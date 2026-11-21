@@ -213,6 +213,32 @@
     return `Fetching replays: ${p.replaysDone}/${p.replaysTotal}`;
   }
 
+  interface SyncScan {
+    feedPages: number;
+    teamDuelsSeen: number;
+    alreadyStored: number;
+    notThisDuo: number;
+    unfinished: number;
+    stoppedEarly: boolean;
+  }
+
+  function describeSyncResult(games: number, replays: number, scan: SyncScan | undefined): string {
+    const head = `Synced ${games} Game(s), ${replays} replay(s).`;
+    if (!scan) return head;
+    const pages = `${scan.feedPages} feed page(s)`;
+    if (scan.teamDuelsSeen === 0) return `${head} No team duels on the ${pages} read.`;
+    const parts = [
+      scan.alreadyStored > 0 && `${scan.alreadyStored} already stored`,
+      scan.notThisDuo > 0 && `${scan.notThisDuo} not this Duo's (other partner or unrated)`,
+      scan.unfinished > 0 && `${scan.unfinished} still being played`,
+    ].filter(Boolean);
+    const end = scan.stoppedEarly
+      ? "Stopped at a page with nothing new."
+      : "Reached the end of the feed.";
+    const replayNote = games === 0 ? " Replays are only fetched for new Games." : "";
+    return `${head} Read ${pages}: ${scan.teamDuelsSeen} team duel(s)${parts.length ? `, ${parts.join(", ")}` : ""}. ${end}${replayNote}`;
+  }
+
   async function syncNow(includeOlderReplays: boolean) {
     statusMessage = "Syncing GeoGuessr...";
     // Refresh faster while syncing so the progress line moves
@@ -225,7 +251,7 @@
     const data = await res.json();
     statusMessage = data.warning
       ? data.warning
-      : `Synced ${data.gamesUploaded ?? 0} Games, ${data.replaysUploaded ?? 0} replays.`;
+      : describeSyncResult(data.gamesUploaded ?? 0, data.replaysUploaded ?? 0, data.scan);
     await loadState();
   }
 

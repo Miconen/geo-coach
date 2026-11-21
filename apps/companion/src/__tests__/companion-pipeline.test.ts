@@ -287,6 +287,14 @@ describe("Seam 5: Companion SQLite outbox, priority queue, silence auto-stop, an
     expect(duelsFetched).toEqual(["g_new1", "g_other", "g_new2"]);
     expect(uploaded).toEqual(["g_new1", "g_new2"]);
     expect(first.gamesUploaded).toBe(2);
+    expect(first.scan).toEqual({
+      feedPages: 2,
+      teamDuelsSeen: 4,
+      alreadyStored: 1,
+      notThisDuo: 1,
+      unfinished: 0,
+      stoppedEarly: true,
+    });
     expect(poller.progress).toBeNull();
 
     // Second sync: everything on page 1 is stored or known not to be ours, so no Game is fetched
@@ -296,5 +304,6 @@ describe("Seam 5: Companion SQLite outbox, priority queue, silence auto-stop, an
     expect(pagesRead).toEqual(["first"]);
     expect(duelsFetched).toEqual([]);
     expect(second.gamesUploaded).toBe(0);
+    expect(second.scan).toMatchObject({ teamDuelsSeen: 3, alreadyStored: 2, notThisDuo: 1, stoppedEarly: true });
   });
 });

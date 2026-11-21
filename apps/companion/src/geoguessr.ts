@@ -45,10 +45,26 @@ export interface SyncProgress {
   replaysTotal: number;
 }
 
+/** What a sync looked at, so "0 Games" can say why */
+export interface SyncScan {
+  feedPages: number;
+  /** Team duels found on the feed pages read */
+  teamDuelsSeen: number;
+  /** Already on the server */
+  alreadyStored: number;
+  /** Not this Duo's ranked team duels (other partners, unrated), known or found now */
+  notThisDuo: number;
+  /** Still being played; checked again next sync */
+  unfinished: number;
+  /** Paging stopped at a page with nothing new (rather than the end of the feed) */
+  stoppedEarly: boolean;
+}
+
 export interface SyncSummary {
   authPaused: boolean;
   gamesUploaded: number;
   replaysUploaded: number;
+  scan: SyncScan;
   warning: string | null;
 }
 
@@ -155,6 +171,14 @@ export class GeoguessrPoller {
       replaysTotal: 0,
     };
     this.progress = progress;
+    const scan: SyncScan = {
+      feedPages: 0,
+      teamDuelsSeen: 0,
+      alreadyStored: 0,
+      notThisDuo: 0,
+      unfinished: 0,
+      stoppedEarly: false,
+    };
     const skipped = this.deps.loadSkippedGameIds?.(opts.duoTeamId) ?? new Set<string>();
 
     // 1. Page through feed/private (newest first) until a page has nothing new.
@@ -172,17 +196,19 @@ export class GeoguessrPoller {
         : "https://www.geoguessr.com/api/v4/feed/private";
       const feedRes = await this.pacedFetch(feedUrl, opts.ncfaCookie);
       if (!feedRes) {
-        return { authPaused: true, gamesUploaded, replaysUploaded, warning: this.lastWarning };
+        return { authPaused: true, gamesUploaded, replaysUploaded, scan, warning: this.lastWarning };
       }
       if (!feedRes.ok) {
         return {
           authPaused: false,
           gamesUploaded,
           replaysUploaded,
+          scan,
           warning: `Feed request returned ${feedRes.status}`,
         };
       }
       progress.feedPages = page + 1;
+      scan.feedPages = page + 1;
 
       const feedJson = (await feedRes.json()) as {
         entries?: unknown[];
@@ -198,11 +224,17 @@ export class GeoguessrPoller {
           ? await this.deps.checkMissing(unknown, [], false)
           : { missingGameIds: [] as string[] };
       newGameIds.push(...missingGameIds);
+      scan.teamDuelsSeen += pageIds.length;
+      scan.notThisDuo += pageIds.length - unknown.length;
+      scan.alreadyStored += unknown.length - missingGameIds.length;
       progress.newGames = newGameIds.length;
 
       const nothingNew = pageIds.length > 0 && missingGameIds.length === 0;
       if (!feedJson.paginationToken || !feedJson.entries?.length) break;
-      if (nothingNew && !opts.includeOlderReplays) break;
+      if (nothingNew && !opts.includeOlderReplays) {
+        scan.stoppedEarly = true;
+        break;
+      }
       paginationToken = feedJson.paginationToken;
     }
 
@@ -215,15 +247,19 @@ export class GeoguessrPoller {
         opts.ncfaCookie,
       );
       if (!duelRes) {
-        return { authPaused: true, gamesUploaded, replaysUploaded, warning: this.lastWarning };
+        return { authPaused: true, gamesUploaded, replaysUploaded, scan, warning: this.lastWarning };
       }
       progress.gamesDone += 1;
       if (!duelRes.ok) continue;
 
       const duel = (await duelRes.json()) as RawDuelPayload;
-      if (duel.status !== "Finished") continue; // in progress: check again next sync
+      if (duel.status !== "Finished") {
+        scan.unfinished += 1; // check again next sync
+        continue;
+      }
       if (!isRankedTeamDuel(duel) || !findDuoTeam(duel.teams ?? [], opts.duoTeamId)) {
         skipped.add(gameId);
+        scan.notThisDuo += 1;
         this.deps.saveSkippedGameIds?.(opts.duoTeamId, skipped);
         continue;
       }
@@ -276,7 +312,7 @@ export class GeoguessrPoller {
           opts.ncfaCookie,
         );
         if (!repRes) {
-          return { authPaused: true, gamesUploaded, replaysUploaded, warning: this.lastWarning };
+          return { authPaused: true, gamesUploaded, replaysUploaded, scan, warning: this.lastWarning };
         }
         progress.replaysDone += 1;
         if (!repRes.ok) continue;
@@ -293,6 +329,6 @@ export class GeoguessrPoller {
       }
     }
 
-    return { authPaused: false, gamesUploaded, replaysUploaded, warning: null };
+    return { authPaused: false, gamesUploaded, replaysUploaded, scan, warning: null };
   }
 }

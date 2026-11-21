@@ -5,7 +5,8 @@ import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const migrationsFolder = path.resolve(__dirname, "../../../../drizzle");
+const migrationsFolder =
+  process.env.MIGRATIONS_DIR ?? path.resolve(__dirname, "../../../../drizzle");
 
 async function main() {
   const url = process.env.DATABASE_URL;

@@ -19,8 +19,16 @@ _Avoid_: match, duel
 One location within a Game, which the Duo guesses on.
 
 **Learning**
-A piece of reusable knowledge the Duo said aloud, such as a clue, a meta, or a mistake to avoid ("Bulgaria has yellow-top bollards"). The main thing geo-coach exists to keep.
-_Avoid_: note, tip
+A piece of reusable knowledge from a Session, such as a clue, a way to tell two countries apart, a mistake, a tactic, or something the Duo wants to study ("Bulgaria has yellow-top bollards"). Most come from what the Duo said aloud; some are Tips. The main thing geo-coach exists to keep.
+_Avoid_: note, tip (for Learnings the Duo said)
+
+**Tip**
+A Learning an agent adds from its own knowledge, prompted by something the Duo said. It is still tied to those Utterances.
+_Avoid_: advice, AI note
+
+**Study item**
+A Learning that names something the Duo wants to learn, rather than a fact ("we should learn Brazilian states"). A Player marks it done when they've covered it.
+_Avoid_: todo, goal
 
 **Utterance**
 A timestamped piece of speech by one player, as transcribed.
@@ -37,7 +45,7 @@ _Avoid_: track, take
 The text version of one Recording, made of Utterances. A player's speech in a Session is the union of their Transcripts. A Transcript can be redone; each redo is a new version, and the parts it changes need processing again.
 
 **Processing run**
-One manual pass of an AI agent over part of a Session that produces Learnings. Any part can be processed again, possibly by a different agent; the new run replaces that part's earlier Learnings.
+One manual pass of an AI agent over part of a Session that produces Learnings. Each run has a purpose: extracting what the Duo said, or adding Tips. Any part can be processed again, possibly by a different agent; the new run replaces that part's earlier Learnings of the same purpose only.
 
 **Companion**
 The program each player runs on their own PC. It keeps that player's audio and turns it into their Transcript.

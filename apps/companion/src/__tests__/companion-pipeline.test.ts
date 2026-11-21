@@ -220,4 +220,81 @@ describe("Seam 5: Companion SQLite outbox, priority queue, silence auto-stop, an
     const paused = await authFailPoller.syncOnce({ duoTeamId: "team_duo", ncfaCookie: "bad" });
     expect(paused.authPaused).toBe(true);
   });
+
+  it("stops paging at a page with nothing new, fetches oldest first, and never refetches other teams' Games", async () => {
+    const finished = (teamPlayers: string[]) => ({
+      status: "Finished",
+      options: { isTeamDuels: true, isRated: true },
+      teams: [
+        { id: "game_team_a", players: teamPlayers.map((playerId) => ({ playerId })) },
+        { id: "game_team_b", players: [{ playerId: "o1" }, { playerId: "o2" }] },
+      ],
+      rounds: [],
+    });
+    // Feed is newest first: page 1 = new Games, page 2 = an already stored Game, page 3 never read
+    const pages: Record<string, { ids: string[]; next: string | null }> = {
+      first: { ids: ["g_new2", "g_other", "g_new1"], next: "p2" },
+      p2: { ids: ["g_stored"], next: "p3" },
+      p3: { ids: ["g_old"], next: null },
+    };
+    const stored = new Set(["g_stored", "g_old"]);
+    const pagesRead: string[] = [];
+    const duelsFetched: string[] = [];
+    const uploaded: string[] = [];
+    let skippedStore = new Set<string>();
+
+    const poller = new GeoguessrPoller({
+      delayBetweenRequestsMs: 0,
+      fetchGeoguessr: async (url) => {
+        if (url.includes("/api/v4/feed/private")) {
+          const key = url.match(/paginationToken=(\w+)/)?.[1] ?? "first";
+          pagesRead.push(key);
+          const page = pages[key]!;
+          return new Response(
+            JSON.stringify({
+              entries: page.ids.map((gameId) => ({ payload: JSON.stringify({ gameMode: "TeamDuels", gameId }) })),
+              paginationToken: page.next,
+            }),
+            { status: 200 },
+          );
+        }
+        const duelId = url.match(/\/api\/duels\/(\w+)/)?.[1];
+        if (duelId) {
+          duelsFetched.push(duelId);
+          return new Response(JSON.stringify(finished(duelId === "g_other" ? ["p1", "x9"] : ["p1", "p2"])), {
+            status: 200,
+          });
+        }
+        return new Response("[]", { status: 200 });
+      },
+      checkMissing: async (gameIds) => ({
+        missingGameIds: gameIds.filter((id) => !stored.has(id)),
+        missingReplays: [],
+      }),
+      uploadGame: async (gameId) => {
+        uploaded.push(gameId);
+        stored.add(gameId);
+      },
+      uploadReplay: async () => {},
+      loadSkippedGameIds: () => new Set(skippedStore),
+      saveSkippedGameIds: (_duo, ids) => {
+        skippedStore = new Set(ids);
+      },
+    });
+
+    const first = await poller.syncOnce({ duoTeamId: "p1-p2", ncfaCookie: "c" });
+    expect(pagesRead).toEqual(["first", "p2"]);
+    expect(duelsFetched).toEqual(["g_new1", "g_other", "g_new2"]);
+    expect(uploaded).toEqual(["g_new1", "g_new2"]);
+    expect(first.gamesUploaded).toBe(2);
+    expect(poller.progress).toBeNull();
+
+    // Second sync: everything on page 1 is stored or known not to be ours, so no Game is fetched
+    pagesRead.length = 0;
+    duelsFetched.length = 0;
+    const second = await poller.syncOnce({ duoTeamId: "p1-p2", ncfaCookie: "c" });
+    expect(pagesRead).toEqual(["first"]);
+    expect(duelsFetched).toEqual([]);
+    expect(second.gamesUploaded).toBe(0);
+  });
 });

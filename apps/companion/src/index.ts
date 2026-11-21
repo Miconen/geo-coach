@@ -267,6 +267,16 @@ async function main() {
       });
       await uploader.drainOnce();
     },
+    loadSkippedGameIds: (duoTeamId) => {
+      try {
+        return new Set(JSON.parse(store.getSetting(`skippedGames:${duoTeamId}`) ?? "[]") as string[]);
+      } catch {
+        return new Set();
+      }
+    },
+    saveSkippedGameIds: (duoTeamId, ids) => {
+      store.setSetting(`skippedGames:${duoTeamId}`, JSON.stringify([...ids]));
+    },
     uploadReplay: async (gameId, playerId, roundNumber, rawEvents) => {
       const duoId = store.getSetting("selectedDuoId") ?? getCachedDuos()[0]?.id;
       if (!duoId) return;
@@ -495,6 +505,7 @@ async function main() {
         transcriptionLagSec: queue.getLagSeconds(),
         geoguessrAuthPaused: poller.authPaused,
         geoguessrWarning: poller.lastWarning,
+        syncProgress: poller.progress,
         notice: lastNotice,
         diskBytes,
         recordings: store.listLocalRecordings(),

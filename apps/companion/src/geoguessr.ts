@@ -27,6 +27,22 @@ export interface GeoguessrPollerDeps {
     roundNumber: number,
     rawEvents: unknown[],
   ) => Promise<void>;
+  /**
+   * Finished Games already checked and found not to be this Duo's ranked team
+   * duels (another partner, unrated). The server never stores them, so without
+   * this they'd be fetched again on every sync.
+   */
+  loadSkippedGameIds?: (duoTeamId: string) => Set<string>;
+  saveSkippedGameIds?: (duoTeamId: string, ids: Set<string>) => void;
+}
+
+export interface SyncProgress {
+  phase: "feed" | "games" | "replays";
+  feedPages: number;
+  newGames: number;
+  gamesDone: number;
+  replaysDone: number;
+  replaysTotal: number;
 }
 
 export interface SyncSummary {
@@ -83,6 +99,9 @@ function extractTeamDuelIdsFromFeed(feedJson: unknown): string[] {
 export class GeoguessrPoller {
   public authPaused = false;
   public lastWarning: string | null = null;
+  /** Live progress of the running sync, null when idle */
+  public progress: SyncProgress | null = null;
+  private running: Promise<SyncSummary> | null = null;
   private readonly delayMs: number;
 
   constructor(private readonly deps: GeoguessrPollerDeps) {
@@ -104,7 +123,20 @@ export class GeoguessrPoller {
     return res;
   }
 
-  async syncOnce(opts: {
+  /** Runs one sync, or joins the one already running (auto-poll and manual sync can overlap) */
+  syncOnce(opts: {
+    duoTeamId: string;
+    ncfaCookie: string;
+    includeOlderReplays?: boolean;
+  }): Promise<SyncSummary> {
+    this.running ??= this.runSync(opts).finally(() => {
+      this.running = null;
+      this.progress = null;
+    });
+    return this.running;
+  }
+
+  private async runSync(opts: {
     duoTeamId: string;
     ncfaCookie: string;
     includeOlderReplays?: boolean;
@@ -114,9 +146,24 @@ export class GeoguessrPoller {
     let gamesUploaded = 0;
     let replaysUploaded = 0;
 
-    // 1. Paginate feed/private sequentially to gather full ranked Game history
+    const progress: SyncProgress = {
+      phase: "feed",
+      feedPages: 0,
+      newGames: 0,
+      gamesDone: 0,
+      replaysDone: 0,
+      replaysTotal: 0,
+    };
+    this.progress = progress;
+    const skipped = this.deps.loadSkippedGameIds?.(opts.duoTeamId) ?? new Set<string>();
+
+    // 1. Page through feed/private (newest first) until a page has nothing new.
+    // Games are fetched oldest first below, so an interrupted sync leaves the
+    // unfetched ones newest, and the next sync reaches them before stopping.
+    // A backfill reads the whole feed.
     const maxPages = this.deps.maxFeedPages ?? 25;
-    const candidateGameSet = new Set<string>();
+    const seen = new Set<string>();
+    const newGameIds: string[] = [];
     let paginationToken: string | null = null;
 
     for (let page = 0; page < maxPages; page++) {
@@ -135,30 +182,34 @@ export class GeoguessrPoller {
           warning: `Feed request returned ${feedRes.status}`,
         };
       }
+      progress.feedPages = page + 1;
 
       const feedJson = (await feedRes.json()) as {
         entries?: unknown[];
         paginationToken?: string | null;
       };
-      for (const id of extractTeamDuelIdsFromFeed(feedJson)) {
-        candidateGameSet.add(id);
-      }
-      if (!feedJson.paginationToken || !feedJson.entries?.length) {
-        break;
-      }
+      const pageIds = extractTeamDuelIdsFromFeed(feedJson).filter((id) => !seen.has(id));
+      for (const id of pageIds) seen.add(id);
+
+      // 2. Ask the server which are missing (two-Companion dedup)
+      const unknown = pageIds.filter((id) => !skipped.has(id));
+      const { missingGameIds } =
+        unknown.length > 0
+          ? await this.deps.checkMissing(unknown, [], false)
+          : { missingGameIds: [] as string[] };
+      newGameIds.push(...missingGameIds);
+      progress.newGames = newGameIds.length;
+
+      const nothingNew = pageIds.length > 0 && missingGameIds.length === 0;
+      if (!feedJson.paginationToken || !feedJson.entries?.length) break;
+      if (nothingNew && !opts.includeOlderReplays) break;
       paginationToken = feedJson.paginationToken;
     }
 
-    const candidateGameIds = [...candidateGameSet];
-
-    // 2. Ask server which Games are missing (two-Companion dedup)
-    const { missingGameIds } =
-      candidateGameIds.length > 0
-        ? await this.deps.checkMissing(candidateGameIds, [], false)
-        : { missingGameIds: [] as string[] };
+    progress.phase = "games";
     const fetchedGames: Array<{ gameId: string; duel: RawDuelPayload }> = [];
 
-    for (const gameId of missingGameIds) {
+    for (const gameId of newGameIds.reverse()) {
       const duelRes = await this.pacedFetch(
         `https://game-server.geoguessr.com/api/duels/${encodeURIComponent(gameId)}`,
         opts.ncfaCookie,
@@ -166,12 +217,16 @@ export class GeoguessrPoller {
       if (!duelRes) {
         return { authPaused: true, gamesUploaded, replaysUploaded, warning: this.lastWarning };
       }
+      progress.gamesDone += 1;
       if (!duelRes.ok) continue;
 
       const duel = (await duelRes.json()) as RawDuelPayload;
-      if (!isRankedTeamDuel(duel)) continue;
-
-      if (!findDuoTeam(duel.teams ?? [], opts.duoTeamId)) continue;
+      if (duel.status !== "Finished") continue; // in progress: check again next sync
+      if (!isRankedTeamDuel(duel) || !findDuoTeam(duel.teams ?? [], opts.duoTeamId)) {
+        skipped.add(gameId);
+        this.deps.saveSkippedGameIds?.(opts.duoTeamId, skipped);
+        continue;
+      }
 
       await this.deps.uploadGame(gameId, duel as unknown as Record<string, unknown>);
       gamesUploaded += 1;
@@ -213,6 +268,8 @@ export class GeoguessrPoller {
         replayCandidates,
         Boolean(opts.includeOlderReplays),
       );
+      progress.phase = "replays";
+      progress.replaysTotal = missingReplays.length;
       for (const req of missingReplays) {
         const repRes = await this.pacedFetch(
           `https://game-server.geoguessr.com/api/replays/${encodeURIComponent(req.geoguessrPlayerId)}/${encodeURIComponent(req.geoguessrGameId)}/${req.roundNumber}`,
@@ -221,6 +278,7 @@ export class GeoguessrPoller {
         if (!repRes) {
           return { authPaused: true, gamesUploaded, replaysUploaded, warning: this.lastWarning };
         }
+        progress.replaysDone += 1;
         if (!repRes.ok) continue;
 
         const rawEvents = await repRes.json();

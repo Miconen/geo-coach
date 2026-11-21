@@ -17,6 +17,14 @@
     transcriptionLagSec: number;
     geoguessrAuthPaused: boolean;
     geoguessrWarning: string | null;
+    syncProgress: {
+      phase: "feed" | "games" | "replays";
+      feedPages: number;
+      newGames: number;
+      gamesDone: number;
+      replaysDone: number;
+      replaysTotal: number;
+    } | null;
     notice: string | null;
     diskBytes: number;
     recordings: Array<{
@@ -172,13 +180,23 @@
     await loadState();
   }
 
+  function describeSync(p: NonNullable<LocalState["syncProgress"]>): string {
+    if (p.phase === "feed") {
+      return `Reading GeoGuessr feed: page ${p.feedPages}, ${p.newGames} new Game(s) so far`;
+    }
+    if (p.phase === "games") return `Fetching Games: ${p.gamesDone}/${p.newGames}`;
+    return `Fetching replays: ${p.replaysDone}/${p.replaysTotal}`;
+  }
+
   async function syncNow(includeOlderReplays: boolean) {
     statusMessage = "Syncing GeoGuessr...";
+    // Refresh faster while syncing so the progress line moves
+    const progressTimer = window.setInterval(() => void loadState(), 1_000);
     const res = await fetch("/local/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ includeOlderReplays }),
-    });
+    }).finally(() => window.clearInterval(progressTimer));
     const data = await res.json();
     statusMessage = data.warning
       ? data.warning
@@ -275,6 +293,9 @@
 
   {#if statusMessage}
     <p style="background:#f1f5f9; padding:8px 12px; border-radius:8px;">{statusMessage}</p>
+  {/if}
+  {#if state?.syncProgress}
+    <p style="background:#f1f5f9; padding:8px 12px; border-radius:8px;">{describeSync(state.syncProgress)}</p>
   {/if}
 
   <section style="background:#fff; border:1px solid #dde3ea; border-radius:10px; padding:16px; margin-bottom:16px;">

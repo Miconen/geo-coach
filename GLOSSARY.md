@@ -1,8 +1,8 @@
 # Glossary
 
 **Duo**
-The two players who queue together in GeoGuessr ranked team duels. The unit everything in geo-coach belongs to.
-_Avoid_: team (reserved for if there are ever multiple Duos), party
+A fixed pair of players who play GeoGuessr ranked team duels together; GeoGuessr calls this a team. The unit everything in geo-coach belongs to. A player can be in several Duos with different partners.
+_Avoid_: party
 
 **Game**
 One GeoGuessr ranked team duel played by the Duo, made up of Rounds.

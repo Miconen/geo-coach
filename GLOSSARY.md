@@ -4,6 +4,13 @@
 A fixed pair of players who play GeoGuessr ranked team duels together; GeoGuessr calls this a team. The unit everything in geo-coach belongs to. A player can be in several Duos with different partners.
 _Avoid_: party
 
+**Player**
+A person who uses geo-coach, belonging to one or more Duos.
+_Avoid_: member, user
+
+**Opponent**
+A GeoGuessr player on the other team in a Game. Opponents never use geo-coach.
+
 **Game**
 One GeoGuessr ranked team duel played by the Duo, made up of Rounds.
 _Avoid_: match, duel

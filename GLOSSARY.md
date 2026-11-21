@@ -19,11 +19,15 @@ _Avoid_: note, tip
 A timestamped piece of speech by one player, as transcribed.
 
 **Session**
-One sitting where the Duo is in call and recording. It covers several Games and the talk between them, which also matters as context.
+One sitting where the Duo is in call and at least one player is recording. It covers several Games and the talk between them, which also matters as context. Players never start or end a Session themselves; it is formed from their Recordings. A Session where only one player recorded is a normal Session.
 _Avoid_: stream, call
 
+**Recording**
+One player's continuous capture of their own mic for one Duo, from pressing Start until Stop, an automatic stop, or a crash. A Session is made of one or more Recordings from one or both players.
+_Avoid_: track, take
+
 **Transcript**
-The text version of one player's speech in a Session, made of Utterances. A Transcript can be redone; each redo is a new version, and the parts it changes need processing again.
+The text version of one Recording, made of Utterances. A player's speech in a Session is the union of their Transcripts. A Transcript can be redone; each redo is a new version, and the parts it changes need processing again.
 
 **Processing run**
 One manual pass of an AI agent over part of a Session that produces Learnings. Any part can be processed again, possibly by a different agent; the new run replaces that part's earlier Learnings.

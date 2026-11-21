@@ -53,7 +53,34 @@ Available tools: `get_instructions`, `list_work`, `start_run`, `read_range`, `ad
 
 ## Companion on a Player's PC
 
-Use [apps/companion/compose.yml](apps/companion/compose.yml) with Docker Desktop (WSL2 + NVIDIA GPU). Audio stays in a local Docker volume (converted to FLAC after Stop) and never leaves the PC. Update between Sessions with `./update.sh` (or `./update.ps1`).
+Each Player runs the Companion (recorder + GPU Whisper) on their own PC from the public images in [apps/companion/compose.yml](apps/companion/compose.yml). Audio stays in a local volume (converted to FLAC after Stop) and never leaves the PC.
+
+### Windows with Docker Desktop
+
+1. Install Docker Desktop (WSL2 backend) and a current NVIDIA driver. Check the GPU: `docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi`
+2. Save [compose.yml](https://raw.githubusercontent.com/Miconen/geo-coach/main/apps/companion/compose.yml) and [update.ps1](https://raw.githubusercontent.com/Miconen/geo-coach/main/apps/companion/update.ps1) into a folder such as `C:\geo-coach`, then run `docker compose up -d` there.
+3. Connect it (see below).
+4. Update between Sessions with `.\update.ps1`.
+
+### WSL2 with Podman
+
+1. Give Podman the GPU (one time):
+   ```bash
+   sudo pacman -S nvidia-container-toolkit   # or your distro's package
+   sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+   podman run --rm --device nvidia.com/gpu=all docker.io/library/ubuntu nvidia-smi -L
+   ```
+2. From `apps/companion`, run `podman compose up -d`.
+3. Connect it (see below).
+4. Update between Sessions with `git pull && podman compose pull && podman compose up -d`.
+
+Keep a WSL terminal open during a Session (WSL shuts down when the last one closes), and don't run `pnpm dev` at the same time (both use port 4173). Containers don't restart after a reboot unless you enable `systemctl --user enable --now podman-restart.service` and `sudo loginctl enable-linger $USER`.
+
+### Connect the Companion
+
+1. On the site's `/settings`, issue a `companion` token.
+2. Open `http://127.0.0.1:4173`. In **Local Settings**, set the server URL to the site, paste the token and your GeoGuessr `_ncfa` cookie (geoguessr.com → DevTools → Application → Cookies), save, and pick the Duo.
+3. Press **Start Recording** when you join the call and **Stop** when done. The first Start downloads the Whisper model (about 3 GB).
 
 ## Useful commands
 

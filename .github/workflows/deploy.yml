@@ -3,6 +3,16 @@ name: Deploy
 on:
   push:
     branches: [main]
+    # Skip deploys when a push only touches docs or dev-only files. Root `*.md`
+    # only: apps/web/prompts/*.md ship with the app.
+    paths-ignore:
+      - "*.md"
+      - "docs/**"
+      - ".out-of-scope/**"
+      - "infra/README.md"
+      - "compose.dev.yml"
+      - "scripts/dev.mjs"
+      - ".gitignore"
   workflow_dispatch:
     inputs:
       tag:
@@ -44,7 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - id: meta
         run: echo "sha_tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
@@ -62,7 +72,8 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             CHANGED="all"
           else
-            CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "all")
+            # Diff the whole push, not just its last commit
+            CHANGED=$(git diff --name-only "${{ github.event.before }}" HEAD 2>/dev/null || echo "all")
           fi
           missing() { ! docker manifest inspect "ghcr.io/miconen/$1:latest" >/dev/null 2>&1; }
           companion=false; transcriber=false

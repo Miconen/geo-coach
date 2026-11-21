@@ -36,12 +36,14 @@ mkdir -p "/home/${DEPLOY_USER}/.ssh" "${APP_DIR}/certs" "${APP_DIR}/dumps"
 chmod 700 "/home/${DEPLOY_USER}/.ssh"
 chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "/home/${DEPLOY_USER}/.ssh" "${APP_DIR}"
 
-# Harden SSH: key-only, no root login, no password auth
-cat >/etc/ssh/sshd_config.d/99-geocoach.conf <<'EOF'
+# Harden SSH: key-only, no root login, no password auth (01- prefix beats 50-cloud-init.conf)
+cat >/etc/ssh/sshd_config.d/01-geocoach.conf <<'EOF'
 PermitRootLogin no
 PasswordAuthentication no
+KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 EOF
+sshd -t
 systemctl reload ssh || systemctl reload sshd
 
 # Firewall: SSH open for GitHub Actions runners; 80/443 only from Cloudflare IP ranges

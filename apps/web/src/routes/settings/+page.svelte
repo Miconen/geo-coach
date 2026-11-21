@@ -1,0 +1,160 @@
+<script lang="ts">
+  import { invalidateAll } from "$app/navigation";
+
+  let { data } = $props();
+  let scope = $state<"companion" | "mcp">("companion");
+  let label = $state("My PC");
+  let ttlDays = $state(90);
+  let newlyIssuedToken = $state<string | null>(null);
+  let hotwordsByDuo = $state<Record<string, string>>({});
+  $effect(() => {
+    for (const d of data.duos) {
+      if (!(d.id in hotwordsByDuo)) {
+        hotwordsByDuo[d.id] = d.hotwords.join("\n");
+      }
+    }
+  });
+  let feedback = $state("");
+
+  async function issueToken(e: Event) {
+    e.preventDefault();
+    newlyIssuedToken = null;
+    const res = await fetch("/api/tokens", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope, label, ttlDays }),
+    });
+    const out = await res.json();
+    if (res.ok) {
+      newlyIssuedToken = out.rawToken;
+      await invalidateAll();
+    } else {
+      feedback = out.error ?? "Failed to issue token";
+    }
+  }
+
+  async function revoke(id: string) {
+    await fetch(`/api/tokens?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    await invalidateAll();
+  }
+
+  async function saveHotwords(duoId: string) {
+    const words = (hotwordsByDuo[duoId] ?? "")
+      .split(/[\n,]+/)
+      .map((w) => w.trim())
+      .filter(Boolean);
+    const res = await fetch(`/api/duos/${duoId}/hotwords`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hotwords: words }),
+    });
+    feedback = res.ok ? "Hotwords saved (Companion fetches on next Start)." : "Save failed.";
+    await invalidateAll();
+  }
+</script>
+
+<main class="mx-auto max-w-4xl p-6 space-y-6">
+  <header class="flex items-center justify-between">
+    <div>
+      <a href="/" class="text-xs font-medium text-[var(--accent)] hover:underline">← Back to Workbench</a>
+      <h1 class="text-xl font-semibold">Settings & Tokens</h1>
+      <p class="text-xs text-[var(--muted)]">Signed in as {data.player.displayName}</p>
+    </div>
+    <form method="POST" action="/auth/logout">
+      <button class="rounded-lg border border-[var(--border-strong)] bg-white px-3 py-1.5 text-xs font-medium">
+        Sign out
+      </button>
+    </form>
+  </header>
+
+  {#if feedback}
+    <div class="rounded-lg border border-[var(--accent)] bg-[var(--accent-soft)] px-3 py-2 text-xs">
+      {feedback}
+    </div>
+  {/if}
+
+  <section class="rounded-xl border border-[var(--border)] bg-white p-5 space-y-4">
+    <div>
+      <h2 class="text-base font-semibold">Scoped Bearer Tokens</h2>
+      <p class="text-xs text-[var(--muted)]">
+        Issue separate tokens for your local <code>companion</code> uploader and remote <code>mcp</code> AI agents.
+        MCP endpoint: <code class="mono">{data.origin}/mcp</code>
+      </p>
+    </div>
+
+    <form onsubmit={issueToken} class="flex flex-wrap items-end gap-3">
+      <label class="text-xs">
+        Scope
+        <select bind:value={scope} class="mt-1 block rounded border border-[var(--border-strong)] px-2 py-1.5 text-sm">
+          <option value="companion">companion (audio/game upload)</option>
+          <option value="mcp">mcp (AI processing runs)</option>
+        </select>
+      </label>
+      <label class="text-xs">
+        Label
+        <input bind:value={label} class="mt-1 block rounded border border-[var(--border-strong)] px-2.5 py-1.5 text-sm" />
+      </label>
+      <label class="text-xs">
+        Expires (days)
+        <input type="number" bind:value={ttlDays} min="1" max="365" class="mt-1 block w-24 rounded border border-[var(--border-strong)] px-2 py-1.5 text-sm" />
+      </label>
+      <button type="submit" class="rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white">
+        Issue Token
+      </button>
+    </form>
+
+    {#if newlyIssuedToken}
+      <div class="rounded-lg border border-[var(--warn)] bg-[var(--warn-bg)] p-3 text-xs">
+        <div class="font-semibold">Copy this token now — it will not be shown again:</div>
+        <code class="mono mt-1 block break-all rounded bg-white p-2">{newlyIssuedToken}</code>
+      </div>
+    {/if}
+
+    <div class="divide-y divide-[var(--border)] text-xs">
+      {#each data.tokens as tok}
+        <div class="flex items-center justify-between py-2.5">
+          <div>
+            <span class="rounded bg-[var(--surface-subtle)] px-1.5 py-0.5 font-semibold uppercase">{tok.scope}</span>
+            <strong class="ml-2">{tok.label}</strong>
+            <span class="mono ml-2 text-[var(--muted)]">{tok.tokenPrefix}…</span>
+            <span class="ml-2 text-[var(--muted)]">
+              Expires {new Date(tok.expiresAt).toLocaleDateString()}
+              {#if tok.revokedAt} · <span class="text-[var(--danger)]">Revoked</span>{/if}
+            </span>
+          </div>
+          {#if !tok.revokedAt}
+            <button onclick={() => revoke(tok.id)} class="text-[var(--danger)] hover:underline">
+              Revoke
+            </button>
+          {/if}
+        </div>
+      {/each}
+    </div>
+  </section>
+
+  <section class="rounded-xl border border-[var(--border)] bg-white p-5 space-y-4">
+    <div>
+      <h2 class="text-base font-semibold">Duo Whisper Hotwords</h2>
+      <p class="text-xs text-[var(--muted)]">
+        Place names and GeoGuessr terms passed to faster-whisper's <code>hotwords</code> parameter (one per line or comma-separated).
+      </p>
+    </div>
+
+    {#each data.duos as duo}
+      <div class="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] p-3">
+        <div class="text-sm font-semibold">{duo.name}</div>
+        <textarea
+          rows="4"
+          bind:value={hotwordsByDuo[duo.id]}
+          class="mono w-full rounded border border-[var(--border-strong)] bg-white p-2 text-xs"
+        ></textarea>
+        <button
+          onclick={() => saveHotwords(duo.id)}
+          class="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white"
+        >
+          Save Hotwords
+        </button>
+      </div>
+    {/each}
+  </section>
+</main>

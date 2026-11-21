@@ -1,0 +1,60 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: geocoach
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: geocoach
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geocoach -d geocoach"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  migrate:
+    image: ghcr.io/miconen/geo-coach-web:${IMAGE_TAG}
+    restart: "no"
+    environment:
+      DATABASE_URL: postgres://geocoach:${POSTGRES_PASSWORD}@postgres:5432/geocoach
+    command: ["node", "apps/web/build-migrate.mjs"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    image: ghcr.io/miconen/geo-coach-web:${IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+      ORIGIN: https://${DOMAIN}
+      DATABASE_URL: postgres://geocoach:${POSTGRES_PASSWORD}@postgres:5432/geocoach
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET}
+      DISCORD_REDIRECT_URI: https://${DOMAIN}/auth/discord/callback
+      LATEST_COMPANION_VERSION: ${LATEST_COMPANION_VERSION:-0.1.0}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs/origin.pem:/etc/caddy/certs/origin.pem:ro
+      - ./certs/origin.key:/etc/caddy/certs/origin.key:ro
+    depends_on:
+      - web
+
+volumes:
+  pgdata:

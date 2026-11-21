@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+node_modules
+**/node_modules
+**/.svelte-kit
+**/build
+**/dist
+data
+dumps
+*.pcm
+*.wav
+*.flac
+*.sqlite*

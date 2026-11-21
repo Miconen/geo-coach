@@ -1,0 +1,27 @@
+{
+  "name": "geo-coach",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.9",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "pnpm --filter @geo-coach/shared build && pnpm --filter @geo-coach/web build && pnpm --filter @geo-coach/companion build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "db:generate": "pnpm --filter @geo-coach/web db:generate",
+    "db:migrate": "pnpm --filter @geo-coach/web db:migrate",
+    "db:seed": "pnpm --filter @geo-coach/web db:seed"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

@@ -1,0 +1,36 @@
+services:
+  companion:
+    image: ghcr.io/miconen/geo-coach-companion:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4173:4173"
+    environment:
+      COMPANION_HOST: 0.0.0.0
+      COMPANION_PORT: 4173
+      COMPANION_DATA_DIR: /data
+      TRANSCRIBER_URL: http://transcriber:8787
+    volumes:
+      - companion-data:/data
+    depends_on:
+      - transcriber
+
+  transcriber:
+    image: ghcr.io/miconen/geo-coach-transcriber:latest
+    restart: unless-stopped
+    environment:
+      WHISPER_MODEL: large-v3
+      WHISPER_COMPUTE_TYPE: int8_float16
+      IDLE_UNLOAD_SECONDS: 900
+    volumes:
+      - whisper-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  companion-data:
+  whisper-cache:

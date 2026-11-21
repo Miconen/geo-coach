@@ -1,0 +1,172 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Optional existing image SHA tag to deploy (for rollback)"
+        required: false
+        default: ""
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  build-images:
+    needs: checks
+    if: ${{ inputs.tag == '' }}
+    runs-on: ubuntu-latest
+    outputs:
+      sha_tag: ${{ steps.meta.outputs.sha_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - id: meta
+        run: echo "sha_tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - id: changes
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "all")
+          echo "companion=$(echo "$CHANGED" | grep -qE '^(apps/companion/|packages/shared/|all)' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "transcriber=$(echo "$CHANGED" | grep -qE '^(apps/companion/transcriber/|all)' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build & push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/miconen/geo-coach-web:${{ steps.meta.outputs.sha_tag }}
+            ghcr.io/miconen/geo-coach-web:main
+
+      - name: Build & push companion image
+        if: steps.changes.outputs.companion == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/companion/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/miconen/geo-coach-companion:${{ steps.meta.outputs.sha_tag }}
+            ghcr.io/miconen/geo-coach-companion:latest
+
+      - name: Build & push transcriber image
+        if: steps.changes.outputs.transcriber == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/companion/transcriber
+          file: apps/companion/transcriber/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/miconen/geo-coach-transcriber:${{ steps.meta.outputs.sha_tag }}
+            ghcr.io/miconen/geo-coach-transcriber:latest
+
+  deploy:
+    needs: [checks, build-images]
+    if: always() && needs.checks.result == 'success' && (inputs.tag != '' || needs.build-images.result == 'success')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      - name: Copy compose and Caddyfile
+        run: |
+          scp infra/compose.prod.yml deploy@${{ secrets.VPS_HOST }}:/srv/geo-coach/compose.yml
+          scp infra/Caddyfile deploy@${{ secrets.VPS_HOST }}:/srv/geo-coach/Caddyfile
+
+      - name: Write secrets, dump DB, migrate, and start
+        env:
+          IMAGE_TAG: ${{ inputs.tag || needs.build-images.outputs.sha_tag }}
+          DOMAIN: ${{ secrets.DOMAIN }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
+          DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
+          CF_ORIGIN_CERT: ${{ secrets.CF_ORIGIN_CERT }}
+          CF_ORIGIN_KEY: ${{ secrets.CF_ORIGIN_KEY }}
+        run: |
+          ssh deploy@${{ secrets.VPS_HOST }} bash -s <<EOF
+          set -euo pipefail
+          cd /srv/geo-coach
+
+          umask 077
+          cat >.env <<ENVEOF
+          IMAGE_TAG=${IMAGE_TAG}
+          DOMAIN=${DOMAIN}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
+          DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET}
+          ENVEOF
+          chmod 600 .env
+
+          mkdir -p certs dumps
+          cat >certs/origin.pem <<'CERTEOF'
+          ${CF_ORIGIN_CERT}
+          CERTEOF
+          cat >certs/origin.key <<'KEYEOF'
+          ${CF_ORIGIN_KEY}
+          KEYEOF
+          chmod 600 certs/origin.key
+
+          if docker compose ps --status running --services | grep -q '^postgres$'; then
+            STAMP=\$(date -u +%Y%m%dT%H%M%SZ)
+            docker compose exec -T postgres pg_dump -U geocoach geocoach | gzip > "dumps/pre-\${STAMP}.sql.gz"
+            ls -1t dumps/pre-*.sql.gz | tail -n +6 | xargs -r rm -f
+          fi
+
+          docker compose pull web migrate postgres caddy
+          docker compose up -d postgres
+          docker compose run --rm migrate
+          docker compose up -d web caddy
+
+          for i in \$(seq 1 30); do
+            if curl -fsS "https://${DOMAIN}/healthz" >/dev/null 2>&1; then
+              echo "Health check passed."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Health check failed after 60s." >&2
+          exit 1
+          EOF

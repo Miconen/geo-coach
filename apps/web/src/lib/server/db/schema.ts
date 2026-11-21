@@ -1,0 +1,437 @@
+import {
+  bigint,
+  boolean,
+  doublePrecision,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
+import type {
+  DerivedGuess,
+  LearningRegion,
+  RoundPhaseInterval,
+  WordTiming,
+} from "@geo-coach/shared";
+
+export interface DeletedSpeechRange {
+  startUtc: string;
+  endUtc: string;
+  deletedAt: string;
+}
+
+export const duos = pgTable("duos", {
+  id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
+  geoguessrTeamId: text("geoguessr_team_id").notNull().unique(),
+  targetRating: integer("target_rating").notNull().default(1200),
+  targetDivision: text("target_division").notNull().default("Champion (1200)"),
+  hotwords: jsonb("hotwords").$type<string[]>().notNull().default([]),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const players = pgTable("players", {
+  id: uuid("id").primaryKey(),
+  discordId: text("discord_id").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  geoguessrUserId: text("geoguessr_user_id").unique(),
+  geoguessrName: text("geoguessr_name"),
+  avatarColor: text("avatar_color").notNull().default("#2563eb"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const duoMemberships = pgTable(
+  "duo_memberships",
+  {
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    playerId: uuid("player_id")
+      .notNull()
+      .references(() => players.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.duoId, table.playerId] })],
+);
+
+export const authSessions = pgTable(
+  "auth_sessions",
+  {
+    id: text("id").primaryKey(),
+    playerId: uuid("player_id")
+      .notNull()
+      .references(() => players.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("auth_sessions_player_idx").on(table.playerId)],
+);
+
+export const apiTokens = pgTable(
+  "api_tokens",
+  {
+    id: uuid("id").primaryKey(),
+    playerId: uuid("player_id")
+      .notNull()
+      .references(() => players.id, { onDelete: "cascade" }),
+    scope: text("scope").$type<"companion" | "mcp">().notNull(),
+    label: text("label").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    tokenPrefix: text("token_prefix").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("api_tokens_player_scope_idx").on(table.playerId, table.scope)],
+);
+
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: uuid("id").primaryKey(),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("sessions_duo_idx").on(table.duoId)],
+);
+
+export const recordings = pgTable(
+  "recordings",
+  {
+    id: uuid("id").primaryKey(),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    playerId: uuid("player_id")
+      .notNull()
+      .references(() => players.id, { onDelete: "cascade" }),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    stoppedAt: timestamp("stopped_at", { withTimezone: true }),
+    stopReason: text("stop_reason").$type<"stop" | "silence" | "reconnect" | "tab-closed">(),
+    continuedFromRecordingId: uuid("continued_from_recording_id"),
+    companionVersion: text("companion_version").notNull(),
+    clockAnchorMs: bigint("clock_anchor_ms", { mode: "number" }).notNull(),
+    manualOffsetOverrideMs: integer("manual_offset_override_ms"),
+    effectiveOffsetMs: integer("effective_offset_ms").notNull().default(0),
+    isCalibrated: boolean("is_calibrated").notNull().default(false),
+    deletedRanges: jsonb("deleted_ranges").$type<DeletedSpeechRange[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("recordings_duo_started_idx").on(table.duoId, table.startedAt),
+    index("recordings_session_idx").on(table.sessionId),
+    index("recordings_player_duo_live_idx").on(table.playerId, table.duoId, table.stoppedAt),
+  ],
+);
+
+export const clockOffsetMeasurements = pgTable(
+  "clock_offset_measurements",
+  {
+    id: uuid("id").primaryKey(),
+    recordingId: uuid("recording_id")
+      .notNull()
+      .references(() => recordings.id, { onDelete: "cascade" }),
+    measuredAt: timestamp("measured_at", { withTimezone: true }).notNull(),
+    pcTimeMs: bigint("pc_time_ms", { mode: "number" }).notNull(),
+    offsetMs: integer("offset_ms").notNull(),
+    rttMs: integer("rtt_ms").notNull(),
+  },
+  (table) => [index("clock_offsets_recording_idx").on(table.recordingId)],
+);
+
+export const transcriptVersions = pgTable(
+  "transcript_versions",
+  {
+    id: uuid("id").primaryKey(),
+    recordingId: uuid("recording_id")
+      .notNull()
+      .references(() => recordings.id, { onDelete: "cascade" }),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    model: text("model").notNull(),
+    settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
+    hotwordsUsed: jsonb("hotwords_used").$type<string[]>().notNull().default([]),
+    isComplete: boolean("is_complete").notNull().default(false),
+    expectedChunks: integer("expected_chunks"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("transcript_versions_recording_idx").on(table.recordingId, table.createdAt)],
+);
+
+export const transcriptChunks = pgTable(
+  "transcript_chunks",
+  {
+    transcriptVersionId: uuid("transcript_version_id")
+      .notNull()
+      .references(() => transcriptVersions.id, { onDelete: "cascade" }),
+    chunkNo: integer("chunk_no").notNull(),
+    recordingId: uuid("recording_id")
+      .notNull()
+      .references(() => recordings.id, { onDelete: "cascade" }),
+    utteranceCount: integer("utterance_count").notNull().default(0),
+    uploadedAt: timestamp("uploaded_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.transcriptVersionId, table.chunkNo] }),
+    index("transcript_chunks_recording_idx").on(table.recordingId),
+  ],
+);
+
+export const utterances = pgTable(
+  "utterances",
+  {
+    id: uuid("id").primaryKey(),
+    transcriptVersionId: uuid("transcript_version_id")
+      .notNull()
+      .references(() => transcriptVersions.id, { onDelete: "cascade" }),
+    recordingId: uuid("recording_id")
+      .notNull()
+      .references(() => recordings.id, { onDelete: "cascade" }),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    playerId: uuid("player_id")
+      .notNull()
+      .references(() => players.id, { onDelete: "cascade" }),
+    chunkNo: integer("chunk_no").notNull(),
+    text: text("text").notNull(),
+    startSampleMs: integer("start_sample_ms").notNull(),
+    endSampleMs: integer("end_sample_ms").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }).notNull(),
+    words: jsonb("words").$type<WordTiming[]>().notNull().default([]),
+    avgLogprob: doublePrecision("avg_logprob"),
+    noSpeechProb: doublePrecision("no_speech_prob"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("utterances_duo_time_idx").on(table.duoId, table.startedAt, table.endedAt),
+    index("utterances_version_chunk_idx").on(table.transcriptVersionId, table.chunkNo),
+    index("utterances_recording_time_idx").on(table.recordingId, table.startedAt),
+  ],
+);
+
+export const games = pgTable(
+  "games",
+  {
+    id: uuid("id").primaryKey(),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    geoguessrGameId: text("geoguessr_game_id").notNull(),
+    rawDuel: jsonb("raw_duel").$type<Record<string, unknown>>().notNull(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }).notNull(),
+    won: boolean("won"),
+    duoRatingBefore: integer("duo_rating_before"),
+    duoRatingAfter: integer("duo_rating_after"),
+    duoPositionBefore: integer("duo_position_before"),
+    duoPositionAfter: integer("duo_position_after"),
+    winStreak: integer("win_streak"),
+    duoFinalHealth: integer("duo_final_health"),
+    opponentFinalHealth: integer("opponent_final_health"),
+    opponentTeamName: text("opponent_team_name"),
+    roundCount: integer("round_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("games_duo_gg_id_uidx").on(table.duoId, table.geoguessrGameId),
+    index("games_duo_time_idx").on(table.duoId, table.startedAt, table.endedAt),
+  ],
+);
+
+export const rounds = pgTable(
+  "rounds",
+  {
+    id: uuid("id").primaryKey(),
+    gameId: uuid("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "cascade" }),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    roundNumber: integer("round_number").notNull(),
+    countryCode: text("country_code"),
+    regionName: text("region_name"),
+    lat: doublePrecision("lat"),
+    lng: doublePrecision("lng"),
+    panoId: text("pano_id"),
+    damageMultiplier: doublePrecision("damage_multiplier").notNull().default(1),
+    startTime: timestamp("start_time", { withTimezone: true }).notNull(),
+    timerStartTime: timestamp("timer_start_time", { withTimezone: true }),
+    endTime: timestamp("end_time", { withTimezone: true }).notNull(),
+    resultsEndTime: timestamp("results_end_time", { withTimezone: true }).notNull(),
+    phases: jsonb("phases").$type<RoundPhaseInterval[]>().notNull().default([]),
+    duoBestScore: integer("duo_best_score").notNull().default(0),
+    opponentBestScore: integer("opponent_best_score").notNull().default(0),
+    hpDelta: integer("hp_delta").notNull().default(0),
+    guesses: jsonb("guesses").$type<DerivedGuess[]>().notNull().default([]),
+  },
+  (table) => [
+    uniqueIndex("rounds_game_round_uidx").on(table.gameId, table.roundNumber),
+    index("rounds_duo_time_idx").on(table.duoId, table.startTime, table.resultsEndTime),
+  ],
+);
+
+export const replays = pgTable(
+  "replays",
+  {
+    id: uuid("id").primaryKey(),
+    gameId: uuid("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "cascade" }),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    geoguessrGameId: text("geoguessr_game_id").notNull(),
+    geoguessrPlayerId: text("geoguessr_player_id").notNull(),
+    roundNumber: integer("round_number").notNull(),
+    rawEvents: jsonb("raw_events").$type<unknown[]>().notNull(),
+    hasEvents: boolean("has_events").notNull().default(false),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("replays_game_player_round_uidx").on(
+      table.gameId,
+      table.geoguessrPlayerId,
+      table.roundNumber,
+    ),
+  ],
+);
+
+export const processingRuns = pgTable(
+  "processing_runs",
+  {
+    id: uuid("id").primaryKey(),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    startedByPlayerId: uuid("started_by_player_id")
+      .notNull()
+      .references(() => players.id, { onDelete: "cascade" }),
+    purpose: text("purpose").$type<"extract" | "tips">().notNull(),
+    agent: text("agent").notNull(),
+    model: text("model").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    rangeStart: timestamp("range_start", { withTimezone: true }).notNull(),
+    rangeEnd: timestamp("range_end", { withTimezone: true }).notNull(),
+    status: text("status").$type<"open" | "finished" | "abandoned">().notNull().default("open"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("processing_runs_session_purpose_idx").on(
+      table.duoId,
+      table.sessionId,
+      table.purpose,
+      table.status,
+    ),
+  ],
+);
+
+export const processingRunInputs = pgTable(
+  "processing_run_inputs",
+  {
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => processingRuns.id, { onDelete: "cascade" }),
+    recordingId: uuid("recording_id")
+      .notNull()
+      .references(() => recordings.id, { onDelete: "cascade" }),
+    transcriptVersionId: uuid("transcript_version_id")
+      .notNull()
+      .references(() => transcriptVersions.id, { onDelete: "cascade" }),
+    chunkCount: integer("chunk_count").notNull(),
+    effectiveOffsetMs: integer("effective_offset_ms").notNull().default(0),
+    deletedRangeCount: integer("deleted_range_count").notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.recordingId] })],
+);
+
+export const learnings = pgTable(
+  "learnings",
+  {
+    id: uuid("id").primaryKey(),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").references(() => processingRuns.id, { onDelete: "cascade" }),
+    authorPlayerId: uuid("author_player_id").references(() => players.id, { onDelete: "set null" }),
+    purpose: text("purpose").$type<"extract" | "tips">(),
+    kind: text("kind")
+      .$type<"clue" | "distinguisher" | "mistake" | "strategy" | "study" | "other">()
+      .notNull(),
+    origin: text("origin").$type<"speech" | "agent" | "manual">().notNull(),
+    text: text("text").notNull(),
+    detail: text("detail"),
+    countries: jsonb("countries").$type<string[]>().notNull().default([]),
+    regions: jsonb("regions").$type<LearningRegion[]>().notNull().default([]),
+    topics: jsonb("topics").$type<string[]>().notNull().default([]),
+    agentNote: text("agent_note"),
+    sourceSpanStart: timestamp("source_span_start", { withTimezone: true }),
+    sourceSpanEnd: timestamp("source_span_end", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("learnings_duo_created_idx").on(table.duoId, table.createdAt),
+    index("learnings_run_idx").on(table.runId),
+  ],
+);
+
+export const learningUtterances = pgTable(
+  "learning_utterances",
+  {
+    learningId: uuid("learning_id")
+      .notNull()
+      .references(() => learnings.id, { onDelete: "cascade" }),
+    utteranceId: uuid("utterance_id")
+      .notNull()
+      .references(() => utterances.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.learningId, table.utteranceId] })],
+);
+
+export const learningRounds = pgTable(
+  "learning_rounds",
+  {
+    learningId: uuid("learning_id")
+      .notNull()
+      .references(() => learnings.id, { onDelete: "cascade" }),
+    roundId: uuid("round_id")
+      .notNull()
+      .references(() => rounds.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.learningId, table.roundId] })],
+);
+
+export const learningReactions = pgTable(
+  "learning_reactions",
+  {
+    learningId: uuid("learning_id")
+      .notNull()
+      .references(() => learnings.id, { onDelete: "cascade" }),
+    playerId: uuid("player_id")
+      .notNull()
+      .references(() => players.id, { onDelete: "cascade" }),
+    reaction: text("reaction").$type<"star" | "dismiss" | "done">().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.learningId, table.playerId, table.reaction] })],
+);

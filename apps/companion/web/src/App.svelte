@@ -314,14 +314,16 @@
   <section style="background:#fff; border:1px solid #dde3ea; border-radius:10px; padding:16px; margin-bottom:16px;">
     <h2 style="margin-top:0; font-size:15px;">Local Settings (kept only in Companion volume)</h2>
     <form onsubmit={saveSettings} style="display:grid; gap:8px;">
+      <!-- Secrets use plain text fields: browsers ignore autocomplete="off" on
+           password fields and autofilled the saved _ncfa into both. -->
       <label>Server URL <input bind:value={serverUrl} oninput={() => (serverUrlEdited = true)} style="width:100%; padding:6px;" /></label>
       <label>
         Companion token ({state?.hasToken ? "configured" : "not set"})
-        <input type="password" autocomplete="off" bind:value={companionToken} placeholder="Paste new gc_cmp_... token" style="width:100%; padding:6px;" />
+        <input type="text" autocomplete="off" spellcheck="false" bind:value={companionToken} placeholder="Paste new gc_cmp_... token" style="width:100%; padding:6px;" />
       </label>
       <label>
         GeoGuessr _ncfa cookie ({state?.hasNcfa ? "configured" : "optional"})
-        <input type="password" autocomplete="off" bind:value={ncfaCookie} placeholder="Paste _ncfa value" style="width:100%; padding:6px;" />
+        <input type="text" autocomplete="off" spellcheck="false" bind:value={ncfaCookie} placeholder="Paste _ncfa value" style="width:100%; padding:6px;" />
       </label>
       <button type="submit" style="width:fit-content; padding:6px 14px;">Save Settings</button>
     </form>

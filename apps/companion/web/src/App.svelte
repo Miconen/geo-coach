@@ -31,6 +31,8 @@
 
   let state = $state<LocalState | null>(null);
   let serverUrl = $state("http://localhost:5173");
+  // Set while the Server URL box has unsaved edits, so the 10 s state poll doesn't overwrite them
+  let serverUrlEdited = $state(false);
   let companionToken = $state("");
   let ncfaCookie = $state("");
   let selectedDuoId = $state("");
@@ -52,7 +54,7 @@
     const res = await fetch("/local/state");
     const data = (await res.json()) as LocalState;
     state = data;
-    serverUrl = data.serverUrl;
+    if (!serverUrlEdited) serverUrl = data.serverUrl;
     if (!selectedDuoId && data.selectedDuoId) selectedDuoId = data.selectedDuoId;
   }
 
@@ -165,6 +167,7 @@
     });
     companionToken = "";
     ncfaCookie = "";
+    serverUrlEdited = false;
     statusMessage = "Settings saved locally.";
     await loadState();
   }
@@ -311,14 +314,14 @@
   <section style="background:#fff; border:1px solid #dde3ea; border-radius:10px; padding:16px; margin-bottom:16px;">
     <h2 style="margin-top:0; font-size:15px;">Local Settings (kept only in Companion volume)</h2>
     <form onsubmit={saveSettings} style="display:grid; gap:8px;">
-      <label>Server URL <input bind:value={serverUrl} style="width:100%; padding:6px;" /></label>
+      <label>Server URL <input bind:value={serverUrl} oninput={() => (serverUrlEdited = true)} style="width:100%; padding:6px;" /></label>
       <label>
         Companion token ({state?.hasToken ? "configured" : "not set"})
-        <input type="password" bind:value={companionToken} placeholder="Paste new gc_cmp_... token" style="width:100%; padding:6px;" />
+        <input type="password" autocomplete="off" bind:value={companionToken} placeholder="Paste new gc_cmp_... token" style="width:100%; padding:6px;" />
       </label>
       <label>
         GeoGuessr _ncfa cookie ({state?.hasNcfa ? "configured" : "optional"})
-        <input type="password" bind:value={ncfaCookie} placeholder="Paste _ncfa value" style="width:100%; padding:6px;" />
+        <input type="password" autocomplete="off" bind:value={ncfaCookie} placeholder="Paste _ncfa value" style="width:100%; padding:6px;" />
       </label>
       <button type="submit" style="width:fit-content; padding:6px 14px;">Save Settings</button>
     </form>

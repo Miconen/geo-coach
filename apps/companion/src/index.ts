@@ -84,7 +84,8 @@ async function main() {
   }
 
   function getNcfaCookie(): string {
-    return store.getSetting("ncfaCookie") ?? "";
+    // Accept a pasted "_ncfa=<value>" too: the fetch adds the name itself
+    return (store.getSetting("ncfaCookie") ?? "").replace(/^_ncfa=/, "");
   }
 
   function getCachedDuos(): CachedDuo[] {

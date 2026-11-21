@@ -151,13 +151,14 @@ jobs:
 
           if docker compose ps --status running --services | grep -q '^postgres$'; then
             STAMP=\$(date -u +%Y%m%dT%H%M%SZ)
-            docker compose exec -T postgres pg_dump -U geocoach geocoach | gzip > "dumps/pre-\${STAMP}.sql.gz"
+            docker compose exec -T postgres pg_dump -U geocoach geocoach </dev/null | gzip > "dumps/pre-\${STAMP}.sql.gz"
             ls -1t dumps/pre-*.sql.gz | tail -n +6 | xargs -r rm -f
           fi
 
           docker compose pull web migrate postgres caddy
           docker compose up -d postgres
-          docker compose run --rm migrate
+          # </dev/null: the rest of this script arrives on stdin, so compose must not read it
+          docker compose run --rm -T migrate </dev/null
           docker compose up -d web caddy
 
           for i in \$(seq 1 30); do

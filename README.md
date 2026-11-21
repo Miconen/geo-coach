@@ -13,7 +13,7 @@ See [GLOSSARY.md](GLOSSARY.md) for domain terms and [docs/adr/](docs/adr/) for c
 
 ## Local development
 
-Prerequisites: Node 22+ (24 LTS recommended), pnpm 10, and Docker (for Postgres 17).
+Prerequisites: Node 22+ (24 LTS recommended), pnpm 10, and Docker or Podman (for Postgres 17; `pnpm dev` uses whichever is on PATH, or `CONTAINER_CLI`).
 
 1. Install dependencies:
    ```bash

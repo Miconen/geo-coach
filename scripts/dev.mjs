@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 const children = [];
 
@@ -7,6 +7,9 @@ function launch(name, cmd, args, extraEnv = {}) {
     stdio: "inherit",
     shell: process.platform === "win32",
     env: { ...process.env, ...extraEnv },
+  });
+  child.on("error", (err) => {
+    console.error(`[${name}] failed to start: ${err.message}`);
   });
   child.on("exit", (code) => {
     if (code && code !== 0) {
@@ -17,8 +20,17 @@ function launch(name, cmd, args, extraEnv = {}) {
   return child;
 }
 
+// Docker or Podman, whichever is on PATH (shell aliases don't apply to spawn)
+const containerCli =
+  process.env.CONTAINER_CLI ??
+  ["docker", "podman"].find((cli) => !spawnSync(cli, ["--version"]).error);
+
 // Start local Postgres via compose.dev.yml (non-fatal if already running externally)
-launch("postgres", "docker", ["compose", "-f", "compose.dev.yml", "up", "-d", "postgres"]);
+if (containerCli) {
+  launch("postgres", containerCli, ["compose", "-f", "compose.dev.yml", "up", "-d", "postgres"]);
+} else {
+  console.warn("[postgres] neither docker nor podman found; expecting Postgres on DATABASE_URL");
+}
 
 // Start SvelteKit dev server with HMR + dev login enabled
 launch("web", "pnpm", ["--filter", "@geo-coach/web", "dev"], {

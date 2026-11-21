@@ -14,7 +14,7 @@
   const wb = $derived(data.workbench);
 
   // Navigation & filter state
-  let mode = $state<"learnings" | "session">("learnings");
+  let mode = $state<"learnings" | "session" | "game">("learnings");
   let queueFilter = $state<"all" | "mistakes" | "starred" | "manual" | "stale" | "study">("all");
   let selectedCountry = $state<string | null>(null);
   let selectedPair = $state<[string, string] | null>(null);
@@ -145,6 +145,10 @@
     selectedCountry ? wb?.countryDossiers.find((c) => c.code === selectedCountry) ?? null : null,
   );
 
+  const standaloneGame = $derived(
+    mode === "game" && selectedGameId ? (wb?.gamesById[selectedGameId] ?? null) : null,
+  );
+
   const activeSession = $derived(
     wb?.sessions.find((s) => s.id === selectedSessionId) ?? wb?.sessions[0] ?? null,
   );
@@ -256,9 +260,14 @@
     if (!wb) return;
     const game = wb.gamesById[gameId];
     if (!game) return;
-    mode = "session";
-    selectedSessionId = game.sessionIds[0] ?? wb.sessions[0]?.id ?? null;
     selectedGameId = game.id;
+    // Games played while nobody recorded have no Session timeline to jump into
+    if (game.sessionIds.length === 0) {
+      mode = "game";
+      return;
+    }
+    mode = "session";
+    selectedSessionId = game.sessionIds[0] ?? null;
   }
 
   function jumpToSession(sessionId: string) {
@@ -799,6 +808,42 @@
               {/each}
             </section>
           {/if}
+        {:else if standaloneGame}
+          {@const g = standaloneGame}
+          <!-- Game without a Session: its Rounds only, no speech -->
+          <div class="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 class="text-base font-bold">
+                  Game · {new Date(g.startedAt).toLocaleString()}
+                </h2>
+                <div class="mono text-xs text-[var(--muted)]">
+                  vs {g.opponentTeamName ?? "Opponents"} · {g.won ? "Win" : "Loss"} ({g.duoRatingBefore ?? "?"} → {g.duoRatingAfter ?? "?"}) · {g.roundIds.length} Rounds
+                </div>
+              </div>
+              <button
+                onclick={() => (mode = "learnings")}
+                class="rounded-lg border border-[var(--border-strong)] px-3 py-1.5 text-xs font-medium"
+              >
+                ← Learnings
+              </button>
+            </div>
+            <p class="text-xs text-[var(--muted)]">
+              No Recording covers this Game, so there's no speech or Session to show.
+            </p>
+            {#each g.roundIds as rId}
+              {@const round = wb.roundsById[rId]}
+              {#if round}
+                <RoundCoachingCard
+                  {round}
+                  players={wb.players}
+                  utterancesById={wb.utterancesById}
+                  highlighted={selectedRoundId === round.id}
+                  onSelectUtterance={(id) => (highlightedUtteranceId = id)}
+                />
+              {/if}
+            {/each}
+          </div>
         {:else if activeSession}
           <!-- Session Timeline Mode -->
           <div class="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">

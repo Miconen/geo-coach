@@ -1,4 +1,4 @@
-import { isRankedTeamDuel, type RawDuelPayload } from "@geo-coach/shared";
+import { findDuoTeam, isRankedTeamDuel, type RawDuelPayload } from "@geo-coach/shared";
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -68,7 +68,8 @@ function extractTeamDuelIdsFromFeed(feedJson: unknown): string[] {
         ids.add(rec.gameId);
       }
       for (const val of Object.values(rec)) {
-        if (val && (typeof val === "object" || (typeof val === "string" && val.startsWith("{")))) {
+        // Some entry payloads are JSON strings of an array, not an object
+        if (val && (typeof val === "object" || (typeof val === "string" && /^[[{]/.test(val)))) {
           walk(val);
         }
       }
@@ -170,8 +171,7 @@ export class GeoguessrPoller {
       const duel = (await duelRes.json()) as RawDuelPayload;
       if (!isRankedTeamDuel(duel)) continue;
 
-      const matchesDuo = (duel.teams ?? []).some((t) => t.id === opts.duoTeamId);
-      if (!matchesDuo) continue;
+      if (!findDuoTeam(duel.teams ?? [], opts.duoTeamId)) continue;
 
       await this.deps.uploadGame(gameId, duel as unknown as Record<string, unknown>);
       gamesUploaded += 1;

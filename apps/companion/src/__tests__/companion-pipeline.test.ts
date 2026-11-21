@@ -113,10 +113,10 @@ describe("Seam 5: Companion SQLite outbox, priority queue, silence auto-stop, an
               JSON.stringify({
                 entries: [
                   {
-                    payload: JSON.stringify({
-                      gameMode: "TeamDuels",
-                      gameId: "gg_g1",
-                    }),
+                    // Grouped feed entries carry a JSON string of an array
+                    payload: JSON.stringify([
+                      { type: 6, payload: { gameMode: "TeamDuels", gameId: "gg_g1" } },
+                    ]),
                   },
                 ],
               }),
@@ -129,9 +129,10 @@ describe("Seam 5: Companion SQLite outbox, priority queue, silence auto-stop, an
                 gameId: "gg_g1",
                 status: "Finished",
                 options: { isTeamDuels: true, isRated: true },
+                // Duel team ids are per Game, unlike the Duo's ranked teamId
                 teams: [
-                  { id: "team_duo", players: [{ playerId: "p1" }, { playerId: "p2" }] },
-                  { id: "team_opp", players: [{ playerId: "o1" }, { playerId: "o2" }] },
+                  { id: "game_team_red", players: [{ playerId: "p1" }, { playerId: "p2" }] },
+                  { id: "game_team_blue", players: [{ playerId: "o1" }, { playerId: "o2" }] },
                 ],
                 rounds: [{ roundNumber: 1, startTime: recentTime, endTime: recentTime }],
               }),
@@ -159,7 +160,7 @@ describe("Seam 5: Companion SQLite outbox, priority queue, silence auto-stop, an
       },
     });
 
-    const summary = await poller.syncOnce({ duoTeamId: "team_duo", ncfaCookie: "cookie_val" });
+    const summary = await poller.syncOnce({ duoTeamId: "p2-p1", ncfaCookie: "cookie_val" });
     expect(maxInFlight).toBe(1);
     expect(summary.authPaused).toBe(false);
     expect(uploadedGames).toEqual(["gg_g1"]);

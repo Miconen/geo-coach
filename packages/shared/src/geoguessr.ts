@@ -84,7 +84,7 @@ interface RawTeamPlayer {
   };
 }
 
-interface RawTeam {
+export interface RawTeam {
   id?: string;
   name?: string;
   health?: number;
@@ -134,6 +134,23 @@ function normalizeCountryCode(value: string | null | undefined): string | null {
   return trimmed.length === 2 ? trimmed : null;
 }
 
+/**
+ * The Duo's team within one Game. A duel's `teams[].id` is per Game, while the
+ * Duo's ranked `teamId` is its two players' userIds joined by "-", so match on
+ * the team's player ids (in either order).
+ */
+export function findDuoTeam(teams: readonly RawTeam[], duoTeamId: string): RawTeam | undefined {
+  const duoPlayerIds = duoTeamId.split("-").sort().join("-");
+  return teams.find(
+    (t) =>
+      t.id === duoTeamId ||
+      (t.players ?? [])
+        .map((p) => p.playerId ?? "")
+        .sort()
+        .join("-") === duoPlayerIds,
+  );
+}
+
 export function isRankedTeamDuel(raw: unknown): boolean {
   if (!raw || typeof raw !== "object") return false;
   const duel = raw as RawDuelPayload;
@@ -156,7 +173,7 @@ export function deriveGameFromRawDuel(
   const duel = (raw ?? {}) as RawDuelPayload;
   const teams = Array.isArray(duel.teams) ? duel.teams : [];
   const duoTeam =
-    teams.find((t) => t.id === duoTeamId) ??
+    findDuoTeam(teams, duoTeamId) ??
     teams.find((t) =>
       (t.players ?? []).some((p) => p.playerId && playerByGeoguessrId[p.playerId]),
     ) ??

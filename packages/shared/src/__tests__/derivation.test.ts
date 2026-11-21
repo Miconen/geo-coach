@@ -4,6 +4,7 @@ import {
   computeRecordingOffsetMs,
   deriveGameFromRawDuel,
   deriveUtteranceUtc,
+  findDuoTeam,
   isSupportedApiVersion,
   isValidIsoCountryCode,
   linkUtteranceToRounds,
@@ -315,5 +316,21 @@ describe("API contracts & validation", () => {
       utteranceRefs: ["u1"],
     });
     expect(badRegion.success).toBe(false);
+  });
+});
+
+describe("findDuoTeam", () => {
+  const teams = [
+    { id: "game_team_blue", players: [{ playerId: "o1" }, { playerId: "o2" }] },
+    { id: "game_team_red", players: [{ playerId: "p1" }, { playerId: "p2" }] },
+  ];
+
+  it("matches the ranked teamId by its players, in either order", () => {
+    expect(findDuoTeam(teams, "p1-p2")?.id).toBe("game_team_red");
+    expect(findDuoTeam(teams, "p2-p1")?.id).toBe("game_team_red");
+  });
+
+  it("returns undefined when the Duo didn't play", () => {
+    expect(findDuoTeam(teams, "p1-x9")).toBeUndefined();
   });
 });

@@ -1,5 +1,7 @@
 <script lang="ts">
   import { invalidateAll } from "$app/navigation";
+  import { THEMES } from "@geo-coach/shared";
+  import { getTheme, setTheme } from "$lib/theme.svelte.js";
 
   let { data } = $props();
   let scope = $state<"companion" | "mcp">("companion");
@@ -61,19 +63,68 @@
       <p class="text-xs text-[var(--muted)]">Signed in as {data.player.displayName}</p>
     </div>
     <form method="POST" action="/auth/logout">
-      <button class="rounded-lg border border-[var(--border-strong)] bg-white px-3 py-1.5 text-xs font-medium">
+      <button class="rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--ink)] hover:bg-[var(--surface-hover)]">
         Sign out
       </button>
     </form>
   </header>
 
   {#if feedback}
-    <div class="rounded-lg border border-[var(--accent)] bg-[var(--accent-soft)] px-3 py-2 text-xs">
+    <div class="rounded-lg border border-[var(--accent)] bg-[var(--accent-soft)] px-3 py-2 text-xs text-[var(--accent-soft-ink)]">
       {feedback}
     </div>
   {/if}
 
-  <section class="rounded-xl border border-[var(--border)] bg-white p-5 space-y-4">
+  <section class="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 space-y-4">
+    <div>
+      <h2 class="text-base font-semibold">Appearance</h2>
+      <p class="text-xs text-[var(--muted)]">
+        Choose a dark or light palette for this browser. The same theme set is available in the local Companion UI.
+      </p>
+    </div>
+
+    <div class="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+      {#each THEMES as theme}
+        {@const active = getTheme() === theme.id}
+        <button
+          type="button"
+          onclick={() => setTheme(theme.id)}
+          aria-pressed={active}
+          class="flex flex-col gap-2 rounded-lg border p-3 text-left transition-colors cursor-pointer {active
+            ? 'border-[var(--accent)] bg-[var(--accent-soft)]/60 ring-1 ring-[var(--accent)]/40'
+            : 'border-[var(--border)] bg-[var(--surface-subtle)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]'}"
+        >
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-xs font-semibold text-[var(--ink)]">{theme.name}</span>
+            <span class="rounded bg-[var(--badge-bg)] px-1.5 py-0.5 text-[10px] font-medium uppercase text-[var(--muted)]">
+              {theme.appearance}
+            </span>
+          </div>
+          <div class="flex items-center gap-1.5" aria-hidden="true">
+            <span
+              class="h-4 w-7 rounded border border-black/20"
+              style="background: {theme.swatches.bg}"
+            ></span>
+            <span
+              class="h-4 w-7 rounded border border-black/20"
+              style="background: {theme.swatches.surface}"
+            ></span>
+            <span
+              class="h-4 w-5 rounded border border-black/20"
+              style="background: {theme.swatches.accent}"
+            ></span>
+            <span
+              class="h-4 w-5 rounded border border-black/20"
+              style="background: {theme.swatches.ink}"
+            ></span>
+          </div>
+          <p class="text-[11px] leading-snug text-[var(--muted)]">{theme.description}</p>
+        </button>
+      {/each}
+    </div>
+  </section>
+
+  <section class="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 space-y-4">
     <div>
       <h2 class="text-base font-semibold">Scoped Bearer Tokens</h2>
       <p class="text-xs text-[var(--muted)]">
@@ -98,15 +149,15 @@
         Expires (days)
         <input type="number" bind:value={ttlDays} min="1" max="365" class="mt-1 block w-24 rounded border border-[var(--border-strong)] px-2 py-1.5 text-sm" />
       </label>
-      <button type="submit" class="rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white">
+      <button type="submit" class="rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-[var(--accent-ink)] hover:opacity-95">
         Issue Token
       </button>
     </form>
 
     {#if newlyIssuedToken}
-      <div class="rounded-lg border border-[var(--warn)] bg-[var(--warn-bg)] p-3 text-xs">
+      <div class="rounded-lg border border-[var(--warn-border)] bg-[var(--warn-bg)] p-3 text-xs text-[var(--warn)]">
         <div class="font-semibold">Copy this token now — it will not be shown again:</div>
-        <code class="mono mt-1 block break-all rounded bg-white p-2">{newlyIssuedToken}</code>
+        <code class="mono mt-1 block break-all rounded border border-[var(--border)] bg-[var(--surface-inset)] p-2 text-[var(--ink)]">{newlyIssuedToken}</code>
       </div>
     {/if}
 
@@ -132,7 +183,7 @@
     </div>
   </section>
 
-  <section class="rounded-xl border border-[var(--border)] bg-white p-5 space-y-4">
+  <section class="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 space-y-4">
     <div>
       <h2 class="text-base font-semibold">Duo Whisper Hotwords</h2>
       <p class="text-xs text-[var(--muted)]">
@@ -146,11 +197,11 @@
         <textarea
           rows="4"
           bind:value={hotwordsByDuo[duo.id]}
-          class="mono w-full rounded border border-[var(--border-strong)] bg-white p-2 text-xs"
+          class="mono w-full rounded border border-[var(--border-strong)] p-2 text-xs"
         ></textarea>
         <button
           onclick={() => saveHotwords(duo.id)}
-          class="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white"
+          class="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-[var(--accent-ink)] hover:opacity-95"
         >
           Save Hotwords
         </button>

@@ -1,5 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import {
+    DEFAULT_THEME_ID,
+    THEMES,
+    THEME_STORAGE_KEY,
+    resolveThemeId,
+    type ThemeId,
+  } from "@geo-coach/shared";
 
   interface LocalState {
     companionVersion: string;
@@ -35,6 +42,24 @@
       durationMs: number;
       bytes: number;
     }>;
+  }
+
+  const darkThemes = THEMES.filter((t) => t.appearance === "dark");
+  const lightThemes = THEMES.filter((t) => t.appearance === "light");
+
+  let themeId = $state<ThemeId>(DEFAULT_THEME_ID);
+  const activeTheme = $derived(THEMES.find((t) => t.id === themeId) ?? THEMES[0]!);
+
+  function applyTheme(id: ThemeId, persist = true) {
+    themeId = id;
+    document.documentElement.dataset.theme = id;
+    if (persist) {
+      try {
+        localStorage.setItem(THEME_STORAGE_KEY, id);
+      } catch {
+        // ignore storage errors
+      }
+    }
   }
 
   let state = $state<LocalState | null>(null);
@@ -226,6 +251,24 @@
   }
 
   onMount(() => {
+    try {
+      applyTheme(
+        resolveThemeId(
+          localStorage.getItem(THEME_STORAGE_KEY) ?? document.documentElement.dataset.theme,
+        ),
+        false,
+      );
+    } catch {
+      applyTheme(resolveThemeId(document.documentElement.dataset.theme), false);
+    }
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === THEME_STORAGE_KEY) {
+        applyTheme(resolveThemeId(e.newValue), false);
+      }
+    };
+    window.addEventListener("storage", onStorage);
+
     void loadState();
     const interval = window.setInterval(() => void loadState(), 10_000);
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -237,34 +280,55 @@
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => {
       clearInterval(interval);
+      window.removeEventListener("storage", onStorage);
       window.removeEventListener("beforeunload", onBeforeUnload);
     };
   });
 </script>
 
-<main style="max-width: 780px; margin: 24px auto; padding: 0 16px; font-family: system-ui, sans-serif; color: #0f172a;">
-  <header style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+<main class="page">
+  <header class="header">
     <div>
-      <h1 style="margin:0; font-size:20px;">geo-coach Companion</h1>
-      <div style="font-size:12px; color:#556275;">
+      <h1>geo-coach Companion</h1>
+      <div class="subtitle">
         v{state?.companionVersion ?? "..."} · Audio stays on this PC · Use headphones
       </div>
     </div>
-    <div style="font-size:12px;">
+    <div class="header-controls">
+      <label class="theme-picker" title="Color theme">
+        <span
+          class="theme-swatch"
+          style="background: {activeTheme.swatches.accent}"
+          aria-hidden="true"
+        ></span>
+        <select
+          aria-label="Color theme"
+          value={themeId}
+          onchange={(e) => applyTheme(resolveThemeId(e.currentTarget.value))}
+        >
+          <optgroup label="Dark themes">
+            {#each darkThemes as t}
+              <option value={t.id}>{t.name}</option>
+            {/each}
+          </optgroup>
+          <optgroup label="Light themes">
+            {#each lightThemes as t}
+              <option value={t.id}>{t.name}</option>
+            {/each}
+          </optgroup>
+        </select>
+      </label>
+
       {#if isCapturing}
-        <span style="background:#dcfce7; color:#15803d; padding:4px 10px; border-radius:999px; font-weight:600;">
-          ● Recording
-        </span>
+        <span class="status-pill recording">● Recording</span>
       {:else}
-        <span style="background:#e2e8f0; color:#475569; padding:4px 10px; border-radius:999px;">
-          Idle
-        </span>
+        <span class="status-pill idle">Idle</span>
       {/if}
     </div>
   </header>
 
   {#if state?.updateAvailable || state?.updateRequired}
-    <div style="background:#fef3c7; border:1px solid #f59e0b; padding:10px 12px; border-radius:8px; margin-bottom:12px;">
+    <div class="banner banner-warn">
       <strong>Update available ({state.latestCompanionVersion}):</strong>
       Run <code>./update.sh</code> (or <code>./update.ps1</code>) between Sessions.
       {#if state.updateRequired}
@@ -274,35 +338,35 @@
   {/if}
 
   {#if reconnectedNotice}
-    <div style="background:#dbeafe; border:1px solid #3b82f6; padding:8px 12px; border-radius:8px; margin-bottom:12px;">
+    <div class="banner banner-info">
       Reconnected seamlessly — buffered audio was forwarded into the same Session.
     </div>
   {/if}
 
   {#if state && state.transcriptionLagSec > 120}
-    <div style="background:#fef3c7; padding:8px 12px; border-radius:8px; margin-bottom:12px;">
+    <div class="banner banner-warn">
       Transcription behind by {Math.round(state.transcriptionLagSec / 60)} min (audio is safe on disk).
     </div>
   {/if}
 
   {#if state?.geoguessrAuthPaused}
-    <div style="background:#ffe4e6; border:1px solid #be123c; padding:8px 12px; border-radius:8px; margin-bottom:12px;">
+    <div class="banner banner-danger">
       {state.geoguessrWarning ?? "GeoGuessr polling paused (update _ncfa cookie)."}
     </div>
   {/if}
 
   {#if statusMessage}
-    <p style="background:#f1f5f9; padding:8px 12px; border-radius:8px;">{statusMessage}</p>
+    <p class="banner banner-neutral">{statusMessage}</p>
   {/if}
   {#if state?.syncProgress}
-    <p style="background:#f1f5f9; padding:8px 12px; border-radius:8px;">{describeSync(state.syncProgress)}</p>
+    <p class="banner banner-neutral">{describeSync(state.syncProgress)}</p>
   {/if}
 
-  <section style="background:#fff; border:1px solid #dde3ea; border-radius:10px; padding:16px; margin-bottom:16px;">
-    <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-      <label style="font-size:13px;">
+  <section class="card">
+    <div class="row">
+      <label class="field-inline">
         Duo:
-        <select bind:value={selectedDuoId} disabled={isCapturing} style="margin-left:6px; padding:6px;">
+        <select bind:value={selectedDuoId} disabled={isCapturing}>
           {#each state?.duos ?? [] as duo}
             <option value={duo.id}>{duo.name}</option>
           {/each}
@@ -310,60 +374,75 @@
       </label>
 
       {#if !isCapturing}
-        <button onclick={startCapture} style="background:#0f766e; color:#fff; border:none; padding:10px 20px; border-radius:8px; font-weight:600; cursor:pointer;">
-          Start Recording
-        </button>
+        <button onclick={startCapture} class="btn-primary">Start Recording</button>
       {:else}
-        <button onclick={() => stopCapture(true)} style="background:#be123c; color:#fff; border:none; padding:10px 20px; border-radius:8px; font-weight:600; cursor:pointer;">
-          Stop Recording
-        </button>
+        <button onclick={() => stopCapture(true)} class="btn-danger">Stop Recording</button>
       {/if}
 
-      <button onclick={() => syncNow(false)} style="padding:8px 12px; border:1px solid #cbd5e1; border-radius:8px; background:#fff; cursor:pointer;">
-        Sync GeoGuessr now
-      </button>
-      <button onclick={() => syncNow(true)} style="padding:8px 12px; border:1px solid #cbd5e1; border-radius:8px; background:#fff; cursor:pointer;">
-        Backfill older replays
-      </button>
+      <button onclick={() => syncNow(false)}>Sync GeoGuessr now</button>
+      <button onclick={() => syncNow(true)}>Backfill older replays</button>
     </div>
 
-    <div style="margin-top:10px; font-size:12px; color:#556275;">
+    <div class="meta">
       Outbox pending: {state?.pendingOutbox ?? 0} · Upload status: {state?.uploadOk ? "OK" : "Retrying"} · Local audio: {((state?.diskBytes ?? 0) / 1048576).toFixed(1)} MB
     </div>
   </section>
 
-  <section style="background:#fff; border:1px solid #dde3ea; border-radius:10px; padding:16px; margin-bottom:16px;">
-    <h2 style="margin-top:0; font-size:15px;">Local Settings (kept only in Companion volume)</h2>
-    <form onsubmit={saveSettings} style="display:grid; gap:8px;">
+  <section class="card">
+    <h2>Local Settings (kept only in Companion volume)</h2>
+    <form onsubmit={saveSettings} class="form-grid">
       <!-- Secrets use plain text fields: browsers ignore autocomplete="off" on
            password fields and autofilled the saved _ncfa into both. -->
-      <label>Server URL <input bind:value={serverUrl} oninput={() => (serverUrlEdited = true)} style="width:100%; padding:6px;" /></label>
-      <label>
+      <label class="field">
+        Server URL
+        <input
+          class="input-full"
+          bind:value={serverUrl}
+          oninput={() => (serverUrlEdited = true)}
+        />
+      </label>
+      <label class="field">
         Companion token ({state?.hasToken ? "configured" : "not set"})
-        <input type="text" autocomplete="off" spellcheck="false" bind:value={companionToken} placeholder="Paste new gc_cmp_... token" style="width:100%; padding:6px;" />
+        <input
+          class="input-full"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          bind:value={companionToken}
+          placeholder="Paste new gc_cmp_... token"
+        />
       </label>
-      <label>
+      <label class="field">
         GeoGuessr _ncfa cookie ({state?.hasNcfa ? "configured" : "optional"})
-        <input type="text" autocomplete="off" spellcheck="false" bind:value={ncfaCookie} placeholder="Paste _ncfa value" style="width:100%; padding:6px;" />
+        <input
+          class="input-full"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          bind:value={ncfaCookie}
+          placeholder="Paste _ncfa value"
+        />
       </label>
-      <button type="submit" style="width:fit-content; padding:6px 14px;">Save Settings</button>
+      <button type="submit" class="btn-primary btn-fit">Save Settings</button>
     </form>
   </section>
 
-  <section style="background:#fff; border:1px solid #dde3ea; border-radius:10px; padding:16px;">
-    <h2 style="margin-top:0; font-size:15px;">Local Recordings & Re-transcription</h2>
-    <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
+  <section class="card">
+    <h2>Local Recordings & Re-transcription</h2>
+    <div class="row" style="margin-bottom: 12px;">
       <input type="datetime-local" bind:value={retransSince} />
       <button onclick={() => retranscribe()}>Re-transcribe all since date</button>
-      <span style="margin-left:auto;">
-        Delete audio older than <input type="number" bind:value={cleanupDays} style="width:60px;" /> days
+      <span class="cleanup-group">
+        Delete audio older than
+        <input class="input-days" type="number" bind:value={cleanupDays} />
+        days
         <button onclick={cleanupAudio}>Delete</button>
       </span>
     </div>
 
-    <ul style="list-style:none; padding:0; margin:0; display:grid; gap:6px;">
+    <ul class="recordings-list">
       {#each state?.recordings ?? [] as rec}
-        <li style="display:flex; justify-content:space-between; align-items:center; padding:8px; background:#f8fafc; border-radius:6px; font-size:13px;">
+        <li class="recording-item">
           <span>
             {new Date(rec.startedAt).toLocaleString()} · {Math.round(rec.durationMs / 1000)}s · {rec.audioFormat} ({(rec.bytes / 1048576).toFixed(1)} MB)
           </span>

@@ -7,7 +7,8 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
-    }
+    },
+    "./themes.css": "./src/themes.css"
   },
   "scripts": {
     "build": "tsc --noEmit",

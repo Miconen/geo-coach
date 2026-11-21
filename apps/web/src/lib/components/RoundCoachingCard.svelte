@@ -65,7 +65,7 @@
     <div class="flex items-center gap-2">
       <span class="mono font-semibold text-[var(--ink)]">R{round.roundNumber}</span>
       {#if recallHidden}
-        <span class="rounded bg-slate-200 px-1.5 py-0.5 text-slate-600">Hidden in Recall</span>
+        <span class="rounded bg-[var(--badge-bg)] px-1.5 py-0.5 text-[var(--muted)]">Hidden in Recall</span>
       {:else}
         <span
           class="rounded px-1.5 py-0.5 font-semibold {wrongCountry
@@ -85,7 +85,7 @@
     </div>
 
     <div class="flex items-center gap-1.5">
-      <span class="mono rounded bg-white px-1.5 py-0.5 text-[11px] text-[var(--muted)] border border-[var(--border)]">
+      <span class="mono rounded bg-[var(--surface)] px-1.5 py-0.5 text-[11px] text-[var(--muted)] border border-[var(--border)]">
         {round.replayPlayerCount > 0 ? `Replay · ${round.replayPlayerCount}p` : "No replay"}
       </span>
       <span
@@ -100,7 +100,7 @@
 
   <!-- 0-5000 Duo score meter with Opponent score tick -->
   <div class="mt-2">
-    <div class="relative h-2 w-full rounded-full bg-slate-200 overflow-hidden">
+    <div class="relative h-2 w-full rounded-full bg-[var(--meter-track)] overflow-hidden">
       <div
         class="h-full rounded-full bg-[var(--accent)]"
         style="width: {Math.min(100, (round.duoBestScore / 5000) * 100)}%"
@@ -123,13 +123,13 @@
       {#each duoGuesses as g}
         {@const pl = g.playerId ? players[g.playerId] : null}
         <span
-          class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 bg-white {g.isBestForTeam
-            ? 'border-[var(--accent)] font-medium'
+          class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 bg-[var(--surface)] {g.isBestForTeam
+            ? 'border-[var(--accent)] font-medium text-[var(--ink)]'
             : 'border-[var(--border)] text-[var(--muted)]'}"
         >
           <span
             class="h-2 w-2 rounded-full"
-            style="background: {pl?.avatarColor ?? '#2563eb'}"
+            style="background: color-mix(in srgb, {pl?.avatarColor ?? '#2563eb'}, #ffffff var(--speaker-lighten))"
           ></span>
           {pl?.displayName ?? g.nick ?? "Duo"}: {g.countryCode ?? "?"} · {g.score}pt
           {#if g.distanceMeters !== null}
@@ -152,10 +152,10 @@
       {#each phaseFractions as seg}
         <div
           class="flex items-center justify-center text-[10px] font-medium {seg.phase === 'play'
-            ? 'bg-emerald-100 text-emerald-800'
+            ? 'bg-[var(--phase-play-bg)] text-[var(--phase-play-ink)]'
             : seg.phase === 'countdown'
-              ? 'bg-amber-100 text-amber-800'
-              : 'bg-slate-200 text-slate-700'}"
+              ? 'bg-[var(--phase-cd-bg)] text-[var(--phase-cd-ink)]'
+              : 'bg-[var(--phase-res-bg)] text-[var(--phase-res-ink)]'}"
         >
           {seg.phase === "play" ? "Play" : seg.phase === "countdown" ? "CD" : "Res"}
         </div>
@@ -166,8 +166,8 @@
           type="button"
           title={marker.tooltip}
           onclick={() => onSelectUtterance?.(marker.id)}
-          class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-3 w-3 rounded-full border-2 border-white shadow hover:scale-125"
-          style="left: {marker.pct}%; background: {marker.color}"
+          class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-3 w-3 rounded-full border-2 border-[var(--surface)] shadow hover:scale-125"
+          style="left: {marker.pct}%; background: color-mix(in srgb, {marker.color}, #ffffff var(--speaker-lighten))"
           aria-label="Jump to Utterance"
         ></button>
       {/each}

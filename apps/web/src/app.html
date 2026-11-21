@@ -4,6 +4,25 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>geo-coach</title>
+    <script>
+      (function () {
+        try {
+          var valid = [
+            "stillwater",
+            "deep-water",
+            "warm-atlas",
+            "pine-dusk",
+            "stillwater-light",
+            "classic-light",
+          ];
+          var saved = localStorage.getItem("geo-coach-theme");
+          document.documentElement.dataset.theme =
+            saved && valid.indexOf(saved) !== -1 ? saved : "stillwater";
+        } catch (e) {
+          document.documentElement.dataset.theme = "stillwater";
+        }
+      })();
+    </script>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">

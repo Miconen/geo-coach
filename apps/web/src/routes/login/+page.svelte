@@ -1,10 +1,17 @@
 <script lang="ts">
+  import ThemeSwitcher from "$lib/components/ThemeSwitcher.svelte";
   let { data } = $props();
 </script>
 
 <main class="min-h-screen flex items-center justify-center p-6">
-  <div class="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
-    <h1 class="text-xl font-semibold text-[var(--ink)]">geo-coach</h1>
+  <div
+    class="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6"
+    style="box-shadow: var(--shadow-card)"
+  >
+    <div class="flex items-start justify-between gap-3">
+      <h1 class="text-xl font-semibold text-[var(--ink)]">geo-coach</h1>
+      <ThemeSwitcher />
+    </div>
     <p class="mt-1 text-sm text-[var(--muted)]">
       GeoGuessr ranked team-duels coaching workbench. Sign in with a Discord account belonging to a configured Duo.
     </p>

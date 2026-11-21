@@ -3,6 +3,7 @@
   import { invalidateAll } from "$app/navigation";
   import { getCountryName, type DuoSseEvent, type LearningKind, type ReactionType } from "@geo-coach/shared";
   import RoundCoachingCard from "$lib/components/RoundCoachingCard.svelte";
+  import ThemeSwitcher from "$lib/components/ThemeSwitcher.svelte";
   import type {
     CountryDossier,
     WorkbenchLearning,
@@ -358,7 +359,7 @@
 
         {#if wb.duo.currentRating !== null}
           {@const dist = wb.duo.targetRating - wb.duo.currentRating}
-          <span class="mono rounded-full bg-[var(--accent-soft)] px-2.5 py-0.5 text-xs font-semibold text-[var(--accent)]">
+          <span class="mono rounded-full bg-[var(--accent-soft)] px-2.5 py-0.5 text-xs font-semibold text-[var(--accent-soft-ink)]">
             {wb.duo.currentRating} ELO · {dist > 0 ? `${dist} to ${wb.duo.targetDivision}` : `${wb.duo.targetDivision} reached`}
           </span>
         {/if}
@@ -370,7 +371,7 @@
               ? 'bg-[var(--ok-bg)] text-[var(--ok)]'
               : 'bg-[var(--surface-subtle)] text-[var(--muted)]'}"
           >
-            <span class="h-2 w-2 rounded-full {st.recording ? 'bg-[var(--ok)]' : 'bg-slate-400'}"></span>
+            <span class="h-2 w-2 rounded-full {st.recording ? 'bg-[var(--ok)]' : 'bg-[var(--muted)]'}"></span>
             {st.playerName} {st.recording ? "recording" : "online"}
             {#if !st.uploadOk}
               · retry
@@ -393,15 +394,16 @@
 
       <div class="flex flex-wrap items-center gap-2 text-xs">
         <span class="hidden lg:inline text-[var(--muted)] mono">j/k nav · / search · s star · r recall</span>
+        <ThemeSwitcher />
         <button
           onclick={() => openManualModal()}
-          class="rounded-lg bg-[var(--accent)] px-3 py-1.5 font-semibold text-white hover:opacity-95"
+          class="rounded-lg bg-[var(--accent)] px-3 py-1.5 font-semibold text-[var(--accent-ink)] hover:opacity-95"
         >
           + Manual Learning
         </button>
         <a
           href="/settings"
-          class="rounded-lg border border-[var(--border-strong)] bg-white px-2.5 py-1.5 font-medium"
+          class="rounded-lg border border-[var(--border-strong)] bg-[var(--surface-subtle)] px-2.5 py-1.5 font-medium text-[var(--ink)] hover:bg-[var(--surface-hover)]"
         >
           Settings
         </a>
@@ -425,8 +427,8 @@
               <button
                 onclick={() => jumpToGame(g.id)}
                 class="mono inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium hover:border-[var(--accent)] {g.won
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                  : 'border-rose-200 bg-rose-50 text-rose-800'}"
+                  ? 'border-[var(--ok-border)] bg-[var(--ok-bg)] text-[var(--ok)]'
+                  : 'border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger)]'}"
               >
                 <span>{g.won ? "W" : "L"}</span>
                 {#if g.ratingDelta !== null}
@@ -458,7 +460,7 @@
                   selectedPair = active ? null : pair.countries;
                 }}
                 class="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs {active
-                  ? 'border-[var(--accent)] bg-[var(--accent-soft)] font-semibold text-[var(--accent)]'
+                  ? 'border-[var(--accent)] bg-[var(--accent-soft)] font-semibold text-[var(--accent-soft-ink)]'
                   : 'border-[var(--border)] bg-[var(--surface-subtle)] hover:border-[var(--border-strong)]'}"
               >
                 <span class="mono font-semibold">{pair.countries[0]} ↔ {pair.countries[1]}</span>
@@ -499,7 +501,7 @@
                   selectedPair = null;
                 }}
                 class="rounded-md px-2 py-1.5 text-left {mode === 'learnings' && queueFilter === key && !selectedCountry && !selectedPair
-                  ? 'bg-[var(--accent-soft)] font-semibold text-[var(--accent)]'
+                  ? 'bg-[var(--accent-soft)] font-semibold text-[var(--accent-soft-ink)]'
                   : 'hover:bg-[var(--surface-subtle)]'}"
               >
                 {label}
@@ -525,7 +527,7 @@
                         selectedCountry = selectedCountry === c.code ? null : c.code;
                       }}
                       class="flex items-center justify-between rounded px-2 py-1 text-left {selectedCountry === c.code
-                        ? 'bg-[var(--accent-soft)] font-semibold text-[var(--accent)]'
+                        ? 'bg-[var(--accent-soft)] font-semibold text-[var(--accent-soft-ink)]'
                         : 'hover:bg-[var(--surface-subtle)]'}"
                     >
                       <span class="truncate">
@@ -614,8 +616,8 @@
                 revealedIds = {};
               }}
               class="rounded-lg border px-2.5 py-1.5 font-semibold {recallMode
-                ? 'border-[var(--accent)] bg-[var(--accent)] text-white'
-                : 'border-[var(--border-strong)] bg-white'}"
+                ? 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-ink)]'
+                : 'border-[var(--border-strong)] bg-[var(--surface-subtle)] text-[var(--ink)] hover:bg-[var(--surface-hover)]'}"
             >
               Recall {recallMode ? "ON" : "OFF"} (r)
             </button>
@@ -712,23 +714,23 @@
                         <span class="rounded bg-[var(--manual-bg)] px-1.5 py-0.5 font-semibold text-[var(--manual)]">Manual</span>
                       {/if}
                       {#each item.countries as code}
-                        <span class="mono rounded bg-slate-100 px-1.5 py-0.5 font-semibold">{code}</span>
+                        <span class="mono rounded bg-[var(--badge-bg)] px-1.5 py-0.5 font-semibold text-[var(--badge-ink)]">{code}</span>
                       {/each}
                       {#if item.isDebrief}
-                        <span class="rounded bg-purple-100 px-1.5 py-0.5 text-purple-800">Debrief</span>
+                        <span class="rounded bg-[var(--debrief-bg)] px-1.5 py-0.5 text-[var(--debrief)]">Debrief</span>
                       {/if}
                       {#if item.isStale}
                         <span class="rounded bg-[var(--warn-bg)] px-1.5 py-0.5 text-[var(--warn)]">Stale</span>
                       {/if}
                       {#if item.status === "superseded"}
-                        <span class="rounded bg-slate-200 px-1.5 py-0.5 text-slate-600">Superseded</span>
+                        <span class="rounded bg-[var(--badge-bg)] px-1.5 py-0.5 text-[var(--muted)]">Superseded</span>
                       {/if}
                     </div>
                     <div class="flex items-center gap-1.5 mono">
                       {#if item.worstHpDelta < 0}
                         <span class="text-[var(--danger)] font-semibold">{item.worstHpDelta} HP</span>
                       {/if}
-                      {#if item.starred}<span>★</span>{/if}
+                      {#if item.starred}<span class="text-[var(--star)]">★</span>{/if}
                       {#if item.done}<span class="text-[var(--ok)]">✓ Done</span>{/if}
                     </div>
                   </div>
@@ -737,7 +739,7 @@
                     {#if isRevealed}
                       {item.text}
                     {:else}
-                      <span class="rounded bg-slate-200 px-2 py-0.5 text-xs text-slate-600">
+                      <span class="rounded bg-[var(--badge-bg)] px-2 py-0.5 text-xs text-[var(--muted)]">
                         Click or press Space to reveal takeaway
                       </span>
                     {/if}
@@ -822,7 +824,7 @@
               <button
                 onclick={() => (selectedGameId = null)}
                 class="rounded-md border px-2.5 py-1 {selectedGameId === null
-                  ? 'border-[var(--accent)] bg-[var(--accent-soft)] font-semibold text-[var(--accent)]'
+                  ? 'border-[var(--accent)] bg-[var(--accent-soft)] font-semibold text-[var(--accent-soft-ink)]'
                   : 'border-[var(--border)]'}"
               >
                 Full Session
@@ -833,7 +835,7 @@
                   <button
                     onclick={() => (selectedGameId = g.id)}
                     class="mono rounded-md border px-2.5 py-1 {selectedGameId === g.id
-                      ? 'border-[var(--accent)] bg-[var(--accent-soft)] font-semibold text-[var(--accent)]'
+                      ? 'border-[var(--accent)] bg-[var(--accent-soft)] font-semibold text-[var(--accent-soft-ink)]'
                       : 'border-[var(--border)]'}"
                   >
                     Game {i + 1} ({g.won ? "W" : "L"} · {g.micCount} mic{g.micCount === 1 ? "" : "s"})
@@ -900,8 +902,8 @@
                                 <button
                                   onclick={() => (selectedLearningId = l.id)}
                                   class="rounded-full px-2.5 py-0.5 text-xs {isDebrief
-                                    ? 'bg-purple-100 text-purple-900'
-                                    : 'bg-[var(--accent-soft)] text-[var(--accent)]'}"
+                                    ? 'bg-[var(--debrief-bg)] text-[var(--debrief)]'
+                                    : 'bg-[var(--accent-soft)] text-[var(--accent-soft-ink)]'}"
                                 >
                                   {isDebrief ? "Debrief ← between-Game talk: " : `${l.kind}: `}{l.text}
                                 </button>
@@ -924,7 +926,12 @@
                             >
                               <div>
                                 <span class="mono text-[var(--muted)]">{formatRelSec(round.startTime, u.startedAt)}</span>
-                                <strong class="ml-1.5" style="color: {speaker?.avatarColor ?? '#0f172a'}">
+                                <strong
+                                  class="ml-1.5"
+                                  style="color: {speaker?.avatarColor
+                                    ? `color-mix(in srgb, ${speaker.avatarColor}, #ffffff var(--speaker-lighten))`
+                                    : 'var(--ink)'}"
+                                >
                                   {speaker?.displayName ?? "Player"}:
                                 </strong>
                                 <span class="ml-1">{u.text}</span>
@@ -973,7 +980,12 @@
                   >
                     <div>
                       <span class="mono text-[var(--muted)]">{new Date(u.startedAt).toISOString().slice(11, 19)}</span>
-                      <strong class="ml-1.5" style="color: {speaker?.avatarColor ?? '#0f172a'}">
+                      <strong
+                        class="ml-1.5"
+                        style="color: {speaker?.avatarColor
+                          ? `color-mix(in srgb, ${speaker.avatarColor}, #ffffff var(--speaker-lighten))`
+                          : 'var(--ink)'}"
+                      >
                         {speaker?.displayName ?? "Player"}:
                       </strong>
                       <span class="ml-1">{u.text}</span>
@@ -1014,7 +1026,7 @@
             <button
               onclick={() => (inspectorTab = "provenance")}
               class="rounded-md px-2.5 py-1 font-semibold {inspectorTab === 'provenance'
-                ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-soft-ink)]'
                 : 'text-[var(--muted)]'}"
             >
               Coaching Provenance
@@ -1023,7 +1035,7 @@
               <button
                 onclick={() => (inspectorTab = "game")}
                 class="rounded-md px-2.5 py-1 font-semibold {inspectorTab === 'game'
-                  ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+                  ? 'bg-[var(--accent-soft)] text-[var(--accent-soft-ink)]'
                   : 'text-[var(--muted)]'}"
               >
                 Full Game ({primaryGame.roundIds.length}R)
@@ -1060,7 +1072,7 @@
               {:else}
                 <button
                   onclick={() => (revealedIds = { ...revealedIds, [activeLearning.id]: true })}
-                  class="w-full rounded-lg bg-[var(--accent)] py-2 text-xs font-semibold text-white"
+                  class="w-full rounded-lg bg-[var(--accent)] py-2 text-xs font-semibold text-[var(--accent-ink)]"
                 >
                   Reveal Takeaway (Space)
                 </button>
@@ -1071,8 +1083,8 @@
                 <button
                   onclick={() => react(activeLearning.id, "star")}
                   class="rounded-md border px-2.5 py-1 {activeLearning.starred
-                    ? 'border-amber-400 bg-amber-50 font-semibold text-amber-800'
-                    : 'border-[var(--border-strong)]'}"
+                    ? 'border-[var(--star-border)] bg-[var(--star-bg)] font-semibold text-[var(--star)]'
+                    : 'border-[var(--border-strong)] hover:bg-[var(--surface-hover)]'}"
                 >
                   ★ {activeLearning.starred ? "Starred" : "Star"}
                 </button>
@@ -1080,8 +1092,8 @@
                   <button
                     onclick={() => react(activeLearning.id, "done")}
                     class="rounded-md border px-2.5 py-1 {activeLearning.done
-                      ? 'border-emerald-400 bg-emerald-50 font-semibold text-emerald-800'
-                      : 'border-[var(--border-strong)]'}"
+                      ? 'border-[var(--ok-border)] bg-[var(--ok-bg)] font-semibold text-[var(--ok)]'
+                      : 'border-[var(--border-strong)] hover:bg-[var(--surface-hover)]'}"
                   >
                     ✓ {activeLearning.done ? "Done" : "Mark done"}
                   </button>
@@ -1089,8 +1101,8 @@
                 <button
                   onclick={() => react(activeLearning.id, "dismiss")}
                   class="rounded-md border px-2.5 py-1 {activeLearning.dismissed
-                    ? 'border-rose-400 bg-rose-50 font-semibold text-rose-800'
-                    : 'border-[var(--border-strong)]'}"
+                    ? 'border-[var(--danger-border)] bg-[var(--danger-bg)] font-semibold text-[var(--danger)]'
+                    : 'border-[var(--border-strong)] hover:bg-[var(--surface-hover)]'}"
                 >
                   {activeLearning.dismissed ? "Dismissed" : "Dismiss"}
                 </button>
@@ -1098,7 +1110,7 @@
 
               <!-- Two-way supersession links -->
               {#if activeLearning.supersededByLearningIds.length > 0}
-                <div class="rounded-lg bg-slate-100 p-2 text-xs">
+                <div class="rounded-lg bg-[var(--surface-subtle)] p-2 text-xs">
                   Superseded by newer run:
                   {#each activeLearning.supersededByLearningIds as repId}
                     <button
@@ -1111,7 +1123,7 @@
                 </div>
               {/if}
               {#if activeLearning.supersedesLearningIds.length > 0}
-                <div class="rounded-lg bg-slate-100 p-2 text-xs">
+                <div class="rounded-lg bg-[var(--surface-subtle)] p-2 text-xs">
                   Replaces:
                   {#each activeLearning.supersedesLearningIds as oldId}
                     <button
@@ -1181,10 +1193,10 @@
 
   <!-- Manual Learning Modal -->
   {#if manualOpen}
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[2px] p-4">
       <form
         onsubmit={submitManualLearning}
-        class="w-full max-w-lg rounded-xl border border-[var(--border)] bg-white p-5 space-y-3 shadow-lg"
+        class="w-full max-w-lg rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 space-y-3 shadow-lg"
       >
         <div class="flex items-center justify-between">
           <h2 class="text-base font-semibold">Add Manual Learning</h2>
@@ -1244,10 +1256,17 @@
         </div>
 
         <div class="flex justify-end gap-2 pt-2">
-          <button type="button" onclick={() => (manualOpen = false)} class="rounded-lg border px-3 py-1.5 text-xs">
+          <button
+            type="button"
+            onclick={() => (manualOpen = false)}
+            class="rounded-lg border border-[var(--border-strong)] bg-[var(--surface-subtle)] px-3 py-1.5 text-xs hover:bg-[var(--surface-hover)]"
+          >
             Cancel
           </button>
-          <button type="submit" class="rounded-lg bg-[var(--accent)] px-4 py-1.5 text-xs font-semibold text-white">
+          <button
+            type="submit"
+            class="rounded-lg bg-[var(--accent)] px-4 py-1.5 text-xs font-semibold text-[var(--accent-ink)] hover:opacity-95"
+          >
             Save Manual Learning
           </button>
         </div>

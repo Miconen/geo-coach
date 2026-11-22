@@ -20,6 +20,8 @@
 
   let { data } = $props();
 
+  let mapView = $state<MapViewSection>();
+
   // The filter lives in the URL so a view can be bookmarked; changing it never reloads
   // the payload, since every panel is computed here in the browser (ADR 0003).
   let filter = $state<StatsFilter>(parseStatsFilter(page.url.searchParams));
@@ -250,10 +252,10 @@
         </div>
       {:else if section.id === "players"}
         <div class="mt-3">
-          <PlayersSection payload={data.stats} {filter} />
+          <PlayersSection payload={data.stats} {filter} onOpenRound={(id) => mapView?.showRound(id)} />
         </div>
       {:else if section.id === "map-view"}
-        <div class="mt-3"><MapViewSection payload={data.stats} rounds={filtered.rounds} /></div>
+        <div class="mt-3"><MapViewSection bind:this={mapView} payload={data.stats} rounds={filtered.rounds} /></div>
       {/if}
     </section>
   {/each}

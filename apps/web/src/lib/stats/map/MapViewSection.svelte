@@ -264,6 +264,19 @@
     if (cam) map?.flyTo({ ...cam, pitch: 0, padding: { top: 60, bottom: 40, left: 0, right: 360 }, duration: 1000 });
   }
 
+  /** A Round to open once the map is ready (asked for before it loaded). */
+  let pendingRoundId: string | null = null;
+
+  /**
+   * Scrolls the Map view into sight and opens a Round's card, for other sections
+   * (the Players' best guesses). Works for a Round the page filter hides.
+   */
+  export function showRound(roundId: string) {
+    wrapper?.scrollIntoView({ behavior: "smooth", block: "end" });
+    if (ready && map) openRoundById(roundId);
+    else pendingRoundId = roundId;
+  }
+
   function setTool(tool: DrawTool) {
     setView({ ...view, tool: view.tool === tool ? "pan" : tool });
   }
@@ -335,6 +348,10 @@
         payload.players.map((p, i) => ({ initial: initial(p.displayName), color: colors[i]! })),
       );
       ready = true;
+      if (pendingRoundId) {
+        openRoundById(pendingRoundId);
+        pendingRoundId = null;
+      }
     });
     drawing = attachDrawing(m, {
       tool: () => view.tool,

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Inspect from "$lib/inspect/Inspect.svelte";
   import type { WorkbenchPlayer, WorkbenchRound, WorkbenchUtterance } from "$lib/server/workbench/view-model.js";
 
   interface Props {
@@ -55,6 +56,10 @@
   );
 </script>
 
+<Inspect
+  name="RoundCoachingCard"
+  props={{ round, utterances, players, recallHidden, highlighted, onSelectUtterance }}
+>
 <div
   class="rounded-lg border p-3 transition-colors {highlighted
     ? 'border-[var(--accent)] bg-[var(--accent-soft)]/40'
@@ -173,3 +178,4 @@
     </div>
   </div>
 </div>
+</Inspect>

@@ -2,6 +2,7 @@
   import { invalidateAll } from "$app/navigation";
   import { THEMES } from "@geo-coach/shared";
   import { getTheme, setTheme } from "$lib/theme.svelte.js";
+  import { getDeveloperMode, setDeveloperMode } from "$lib/developer-mode.svelte.js";
 
   let { data } = $props();
   let scope = $state<"companion" | "mcp">("companion");
@@ -121,6 +122,35 @@
           <p class="text-[11px] leading-snug text-[var(--muted)]">{theme.description}</p>
         </button>
       {/each}
+    </div>
+  </section>
+
+  <section class="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+    <div class="flex items-center justify-between gap-4">
+      <div>
+        <h2 id="developer-mode-heading" class="text-base font-semibold">Developer mode</h2>
+        <p class="text-xs text-[var(--muted)]">
+          Adds a <code class="mono">{"{ }"}</code> badge to Game and Round cards that shows the props each one
+          receives. Only for this browser.
+        </p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={getDeveloperMode()}
+        aria-labelledby="developer-mode-heading"
+        onclick={() => setDeveloperMode(!getDeveloperMode())}
+        class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border transition-colors {getDeveloperMode()
+          ? 'border-[var(--accent)] bg-[var(--accent)]'
+          : 'border-[var(--border-strong)] bg-[var(--surface-inset)]'}"
+      >
+        <span
+          class="inline-block h-3.5 w-3.5 rounded-full shadow transition-transform {getDeveloperMode()
+            ? 'translate-x-4 bg-[var(--accent-ink)]'
+            : 'translate-x-0.5 bg-[var(--muted)]'}"
+          aria-hidden="true"
+        ></span>
+      </button>
     </div>
   </section>
 

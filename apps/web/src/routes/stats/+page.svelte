@@ -27,11 +27,16 @@
   const mapNames = $derived(
     [...new Set(data.stats.games.map((g) => g.mapName).filter((n): n is string => !!n))].sort(),
   );
-  const countryCodes = $derived(
-    [...new Set(data.stats.rounds.map((r) => r.countryCode).filter((c): c is string => !!c))].sort(
-      (a, b) => getCountryName(a).localeCompare(getCountryName(b)),
-    ),
-  );
+  // Most-played first, so the countries worth filtering on are at the top.
+  const countries = $derived.by(() => {
+    const counts = new Map<string, number>();
+    for (const r of data.stats.rounds) {
+      if (r.countryCode) counts.set(r.countryCode, (counts.get(r.countryCode) ?? 0) + 1);
+    }
+    return [...counts]
+      .map(([code, rounds]) => ({ code, rounds }))
+      .sort((a, b) => b.rounds - a.rounds || getCountryName(a.code).localeCompare(getCountryName(b.code)));
+  });
   const sessionsNewestFirst = $derived([...data.stats.sessions].reverse());
 
   const isFiltered = $derived(serializeStatsFilter(filter).toString() !== "");
@@ -201,8 +206,10 @@
         class="{inputClass} min-w-44"
         onchange={(e) => setFilter({ ...filter, countryCodes: selectedValues(e) })}
       >
-        {#each countryCodes as code (code)}
-          <option value={code} selected={filter.countryCodes.includes(code)}>{getCountryName(code)}</option>
+        {#each countries as { code, rounds } (code)}
+          <option value={code} selected={filter.countryCodes.includes(code)}>
+            {getCountryName(code)} · {rounds}
+          </option>
         {/each}
       </select>
     </label>

@@ -15,6 +15,10 @@ RUN pnpm --filter @geo-coach/web exec esbuild src/lib/server/db/seed.ts \
       --bundle --platform=node --format=esm \
       --external:drizzle-orm --external:postgres --external:zod \
       --outfile=build-seed.mjs
+RUN pnpm --filter @geo-coach/web exec esbuild src/lib/server/db/rebuild-derived.ts \
+      --bundle --platform=node --format=esm \
+      --external:drizzle-orm --external:postgres --external:zod \
+      --outfile=build-rebuild-derived.mjs
 
 FROM node:24-slim
 WORKDIR /app
@@ -31,6 +35,7 @@ COPY --from=build /app/apps/web/node_modules ./apps/web/node_modules
 COPY --from=build /app/apps/web/build ./apps/web/build
 COPY --from=build /app/apps/web/build-migrate.mjs ./apps/web/build-migrate.mjs
 COPY --from=build /app/apps/web/build-seed.mjs ./apps/web/build-seed.mjs
+COPY --from=build /app/apps/web/build-rebuild-derived.mjs ./apps/web/build-rebuild-derived.mjs
 COPY --from=build /app/apps/web/drizzle ./apps/web/drizzle
 COPY --from=build /app/apps/web/prompts ./apps/web/prompts
 

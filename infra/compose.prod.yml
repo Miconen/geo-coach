@@ -19,7 +19,10 @@ services:
     restart: "no"
     environment:
       DATABASE_URL: postgres://geocoach:${POSTGRES_PASSWORD}@postgres:5432/geocoach
-    command: ["node", "apps/web/build-migrate.mjs"]
+    # Re-derive Games and Rounds from their raw duels after migrating, so new
+    # derived columns are filled on deploy. It updates rows in place.
+    command:
+      ["sh", "-c", "node apps/web/build-migrate.mjs && node apps/web/build-rebuild-derived.mjs"]
     depends_on:
       postgres:
         condition: service_healthy

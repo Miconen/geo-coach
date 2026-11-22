@@ -151,7 +151,7 @@ describe("buildStatsPayload", () => {
 
     const payload = await buildStatsPayload(handle.db, duoId);
 
-    expect(payload.players).toEqual([{ id: mikoId, displayName: "Miko" }]);
+    expect(payload.players).toEqual([{ id: mikoId, displayName: "Miko", avatarColor: "#2563eb" }]);
     expect(payload.sessions.map((s) => s.id)).toEqual([sessionId]);
     expect(payload.games).toHaveLength(1);
     expect(payload.games[0]).toMatchObject({

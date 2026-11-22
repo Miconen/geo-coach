@@ -16,6 +16,7 @@
   import OverviewSection from "$lib/stats/OverviewSection.svelte";
   import RankingsSection from "$lib/stats/RankingsSection.svelte";
   import PlayersSection from "$lib/stats/PlayersSection.svelte";
+  import MapViewSection from "$lib/stats/map/MapViewSection.svelte";
 
   let { data } = $props();
 
@@ -251,6 +252,8 @@
         <div class="mt-3">
           <PlayersSection payload={data.stats} {filter} />
         </div>
+      {:else if section.id === "map-view"}
+        <div class="mt-3"><MapViewSection payload={data.stats} rounds={filtered.rounds} /></div>
       {/if}
     </section>
   {/each}

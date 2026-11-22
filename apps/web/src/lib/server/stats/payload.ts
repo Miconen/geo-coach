@@ -137,7 +137,11 @@ export async function buildStatsPayload(db: AppDb, duoId: string): Promise<Stats
 
   return {
     duoId,
-    players: duoPlayers.map((p) => ({ id: p.id, displayName: p.displayName })),
+    players: duoPlayers.map((p) => ({
+      id: p.id,
+      displayName: p.displayName,
+      avatarColor: p.avatarColor,
+    })),
     sessions,
     games: statsGames,
     rounds: statsRounds,

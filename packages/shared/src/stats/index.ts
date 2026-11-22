@@ -2,6 +2,7 @@ export * from "./payload.js";
 export * from "./filter.js";
 export * from "./first-guesser.js";
 export * from "./hedge.js";
+export * from "./hedge-summary.js";
 export * from "./rounds.js";
 export * from "./games.js";
 export * from "./headline.js";

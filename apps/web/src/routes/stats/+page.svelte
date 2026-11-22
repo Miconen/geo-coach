@@ -22,6 +22,7 @@
   import RankingsSection from "$lib/stats/RankingsSection.svelte";
   import PlayersSection from "$lib/stats/PlayersSection.svelte";
   import SpeedSection from "$lib/stats/SpeedSection.svelte";
+  import EffectsSection from "$lib/stats/EffectsSection.svelte";
   import VersusSection from "$lib/stats/VersusSection.svelte";
   import MapViewSection from "$lib/stats/map/MapViewSection.svelte";
 
@@ -106,6 +107,7 @@
     { id: "rankings", title: "Rankings" },
     { id: "versus", title: "Versus Opponents" },
     { id: "speed", title: "Speed" },
+    { id: "effects", title: "What happens when…" },
     { id: "map-view", title: "Map view" },
     { id: "players", title: "Players" },
   ];
@@ -298,6 +300,10 @@
       {:else if section.id === "speed"}
         <div class="mt-3">
           <SpeedSection payload={data.stats} {filter} {smoothing} />
+        </div>
+      {:else if section.id === "effects"}
+        <div class="mt-3">
+          <EffectsSection payload={data.stats} {filter} />
         </div>
       {:else if section.id === "players"}
         <div class="mt-3">

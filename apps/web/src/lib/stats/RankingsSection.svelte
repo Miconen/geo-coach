@@ -12,6 +12,7 @@
     countryRows,
     gapChartRows,
     getCountryName,
+    hedgeSummary,
     isGreyedOut,
     slowThreshold,
     sortCountryRows,
@@ -25,6 +26,8 @@
   } from "@geo-coach/shared";
   import { getDeveloperMode } from "$lib/developer-mode.svelte.js";
   import CountryDetail from "./CountryDetail.svelte";
+  import CountryHedge from "./CountryHedge.svelte";
+  import HedgeSection from "./HedgeSection.svelte";
   import PlotChart from "./PlotChart.svelte";
   import { formatNumber, formatPercent, formatSigned, unitLabel } from "./overview-text.js";
   import { gapTakeaway, placeName, rowCountryOf } from "./rankings-text.js";
@@ -130,6 +133,7 @@
   const selectedRow = $derived(rows.find((r) => r.countryCode === selected) ?? null);
 
   const pairs = $derived(confusionPairs(filtered.rounds));
+  const hedge = $derived(hedgeSummary(filtered));
   // "Mistaken for" looks at other countries' Rounds, so it ignores the country filter.
   const otherCountryPairs = $derived(
     confusionPairs(applyFilter(payload, withoutCountryFilter(filter)).rounds),
@@ -318,7 +322,15 @@
           onclose={() => (selected = null)}
           onselect={select}
           {canSelect}
-        />
+        >
+          {#snippet extra(row: CountryRow)}
+            <CountryHedge
+              rounds={filtered.rounds.filter((r) => r.countryCode === row.countryCode)}
+              countryName={getCountryName(row.countryCode)}
+              {greyOutRounds}
+            />
+          {/snippet}
+        </CountryDetail>
       </div>
     {:else}
       <div class="space-y-4">
@@ -347,7 +359,7 @@
             <p class="mt-1 text-[11px] text-[var(--muted)]">{pairs.length - PAIRS_SHOWN} more pairs not shown.</p>
           {/if}
         </div>
-        <!-- Subsections after the confusion pairs (e.g. hedge quality, #41) go here. -->
+        <HedgeSection summary={hedge} {greyOutRounds} />
       </div>
     {/if}
   </div>

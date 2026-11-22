@@ -2,8 +2,11 @@
   import { onMount } from "svelte";
   import { invalidateAll } from "$app/navigation";
   import { getCountryName, type DuoSseEvent, type LearningKind, type ReactionType } from "@geo-coach/shared";
+  import GameCard from "$lib/components/GameCard.svelte";
   import RoundCoachingCard from "$lib/components/RoundCoachingCard.svelte";
   import ThemeSwitcher from "$lib/components/ThemeSwitcher.svelte";
+  import { formatRelSec } from "$lib/workbench/format.js";
+  import { gameSlice, roundSlice } from "$lib/workbench/slices.js";
   import type {
     CountryDossier,
     WorkbenchLearning,
@@ -141,6 +144,13 @@
     !recallMode || (activeLearning ? Boolean(revealedIds[activeLearning.id]) : false),
   );
 
+  // The Game behind the active Learning's first Round, for the Inspector's "Full Game" tab
+  const primaryGameSlice = $derived.by(() => {
+    const roundId = activeLearning?.roundIds[0];
+    const round = roundId ? wb?.roundsById[roundId] : null;
+    return wb && round ? gameSlice(wb, round.gameId) : null;
+  });
+
   const activeCountryDossier = $derived(
     selectedCountry ? wb?.countryDossiers.find((c) => c.code === selectedCountry) ?? null : null,
   );
@@ -148,6 +158,8 @@
   const standaloneGame = $derived(
     mode === "game" && selectedGameId ? (wb?.gamesById[selectedGameId] ?? null) : null,
   );
+
+  const standaloneGameSlice = $derived(wb && standaloneGame ? gameSlice(wb, standaloneGame.id) : null);
 
   const activeSession = $derived(
     wb?.sessions.find((s) => s.id === selectedSessionId) ?? wb?.sessions[0] ?? null,
@@ -274,15 +286,6 @@
     mode = "session";
     selectedSessionId = sessionId;
     selectedGameId = null;
-  }
-
-  function formatRelSec(baseIso: string, targetIso: string): string {
-    const diffSec = Math.round((Date.parse(targetIso) - Date.parse(baseIso)) / 1000);
-    const sign = diffSec < 0 ? "-" : "+";
-    const abs = Math.abs(diffSec);
-    const m = Math.floor(abs / 60);
-    const s = String(abs % 60).padStart(2, "0");
-    return `${sign}${m}:${s}`;
   }
 
   onMount(() => {
@@ -665,12 +668,12 @@
                     No Learnings yet — bridge from played Rounds:
                   </div>
                   {#each activeCountryDossier.roundIds as rId}
-                    {@const round = wb.roundsById[rId]}
-                    {#if round}
+                    {@const slice = roundSlice(wb, rId)}
+                    {#if slice}
                       <RoundCoachingCard
-                        {round}
-                        players={wb.players}
-                        utterancesById={wb.utterancesById}
+                        round={slice.round}
+                        utterances={slice.utterances}
+                        players={slice.players}
                       />
                     {/if}
                   {/each}
@@ -837,18 +840,14 @@
             <p class="text-xs text-[var(--muted)]">
               No Recording covers this Game, so there's no speech or Session to show.
             </p>
-            {#each g.roundIds as rId}
-              {@const round = wb.roundsById[rId]}
-              {#if round}
-                <RoundCoachingCard
-                  {round}
-                  players={wb.players}
-                  utterancesById={wb.utterancesById}
-                  highlighted={selectedRoundId === round.id}
-                  onSelectUtterance={(id) => (highlightedUtteranceId = id)}
-                />
-              {/if}
-            {/each}
+            {#if standaloneGameSlice}
+              <GameCard
+                game={standaloneGameSlice.game}
+                rounds={standaloneGameSlice.rounds}
+                highlightedRoundIds={selectedRoundId ? [selectedRoundId] : []}
+                onSelectUtterance={(id) => (highlightedUtteranceId = id)}
+              />
+            {/if}
           </div>
         {:else if activeSession}
           <!-- Session Timeline Mode -->
@@ -926,90 +925,21 @@
 
             <!-- Rounds with interleaved Utterances & inline Learning pills -->
             {#each (selectedGameId ? [selectedGameId] : activeSession.gameIds) as gId}
-              {@const g = wb.gamesById[gId]}
-              {#if g}
-                <div class="space-y-3 border-t border-[var(--border)] pt-3">
-                  <div class="text-xs font-semibold text-[var(--muted)]">
-                    Game vs {g.opponentTeamName ?? "Opponents"} · {g.won ? "Win" : "Loss"} ({g.duoRatingBefore ?? "?"} → {g.duoRatingAfter ?? "?"}) · {g.micCount} mic{g.micCount === 1 ? "" : "s"}
-                  </div>
-                  {#each g.roundIds as rId}
-                    {@const round = wb.roundsById[rId]}
-                    {#if round}
-                      <div class="space-y-1.5">
-                        <RoundCoachingCard
-                          {round}
-                          players={wb.players}
-                          utterancesById={wb.utterancesById}
-                          highlighted={selectedRoundId === round.id}
-                          onSelectUtterance={(id) => (highlightedUtteranceId = id)}
-                        />
-
-                        {#if round.learningIds.length > 0}
-                          <div class="flex flex-wrap gap-1.5 pl-2">
-                            {#each round.learningIds as lId}
-                              {@const l = wb.learnings.find((x) => x.id === lId)}
-                              {#if l}
-                                {@const isDebrief = round.debriefLearningIds.includes(l.id)}
-                                <button
-                                  onclick={() => (selectedLearningId = l.id)}
-                                  class="rounded-full px-2.5 py-0.5 text-xs {isDebrief
-                                    ? 'bg-[var(--debrief-bg)] text-[var(--debrief)]'
-                                    : 'bg-[var(--accent-soft)] text-[var(--accent-soft-ink)]'}"
-                                >
-                                  {isDebrief ? "Debrief ← between-Game talk: " : `${l.kind}: `}{l.text}
-                                </button>
-                              {/if}
-                            {/each}
-                          </div>
-                        {/if}
-
-                        {#each round.utteranceIds as uId}
-                          {@const u = wb.utterancesById[uId]}
-                          {#if u}
-                            {@const speaker = wb.players[u.playerId]}
-                            {@const matchHighlight =
-                              timelineSearch.trim() !== "" &&
-                              u.text.toLowerCase().includes(timelineSearch.trim().toLowerCase())}
-                            <div
-                              class="ml-3 flex items-start justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs {highlightedUtteranceId === u.id || matchHighlight
-                                ? 'bg-[var(--warn-bg)]'
-                                : 'bg-[var(--surface-subtle)]'}"
-                            >
-                              <div>
-                                <span class="mono text-[var(--muted)]">{formatRelSec(round.startTime, u.startedAt)}</span>
-                                <strong
-                                  class="ml-1.5"
-                                  style="color: {speaker?.avatarColor
-                                    ? `color-mix(in srgb, ${speaker.avatarColor}, #ffffff var(--speaker-lighten))`
-                                    : 'var(--ink)'}"
-                                >
-                                  {speaker?.displayName ?? "Player"}:
-                                </strong>
-                                <span class="ml-1">{u.text}</span>
-                              </div>
-                              <div class="flex items-center gap-2 shrink-0">
-                                <button
-                                  onclick={() => openManualModal({ utteranceIds: [u.id], roundIds: [round.id], country: round.countryCode ?? undefined })}
-                                  class="text-[var(--accent)] hover:underline"
-                                >
-                                  + Learning
-                                </button>
-                                {#if speaker?.isCurrentPlayer}
-                                  <button
-                                    onclick={() => deleteUtterance(u)}
-                                    class="text-[var(--danger)] hover:underline"
-                                  >
-                                    Delete
-                                  </button>
-                                {/if}
-                              </div>
-                            </div>
-                          {/if}
-                        {/each}
-                      </div>
-                    {/if}
-                  {/each}
-                </div>
+              {@const slice = gameSlice(wb, gId)}
+              {#if slice}
+                <GameCard
+                  game={slice.game}
+                  rounds={slice.rounds}
+                  learnings={slice.learnings}
+                  timeline
+                  highlightedRoundIds={selectedRoundId ? [selectedRoundId] : []}
+                  {highlightedUtteranceId}
+                  {timelineSearch}
+                  onSelectUtterance={(id) => (highlightedUtteranceId = id)}
+                  onSelectLearning={(id) => (selectedLearningId = id)}
+                  onAddLearning={openManualModal}
+                  onDeleteUtterance={deleteUtterance}
+                />
               {/if}
             {/each}
 
@@ -1096,17 +1026,13 @@
 
           {#if inspectorTab === "game" && primaryGame && activeLearningRevealed}
             <div class="space-y-2">
-              {#each primaryGame.roundIds as rId}
-                {@const r = wb.roundsById[rId]}
-                {#if r}
-                  <RoundCoachingCard
-                    round={r}
-                    players={wb.players}
-                    utterancesById={wb.utterancesById}
-                    highlighted={activeLearning.roundIds.includes(r.id)}
-                  />
-                {/if}
-              {/each}
+              {#if primaryGameSlice}
+                <GameCard
+                  game={primaryGameSlice.game}
+                  rounds={primaryGameSlice.rounds}
+                  highlightedRoundIds={activeLearning.roundIds}
+                />
+              {/if}
             </div>
           {:else}
             <div class="space-y-3">
@@ -1192,12 +1118,12 @@
 
               <!-- Linked Round Coaching Cards -->
               {#each activeLearning.roundIds as rId}
-                {@const r = wb.roundsById[rId]}
-                {#if r}
+                {@const slice = roundSlice(wb, rId)}
+                {#if slice}
                   <RoundCoachingCard
-                    round={r}
-                    players={wb.players}
-                    utterancesById={wb.utterancesById}
+                    round={slice.round}
+                    utterances={slice.utterances}
+                    players={slice.players}
                     recallHidden={!activeLearningRevealed}
                   />
                 {/if}

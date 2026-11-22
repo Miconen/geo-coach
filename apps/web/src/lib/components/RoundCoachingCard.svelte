@@ -3,8 +3,10 @@
 
   interface Props {
     round: WorkbenchRound;
+    /** This Round's Utterances, in order. */
+    utterances: WorkbenchUtterance[];
+    /** Only the Players who speak or guess in this Round. */
     players: Record<string, WorkbenchPlayer>;
-    utterancesById: Record<string, WorkbenchUtterance>;
     recallHidden?: boolean;
     highlighted?: boolean;
     onSelectUtterance?: (utteranceId: string) => void;
@@ -12,8 +14,8 @@
 
   let {
     round,
+    utterances,
     players,
-    utterancesById,
     recallHidden = false,
     highlighted = false,
     onSelectUtterance,
@@ -37,22 +39,19 @@
   );
 
   const utteranceMarkers = $derived(
-    round.utteranceIds
-      .map((id) => utterancesById[id])
-      .filter((u): u is WorkbenchUtterance => Boolean(u))
-      .map((u) => {
-        const pct = Math.max(
-          0,
-          Math.min(100, ((Date.parse(u.startedAt) - Date.parse(round.startTime)) / totalMs) * 100),
-        );
-        const speaker = players[u.playerId];
-        return {
-          id: u.id,
-          pct,
-          color: speaker?.avatarColor ?? "#2563eb",
-          tooltip: recallHidden ? "Utterance" : `${speaker?.displayName ?? "Player"}: ${u.text}`,
-        };
-      }),
+    utterances.map((u) => {
+      const pct = Math.max(
+        0,
+        Math.min(100, ((Date.parse(u.startedAt) - Date.parse(round.startTime)) / totalMs) * 100),
+      );
+      const speaker = players[u.playerId];
+      return {
+        id: u.id,
+        pct,
+        color: speaker?.avatarColor ?? "#2563eb",
+        tooltip: recallHidden ? "Utterance" : `${speaker?.displayName ?? "Player"}: ${u.text}`,
+      };
+    }),
   );
 </script>
 

@@ -15,6 +15,12 @@ A GeoGuessr player on the other team in a Game. Opponents never use geo-coach.
 One GeoGuessr ranked team duel played by the Duo, made up of Rounds.
 _Avoid_: match, duel
 
+**Map**
+The GeoGuessr map a Game is played on, such as "A Pro World". The geographic view on the statistics page is the "map view", never a Map.
+
+**Mode**
+The movement rules a Game is played with: Moving, NoMove (NM), or NMPZ (no move, pan or zoom).
+
 **Round**
 One location within a Game, which the Duo guesses on.
 

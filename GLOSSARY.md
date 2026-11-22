@@ -24,6 +24,10 @@ The movement rules a Game is played with: Moving, NoMove (NM), or NMPZ (no move,
 **Round**
 One location within a Game, which the Duo guesses on.
 
+**Region**
+A first-level subdivision of a country as geo-coach groups it: a US state, a Brazilian state, a French region, a UK nation. Both a Round's location and each guess have one.
+_Avoid_: subdivision, province, state (for the general idea)
+
 **Learning**
 A piece of reusable knowledge from a Session, such as a clue, a way to tell two countries apart, a mistake, a tactic, or something the Duo wants to study ("Bulgaria has yellow-top bollards"). Most come from what the Duo said aloud; some are Tips. The main thing geo-coach exists to keep.
 _Avoid_: note, tip (for Learnings the Duo said)

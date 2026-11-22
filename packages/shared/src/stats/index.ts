@@ -11,3 +11,5 @@ export * from "./overview.js";
 export * from "./ranking-method.js";
 export * from "./confusion.js";
 export * from "./rankings.js";
+export * from "./players.js";
+export * from "./best-guesses.js";

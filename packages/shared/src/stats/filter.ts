@@ -8,9 +8,9 @@ import type { StatsGame, StatsPayload, StatsRound } from "./payload.js";
  * filter: panels show the Duo and each Player side by side.
  */
 export interface StatsFilter {
-  /** First UTC day included, as YYYY-MM-DD. */
+  /** First local day included, as YYYY-MM-DD. */
   from: string | null;
-  /** Last UTC day included, as YYYY-MM-DD. */
+  /** Last local day included, as YYYY-MM-DD. */
   to: string | null;
   sessionIds: string[];
   mapNames: string[];
@@ -99,11 +99,15 @@ export interface FilteredStats {
   rounds: StatsRound[];
 }
 
-const DAY_MS = 86_400_000;
+/** Local midnight starting `day` (YYYY-MM-DD), plus `offsetDays`; DST-safe. */
+function localMidnightMs(day: string, offsetDays = 0): number {
+  const [y, m, d] = day.split("-").map(Number) as [number, number, number];
+  return new Date(y, m - 1, d + offsetDays).getTime();
+}
 
 function gamePasses(game: StatsGame, filter: StatsFilter): boolean {
-  if (filter.from && game.startedAtMs < Date.parse(`${filter.from}T00:00:00Z`)) return false;
-  if (filter.to && game.startedAtMs >= Date.parse(`${filter.to}T00:00:00Z`) + DAY_MS) return false;
+  if (filter.from && game.startedAtMs < localMidnightMs(filter.from)) return false;
+  if (filter.to && game.startedAtMs >= localMidnightMs(filter.to, 1)) return false;
   if (filter.sessionIds.length > 0 && !filter.sessionIds.includes(game.sessionId ?? "")) {
     return false;
   }

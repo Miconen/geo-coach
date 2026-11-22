@@ -8,6 +8,10 @@ import {
   type StatsRound,
 } from "../index.js";
 
+// Days in the filter are the viewer's local days; pin a zone east of UTC so the
+// late Game (23:30 UTC) falls on the next local day.
+process.env.TZ = "Europe/Helsinki";
+
 const day = (iso: string) => Date.parse(iso);
 
 function game(id: string, overrides: Partial<StatsGame>): StatsGame {
@@ -77,8 +81,9 @@ describe("applyFilter", () => {
     expect(result.rounds).toEqual(payload.rounds);
   });
 
-  it("keeps Games whose UTC start day is within the time range, inclusive", () => {
-    expect(run({ from: "2026-11-20" })).toEqual({ games: ["g_late"], rounds: ["r_late_br"] });
+  it("keeps Games whose local start day is within the time range, inclusive", () => {
+    expect(run({ from: "2026-11-21" })).toEqual({ games: ["g_late"], rounds: ["r_late_br"] });
+    expect(run({ to: "2026-11-20" }).games).not.toContain("g_late");
     expect(run({ to: "2026-11-01" }).games).toEqual([
       "g_base",
       "g_nmpz",

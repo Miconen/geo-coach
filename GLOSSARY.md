@@ -16,7 +16,7 @@ One GeoGuessr ranked team duel played by the Duo, made up of Rounds.
 _Avoid_: match, duel
 
 **Map**
-The GeoGuessr map a Game is played on, such as "A Pro World". The geographic view on the statistics page is the "map view", never a Map.
+The GeoGuessr map a Game is played on, such as "A Pro World". The Duo doesn't choose it: ranked Maps rotate every few weeks, so a Map mostly stands for a stretch of time. The geographic view on the statistics page is the "map view", never a Map.
 
 **Mode**
 The movement rules a Game is played with: Moving, NoMove (NM), or NMPZ (no move, pan or zoom).
@@ -27,6 +27,14 @@ One location within a Game, which the Duo guesses on.
 **Region**
 A first-level subdivision of a country as geo-coach groups it: a US state, a Brazilian state, a French region, a UK nation. Both a Round's location and each guess have one.
 _Avoid_: subdivision, province, state (for the general idea)
+
+**Damage**
+What the team with the lower best score takes in a Round: the score gap times the Round's multiplier, counted in full even when it exceeds the HP that team had left.
+_Avoid_: HP lost (for the uncapped amount)
+
+**Split**
+A Round where the Duo's guesses land in different countries, usually to cover two options. Only the best guess scores, so the other guess is the cost of the hedge, not a mistake.
+_Avoid_: hedge (for the Round itself)
 
 **Learning**
 A piece of reusable knowledge from a Session, such as a clue, a way to tell two countries apart, a mistake, a tactic, or something the Duo wants to study ("Bulgaria has yellow-top bollards"). Most come from what the Duo said aloud; some are Tips. The main thing geo-coach exists to keep.

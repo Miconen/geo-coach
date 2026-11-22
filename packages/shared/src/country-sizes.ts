@@ -275,3 +275,9 @@ export function countrySizeKm(code: string | null | undefined): number | null {
   if (!code) return null;
   return COUNTRY_SIZE_KM[code] ?? OVERSEAS_REGION_SIZE_KM[code] ?? null;
 }
+
+/** `countrySizeKm` in metres, shaped as a `CountrySizeLookup` for `roundHedge`. */
+export function countrySizeMeters(code: string): number | null {
+  const km = countrySizeKm(code);
+  return km === null ? null : km * 1000;
+}

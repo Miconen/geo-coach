@@ -3,19 +3,26 @@
   import { replaceState } from "$app/navigation";
   import {
     EMPTY_STATS_FILTER,
+    DEFAULT_SMOOTHING,
     GAME_MODES,
+    SMOOTHING_LEVELS,
+    SMOOTHING_PARAM,
     STATS_FILTER_PARAMS,
     applyFilter,
     getCountryName,
+    parseSmoothing,
     parseStatsFilter,
     serializeStatsFilter,
     type GameMode,
+    type SmoothingLevel,
     type StatsFilter,
   } from "@geo-coach/shared";
   import ThemeSwitcher from "$lib/components/ThemeSwitcher.svelte";
   import OverviewSection from "$lib/stats/OverviewSection.svelte";
   import RankingsSection from "$lib/stats/RankingsSection.svelte";
   import PlayersSection from "$lib/stats/PlayersSection.svelte";
+  import SpeedSection from "$lib/stats/SpeedSection.svelte";
+  import VersusSection from "$lib/stats/VersusSection.svelte";
   import MapViewSection from "$lib/stats/map/MapViewSection.svelte";
 
   let { data } = $props();
@@ -27,6 +34,25 @@
   let filter = $state<StatsFilter>(parseStatsFilter(page.url.searchParams));
 
   const filtered = $derived(applyFilter(data.stats, filter));
+
+  // How much the time-series charts are smoothed. Not part of the filter (it never
+  // narrows the Rounds), but kept in the URL next to it so a view can be bookmarked.
+  let smoothing = $state<SmoothingLevel>(parseSmoothing(page.url.searchParams));
+
+  const SMOOTHING_LABELS: Record<SmoothingLevel, string> = {
+    off: "Off",
+    light: "Light",
+    medium: "Medium",
+    heavy: "Heavy",
+  };
+
+  function setSmoothing(next: SmoothingLevel) {
+    smoothing = next;
+    const params = new URLSearchParams(page.url.searchParams);
+    if (next === DEFAULT_SMOOTHING) params.delete(SMOOTHING_PARAM);
+    else params.set(SMOOTHING_PARAM, next);
+    replaceState(`?${params}`, {});
+  }
 
   const MODE_LABELS: Record<GameMode, string> = { moving: "Moving", nm: "NM", nmpz: "NMPZ" };
 
@@ -78,6 +104,8 @@
   const SECTIONS = [
     { id: "overview", title: "Overview & rating" },
     { id: "rankings", title: "Rankings" },
+    { id: "versus", title: "Versus Opponents" },
+    { id: "speed", title: "Speed" },
     { id: "map-view", title: "Map view" },
     { id: "players", title: "Players" },
   ];
@@ -220,6 +248,19 @@
       </select>
     </label>
 
+    <label class="flex flex-col gap-1" title="Rolling window for the charts over time: Games for the rating line, Rounds for the trends">
+      <span class={labelClass}>Smoothing</span>
+      <select
+        class={inputClass}
+        value={smoothing}
+        onchange={(e) => setSmoothing(e.currentTarget.value as SmoothingLevel)}
+      >
+        {#each SMOOTHING_LEVELS as level (level)}
+          <option value={level}>{SMOOTHING_LABELS[level]}</option>
+        {/each}
+      </select>
+    </label>
+
     {#if isFiltered}
       <button
         type="button"
@@ -244,15 +285,23 @@
       </div>
       {#if section.id === "overview"}
         <div class="mt-3">
-          <OverviewSection payload={data.stats} {filter} />
+          <OverviewSection payload={data.stats} {filter} {smoothing} />
         </div>
       {:else if section.id === "rankings"}
         <div class="mt-3">
           <RankingsSection payload={data.stats} {filter} />
         </div>
+      {:else if section.id === "versus"}
+        <div class="mt-3">
+          <VersusSection payload={data.stats} {filter} {smoothing} />
+        </div>
+      {:else if section.id === "speed"}
+        <div class="mt-3">
+          <SpeedSection payload={data.stats} {filter} {smoothing} />
+        </div>
       {:else if section.id === "players"}
         <div class="mt-3">
-          <PlayersSection payload={data.stats} {filter} onOpenRound={(id) => mapView?.showRound(id)} />
+          <PlayersSection payload={data.stats} {filter} {smoothing} onOpenRound={(id) => mapView?.showRound(id)} />
         </div>
       {:else if section.id === "map-view"}
         <div class="mt-3"><MapViewSection bind:this={mapView} payload={data.stats} rounds={filtered.rounds} /></div>

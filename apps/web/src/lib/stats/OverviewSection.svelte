@@ -2,13 +2,17 @@
   import * as Plot from "@observablehq/plot";
   import {
     CLOSE_SHARE_OF_COUNTRY_SIZE,
+    DEFAULT_SMOOTHING,
     getCountryName,
     overview,
     regionName,
+    rollingMean,
+    smoothingWindow,
     type LostRoundPoint,
     type RatingGapBand,
     type RatingGapPoint,
     type RatingPoint,
+    type SmoothingLevel,
     type StatsFilter,
     type StatsPayload,
     type StreakRun,
@@ -28,9 +32,19 @@
     unitLabel,
   } from "./overview-text.js";
 
-  let { payload, filter }: { payload: StatsPayload; filter: StatsFilter } = $props();
+  let {
+    payload,
+    filter,
+    smoothing = DEFAULT_SMOOTHING,
+  }: {
+    payload: StatsPayload;
+    filter: StatsFilter;
+    /** The page's Smoothing control: adds a rolling-mean rating line over Games. */
+    smoothing?: SmoothingLevel;
+  } = $props();
 
   const o = $derived(overview(payload, filter));
+  const ratingWindow = $derived(smoothingWindow(smoothing, "games"));
 
   let xAxis = $state<"game" | "date">("game");
 
@@ -66,6 +80,12 @@
         : [{ x1: new Date(s.startedAtMs), x2: new Date(s.endedAtMs) }];
     });
     const rated = series.filter((p) => p.rating !== null);
+    const smoothed =
+      ratingWindow > 1
+        ? rollingMean(rated.map((p) => p.rating), ratingWindow).flatMap((rating, i) =>
+            rating === null ? [] : [{ x: xOf(rated[i]!), rating }],
+          )
+        : [];
     return Plot.plot({
       width,
       height: 300,
@@ -76,7 +96,14 @@
         Plot.rect(sessionBands, { x1: "x1", x2: "x2", fill: "var(--info)", fillOpacity: 0.1 }),
         Plot.rect(o.streaks.winRuns.flatMap(runBand), { x1: "x1", x2: "x2", fill: "var(--ok)", fillOpacity: 0.12 }),
         Plot.rect(o.streaks.lossRuns.flatMap(runBand), { x1: "x1", x2: "x2", fill: "var(--danger)", fillOpacity: 0.12 }),
-        Plot.lineY(rated, { x: xOf, y: "rating", stroke: "var(--accent)", strokeWidth: 2 }),
+        Plot.lineY(rated, {
+          x: xOf,
+          y: "rating",
+          stroke: "var(--accent)",
+          strokeWidth: smoothed.length ? 1 : 2,
+          strokeOpacity: smoothed.length ? 0.45 : 1,
+        }),
+        Plot.lineY(smoothed, { x: "x", y: "rating", stroke: "var(--accent)", strokeWidth: 2.5 }),
         Plot.dot(rated, {
           x: xOf,
           y: "rating",
@@ -318,6 +345,11 @@
       </div>
     </div>
     <PlotChart height={300} label="Rating over Games" render={ratingChart} />
+    {#if ratingWindow > 1}
+      <p class="text-[11px] text-[var(--muted)]">
+        Thick line: rolling mean over {unitLabel("games", ratingWindow)} (set by Smoothing in the filter bar).
+      </p>
+    {/if}
   </div>
 
   <div class="grid gap-6 lg:grid-cols-2">

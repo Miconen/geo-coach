@@ -5,7 +5,7 @@
   import * as Plot from "@observablehq/plot";
   import {
     DEFAULT_GREY_OUT_ROUNDS,
-    ROLLING_WINDOW_ROUNDS,
+    DEFAULT_SMOOTHING,
     applyFilter,
     bestGuesses,
     carryChips,
@@ -15,9 +15,11 @@
     playerSummaries,
     regionName,
     rollingSeries,
+    smoothingWindow,
     type BestGuess,
     type CarryChip,
     type GuessGroup,
+    type SmoothingLevel,
     type StatsFilter,
     type StatsPayload,
   } from "@geo-coach/shared";
@@ -38,10 +40,13 @@
     payload,
     filter,
     greyOutRounds = DEFAULT_GREY_OUT_ROUNDS,
+    smoothing = DEFAULT_SMOOTHING,
     onOpenRound,
   }: {
     payload: StatsPayload;
     filter: StatsFilter;
+    /** Sets the trend window (the page's Smoothing control); medium is 50 Rounds. */
+    smoothing?: SmoothingLevel;
     /** Carry chips leave out countries with fewer Rounds than this (the Rankings threshold). */
     greyOutRounds?: number;
     /** Opens a Round's card; Best-guess rows are clickable only when it's given. */
@@ -49,6 +54,7 @@
   } = $props();
 
   const filtered = $derived(applyFilter(payload, filter));
+  const trendWindow = $derived(smoothingWindow(smoothing, "rounds"));
   const players = $derived(payload.players);
   const nameOf = (id: string) => players.find((p) => p.id === id)?.displayName ?? "?";
   const colorOf = (id: string) => playerColor(Math.max(0, players.findIndex((p) => p.id === id)));
@@ -59,9 +65,9 @@
   const rows = $derived(countryRows(filtered, { learnings: [], slowThresholdSeconds: null }));
   const chipsOf = (id: string): CarryChip[] => carryChips(rows, id, greyOutRounds);
   const trends = $derived(
-    players.map((p) => ({ playerId: p.id, points: rollingSeries(filtered.rounds, p.id, ROLLING_WINDOW_ROUNDS) })),
+    players.map((p) => ({ playerId: p.id, points: rollingSeries(filtered.rounds, p.id, trendWindow) })),
   );
-  const hasTrend = $derived(filtered.rounds.length >= ROLLING_WINDOW_ROUNDS);
+  const hasTrend = $derived(filtered.rounds.length >= trendWindow);
   const shortlist = $derived(players.map((p) => ({ playerId: p.id, guesses: bestGuesses(filtered, p.id) })));
 
   const TIP = { lineWidth: 32 } as const;
@@ -188,7 +194,7 @@
         width,
         height: 220,
         marginLeft: 48,
-        x: { label: `Round (end of each ${ROLLING_WINDOW_ROUNDS}-Round window)` },
+        x: { label: `Round (end of each ${trendWindow}-Round window)` },
         y:
           metric === "bestShare"
             ? { label: "Best-guess share", grid: true, tickFormat: (d: number) => formatPercent(d) }
@@ -204,7 +210,7 @@
             tip: TIP,
             title: (r: TrendRow) =>
               [
-                `${nameOf(r.playerId)} · Rounds ${r.roundIndex - ROLLING_WINDOW_ROUNDS + 1}–${r.roundIndex}`,
+                `${nameOf(r.playerId)} · Rounds ${r.roundIndex - trendWindow + 1}–${r.roundIndex}`,
                 `Best guess in ${formatPercent(r.bestShare)}`,
                 `Median ${formatNumber(r.medianKm)} km off (not Splits)`,
               ].join("\n"),
@@ -371,7 +377,7 @@
   <div class="space-y-2">
     {@render takeaway(
       "Is each of us getting better?",
-      trendTakeaway(trends, filtered.rounds.length, ROLLING_WINDOW_ROUNDS, nameOf),
+      trendTakeaway(trends, filtered.rounds.length, trendWindow, nameOf),
     )}
     {#if hasTrend}
       <div class="grid gap-6 lg:grid-cols-2">

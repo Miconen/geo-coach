@@ -7,3 +7,4 @@ export * from "./games.js";
 export * from "./headline.js";
 export * from "./rating-gap.js";
 export * from "./overview.js";
+export * from "./ranking-method.js";

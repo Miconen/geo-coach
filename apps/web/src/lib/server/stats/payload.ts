@@ -86,6 +86,8 @@ export async function buildStatsPayload(db: AppDb, duoId: string): Promise<Stats
           score: g.score,
           guessedFirst: g.guessedFirst,
           isBestForTeam: g.isBestForTeam,
+          // Rows derived before `timedOut` existed lack it until `db:rebuild-derived`.
+          timedOut: g.timedOut ?? false,
           secondsToGuess:
             guessedAtMs !== null && !Number.isNaN(guessedAtMs)
               ? (guessedAtMs - roundStartMs) / 1000

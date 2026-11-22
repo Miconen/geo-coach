@@ -63,6 +63,8 @@ export interface StatsGuess {
   score: number;
   guessedFirst: boolean;
   isBestForTeam: boolean;
+  /** GLOSSARY: Timed-out guess. The timer submitted it; the Player never pressed guess. */
+  timedOut: boolean;
   /** Seconds from the Round's start to the guess. */
   secondsToGuess: number | null;
 }

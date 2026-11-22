@@ -36,6 +36,8 @@ export interface DerivedGuess {
   guessedAt: Date | null;
   guessedFirst: boolean;
   isBestForTeam: boolean;
+  /** GLOSSARY: Timed-out guess. Made more than TIMED_OUT_AFTER_ROUND_END_MS after the Round's end. */
+  timedOut: boolean;
 }
 
 export interface DerivedRound {
@@ -85,6 +87,13 @@ export interface DerivedGame {
 }
 
 export const FINAL_ROUND_RESULTS_TAIL_MS = 15_000;
+
+/**
+ * A guess stamped this long after the Round's end was submitted by the timer,
+ * not pressed (GLOSSARY: Timed-out guess). GeoGuessr stamps those about
+ * 1.1–1.6 s after the end; pressed guesses land before it.
+ */
+export const TIMED_OUT_AFTER_ROUND_END_MS = 1_000;
 
 interface RawGuess {
   roundNumber?: number;
@@ -288,6 +297,7 @@ export function deriveGameFromRawDuel(
           guessedAt: parseIsoOrNull(g.created),
           guessedFirst: false,
           isBestForTeam: false,
+          timedOut: false,
         });
         guessesByRound.set(g.roundNumber, list);
       }
@@ -320,6 +330,11 @@ export function deriveGameFromRawDuel(
     phases.push({ phase: "results", startedAt: endTime, endedAt: resultsEndTime });
 
     const guesses = guessesByRound.get(roundNumber) ?? [];
+    for (const g of guesses) {
+      g.timedOut =
+        g.guessedAt !== null &&
+        g.guessedAt.getTime() - endTime.getTime() > TIMED_OUT_AFTER_ROUND_END_MS;
+    }
     // Identify earliest guess across all players
     let earliestMs = Number.POSITIVE_INFINITY;
     for (const g of guesses) {

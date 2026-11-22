@@ -54,6 +54,7 @@ function guess(playerId: string | null): WorkbenchGuess {
     guessedAt: null,
     guessedFirst: false,
     isBestForTeam: false,
+    timedOut: false,
   };
 }
 

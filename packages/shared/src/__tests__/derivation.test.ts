@@ -323,6 +323,33 @@ describe("deriveGameFromRawDuel", () => {
     expect(derived.opponentRatingBefore).toBe(1455);
   });
 
+  it("marks a guess more than a second after the Round's end as timed out", () => {
+    // Round 1 ends at 19:00:40.
+    const withTimes = (created: [string, string]) => ({
+      ...sampleDuel,
+      teams: [
+        {
+          ...sampleDuel.teams[0]!,
+          players: sampleDuel.teams[0]!.players.map((p, i) => ({
+            ...p,
+            guesses: [{ ...p.guesses[0]!, created: created[i] }],
+          })),
+        },
+        sampleDuel.teams[1]!,
+      ],
+    });
+    const derived = deriveGameFromRawDuel(
+      withTimes(["2026-11-20T19:00:41.400Z", "2026-11-20T19:00:39.500Z"]),
+      "gg_team_duo",
+      { gg_p1: "player_miko", gg_p2: "player_sora" },
+      stubGeocoder,
+    );
+
+    const guesses = derived.rounds[0]!.guesses;
+    expect(guesses.find((g) => g.playerId === "player_miko")!.timedOut).toBe(true);
+    expect(guesses.find((g) => g.playerId === "player_sora")!.timedOut).toBe(false);
+  });
+
   it("tells Moving, NoMove and NMPZ apart, and leaves unknowns null", () => {
     const modeOf = (movementOptions: unknown) =>
       deriveGameFromRawDuel(

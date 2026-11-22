@@ -151,9 +151,42 @@ describe("buildStatsPayload", () => {
     const [round] = payload.rounds;
     expect(round).toMatchObject({ countryCode: "BG", duoBestScore: 4950, opponentBestScore: 3500 });
     const duoGuess = round!.guesses.find((g) => g.isDuo)!;
-    expect(duoGuess).toMatchObject({ playerId: mikoId, secondsToGuess: 12.5, guessedFirst: true });
+    expect(duoGuess).toMatchObject({
+      playerId: mikoId,
+      secondsToGuess: 12.5,
+      guessedFirst: true,
+      timedOut: false,
+    });
     const opponentGuess = round!.guesses.find((g) => !g.isDuo)!;
     expect(opponentGuess).toMatchObject({ playerId: null, score: 3500, secondsToGuess: 20 });
+  });
+
+  it("marks guesses the timer submitted as timed out", async () => {
+    // The Round ends at 19:05:27.500; the timer submits a placed pin ~1.4 s later.
+    const [duoTeam, oppTeam] = rawDuel.teams;
+    const [miko] = duoTeam!.players;
+    const timedOutDuel = {
+      ...rawDuel,
+      teams: [
+        {
+          ...duoTeam!,
+          players: [
+            { ...miko!, guesses: [{ ...miko!.guesses[0]!, created: "2026-11-20T19:05:28.900Z" }] },
+          ],
+        },
+        oppTeam!,
+      ],
+    };
+    await upsertRawGame(handle.db, {
+      duoId,
+      geoguessrGameId: "gg_duel_stats",
+      fetchedAt: "2026-11-20T19:10:00.000Z",
+      rawDuel: timedOutDuel,
+    });
+
+    const [round] = (await buildStatsPayload(handle.db, duoId)).rounds;
+    expect(round!.guesses.find((g) => g.isDuo)).toMatchObject({ timedOut: true });
+    expect(round!.guesses.find((g) => !g.isDuo)).toMatchObject({ timedOut: false });
   });
 
   it("carries no Opponent nickname, GeoGuessr ID or team name", async () => {

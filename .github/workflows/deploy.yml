@@ -148,6 +148,8 @@ jobs:
           DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
           CF_ORIGIN_CERT: ${{ secrets.CF_ORIGIN_CERT }}
           CF_ORIGIN_KEY: ${{ secrets.CF_ORIGIN_KEY }}
+          PUBLIC_MAPBOX_TOKEN: ${{ secrets.PUBLIC_MAPBOX_TOKEN }}
+          PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.PUBLIC_GOOGLE_MAPS_API_KEY }}
         run: |
           ssh deploy@${{ secrets.VPS_HOST }} bash -s <<EOF
           set -euo pipefail
@@ -160,6 +162,8 @@ jobs:
           POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
           DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
           DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET}
+          PUBLIC_MAPBOX_TOKEN=${PUBLIC_MAPBOX_TOKEN}
+          PUBLIC_GOOGLE_MAPS_API_KEY=${PUBLIC_GOOGLE_MAPS_API_KEY}
           ENVEOF
           chmod 600 .env
 

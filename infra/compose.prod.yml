@@ -40,6 +40,8 @@ services:
       DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET}
       DISCORD_REDIRECT_URI: https://${DOMAIN}/auth/discord/callback
       LATEST_COMPANION_VERSION: ${LATEST_COMPANION_VERSION:-0.1.0}
+      PUBLIC_MAPBOX_TOKEN: ${PUBLIC_MAPBOX_TOKEN:-}
+      PUBLIC_GOOGLE_MAPS_API_KEY: ${PUBLIC_GOOGLE_MAPS_API_KEY:-}
     depends_on:
       migrate:
         condition: service_completed_successfully

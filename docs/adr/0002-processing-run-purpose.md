@@ -10,3 +10,4 @@ ADR 0001 has a later finished run replace every Learning whose source span its r
 ## Consequences
 
 - "Current", "unprocessed" and "stale" queries all gain a purpose filter, and a range can be up to date for `extract` but unprocessed for `tips`.
+- A third purpose, `calls` (#41), labels each Split or Spread Round as a Call or not, with the Utterances it rests on. Its output is per-Round labels, not Learnings, but replacement and staleness follow the same per-purpose rule, so Calls can be relabelled or backfilled without redoing extraction.

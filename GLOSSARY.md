@@ -36,6 +36,20 @@ _Avoid_: HP lost (for the uncapped amount)
 A Round where the Duo's guesses land in different countries, usually to cover two options. Only the best guess scores, so the other guess is the cost of the hedge, not a mistake.
 _Avoid_: hedge (for the Round itself)
 
+**Committed**
+A Round where both of the Duo's guesses land in the same Region: the Duo bet on one answer instead of covering several.
+
+**Spread**
+A Round where the Duo's guesses land in one country but in different Regions, covering more of the country at the cost of the best possible score. Committed, Spread and Split are the three ways the Duo can place its two guesses.
+_Avoid_: hedge (for the Round itself)
+
+**Call**
+A Split or Spread the Duo agreed on aloud while guessing ("you go Spain, I'll go Portugal"), as opposed to one where the two Players simply disagreed. Calls are read from the Transcript.
+_Avoid_: intent
+
+**Timed-out guess**
+A guess the Player never pressed guess on: the pin they had placed was submitted when the Round's timer ran out. The first to guess within the Duo is whoever pressed guess earlier; when both guesses timed out, neither was first.
+
 **Learning**
 A piece of reusable knowledge from a Session, such as a clue, a way to tell two countries apart, a mistake, a tactic, or something the Duo wants to study ("Bulgaria has yellow-top bollards"). Most come from what the Duo said aloud; some are Tips. The main thing geo-coach exists to keep.
 _Avoid_: note, tip (for Learnings the Duo said)
@@ -63,7 +77,7 @@ _Avoid_: track, take
 The text version of one Recording, made of Utterances. A player's speech in a Session is the union of their Transcripts. A Transcript can be redone; each redo is a new version, and the parts it changes need processing again.
 
 **Processing run**
-One manual pass of an AI agent over part of a Session that produces Learnings. Each run has a purpose: extracting what the Duo said, or adding Tips. Any part can be processed again, possibly by a different agent; the new run replaces that part's earlier Learnings of the same purpose only.
+One manual pass of an AI agent over part of a Session. Each run has a purpose: extracting what the Duo said or adding Tips (both produce Learnings), or labelling Calls. Any part can be processed again, possibly by a different agent; the new run replaces only what earlier runs of the same purpose produced for that part.
 
 **Companion**
 The program each player runs on their own PC. It keeps that player's audio and turns it into their Transcript.

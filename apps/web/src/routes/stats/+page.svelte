@@ -15,6 +15,7 @@
   import ThemeSwitcher from "$lib/components/ThemeSwitcher.svelte";
   import OverviewSection from "$lib/stats/OverviewSection.svelte";
   import RankingsSection from "$lib/stats/RankingsSection.svelte";
+  import PlayersSection from "$lib/stats/PlayersSection.svelte";
 
   let { data } = $props();
 
@@ -245,6 +246,10 @@
       {:else if section.id === "rankings"}
         <div class="mt-3">
           <RankingsSection payload={data.stats} {filter} />
+        </div>
+      {:else if section.id === "players"}
+        <div class="mt-3">
+          <PlayersSection payload={data.stats} {filter} />
         </div>
       {/if}
     </section>

@@ -40,7 +40,14 @@ const rawDuel = {
               created: "2026-11-20T19:05:12.500Z",
             },
           ],
-          progressChange: { rankedTeamDuelsProgress: { ratingBefore: 1170, ratingAfter: 1185 } },
+          progressChange: {
+            rankedTeamDuelsProgress: {
+              ratingBefore: 1170,
+              ratingAfter: 1185,
+              positionBefore: 412,
+              positionAfter: 398,
+            },
+          },
         },
       ],
     },
@@ -145,20 +152,35 @@ describe("buildStatsPayload", () => {
       mapName: "A Pro World",
       mode: "nmpz",
       opponentRatingBefore: 1240,
+      positionBefore: 412,
+      positionAfter: 398,
       sessionId,
     });
 
     const [round] = payload.rounds;
-    expect(round).toMatchObject({ countryCode: "BG", duoBestScore: 4950, opponentBestScore: 3500 });
+    expect(round).toMatchObject({
+      countryCode: "BG",
+      regionCode: "BG-24",
+      duoBestScore: 4950,
+      opponentBestScore: 3500,
+    });
     const duoGuess = round!.guesses.find((g) => g.isDuo)!;
     expect(duoGuess).toMatchObject({
       playerId: mikoId,
+      countryCode: "BG",
+      regionCode: "BG-24",
       secondsToGuess: 12.5,
       guessedFirst: true,
       timedOut: false,
     });
     const opponentGuess = round!.guesses.find((g) => !g.isDuo)!;
-    expect(opponentGuess).toMatchObject({ playerId: null, score: 3500, secondsToGuess: 20 });
+    expect(opponentGuess).toMatchObject({
+      playerId: null,
+      countryCode: "RO",
+      regionCode: "RO-B",
+      score: 3500,
+      secondsToGuess: 20,
+    });
   });
 
   it("marks guesses the timer submitted as timed out", async () => {

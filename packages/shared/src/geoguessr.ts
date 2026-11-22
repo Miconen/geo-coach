@@ -1,3 +1,5 @@
+import { isPartOfCountry } from "./overseas-regions.js";
+
 export type RoundPhase = "play" | "countdown" | "results";
 
 export interface RoundPhaseInterval {
@@ -379,9 +381,12 @@ export function deriveGameFromRawDuel(
     const lng = typeof r.panorama?.lng === "number" ? r.panorama.lng : null;
     const place = lat !== null && lng !== null ? geocoder(lat, lng) : null;
     // The country is GeoGuessr's; a Region from a geocoder that disagrees on
-    // the country would belong to another country.
+    // the country would belong to another country. An overseas Region the
+    // geocoder keeps as its own unit (GeoGuessr's FR is its GF) still counts.
     const regionCode =
-      place && (countryCode === null || place.countryCode === countryCode) ? place.regionCode : null;
+      place && (countryCode === null || isPartOfCountry(place.countryCode, countryCode))
+        ? place.regionCode
+        : null;
 
     return {
       roundNumber,

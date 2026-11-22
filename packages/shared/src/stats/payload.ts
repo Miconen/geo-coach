@@ -33,6 +33,9 @@ export interface StatsGame {
   mapName: string | null;
   mode: GameMode | null;
   opponentRatingBefore: number | null;
+  /** The Duo's place within its GeoGuessr bucket before and after the Game. */
+  positionBefore: number | null;
+  positionAfter: number | null;
   /** The Session the Game was played in, if any Recording covered it. */
   sessionId: string | null;
 }
@@ -42,10 +45,14 @@ export interface StatsRound {
   gameId: string;
   roundNumber: number;
   startedAtMs: number;
+  /** GeoGuessr's own country for the location. */
   countryCode: string | null;
+  /** The location's Region (GLOSSARY), from the geocoder. */
+  regionCode: string | null;
   lat: number | null;
   lng: number | null;
   damageMultiplier: number;
+  /** The Round's Damage (GLOSSARY) from the Duo's side: positive when dealt, negative when taken. */
   hpDelta: number;
   duoBestScore: number;
   opponentBestScore: number;
@@ -67,6 +74,9 @@ export interface StatsGuess {
   isDuo: boolean;
   lat: number | null;
   lng: number | null;
+  /** Where the guess landed, from the geocoder; null for water or a missing pin. */
+  countryCode: string | null;
+  regionCode: string | null;
   distanceMeters: number | null;
   score: number;
   guessedFirst: boolean;

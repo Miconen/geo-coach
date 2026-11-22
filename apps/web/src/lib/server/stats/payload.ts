@@ -77,6 +77,8 @@ export async function buildStatsPayload(db: AppDb, duoId: string): Promise<Stats
       mapName: g.mapName,
       mode: g.mode,
       opponentRatingBefore: g.opponentRatingBefore,
+      positionBefore: g.duoPositionBefore,
+      positionAfter: g.duoPositionAfter,
       sessionId: session?.id ?? null,
     };
   });
@@ -89,6 +91,7 @@ export async function buildStatsPayload(db: AppDb, duoId: string): Promise<Stats
       roundNumber: r.roundNumber,
       startedAtMs: roundStartMs,
       countryCode: r.countryCode,
+      regionCode: r.regionCode,
       lat: r.lat,
       lng: r.lng,
       damageMultiplier: r.damageMultiplier,
@@ -103,6 +106,9 @@ export async function buildStatsPayload(db: AppDb, duoId: string): Promise<Stats
           isDuo: g.isDuo,
           lat: g.lat,
           lng: g.lng,
+          // Guesses derived before the geocoder existed lack these until a rebuild.
+          countryCode: g.countryCode ?? null,
+          regionCode: g.regionCode ?? null,
           distanceMeters: g.distanceMeters,
           score: g.score,
           guessedFirst: g.guessedFirst,

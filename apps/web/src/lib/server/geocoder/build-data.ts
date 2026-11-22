@@ -8,6 +8,8 @@
  *
  * Usage: pnpm --filter @geo-coach/web geocoder:build-data [--cache <dir>]
  *
+ * Then run `geocoder:build-sizes` to regenerate the country-size table from the new data.
+ *
  * The Natural Earth zips are downloaded into the cache dir (default: the OS temp
  * dir) on first run. See ADR 0004 and GLOSSARY "Region" for the grouping rules.
  */

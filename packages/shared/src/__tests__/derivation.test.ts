@@ -296,6 +296,24 @@ describe("deriveGameFromRawDuel", () => {
     expect(r1.regionCode).toBeNull();
   });
 
+  it("keeps the Region of an overseas Region the geocoder names as its own country", () => {
+    // GeoGuessr reports French Guiana as FR; the geocoder's map units call it GF.
+    const duel = {
+      ...sampleDuel,
+      rounds: sampleDuel.rounds.map((r) => ({
+        ...r,
+        panorama: { ...r.panorama, countryCode: "fr" },
+      })),
+    };
+    const geocoder: Geocoder = (lat, lng) =>
+      lat === 42.69 && lng === 25.32
+        ? { countryCode: "GF", regionCode: "FR-GUF" }
+        : stubGeocoder(lat, lng);
+    const r1 = deriveGameFromRawDuel(duel, "gg_team_duo", {}, geocoder).rounds[0]!;
+
+    expect(r1).toMatchObject({ countryCode: "FR", regionCode: "FR-GUF" });
+  });
+
   it("derives the Map, the Mode and the Opponents' rating before the Game", () => {
     const opponentProgress = {
       rankedTeamDuelsProgress: { ratingBefore: 1455, ratingAfter: 1462, winStreak: 4 },

@@ -24,6 +24,8 @@ function game(id: string, overrides: Partial<StatsGame>): StatsGame {
     mapName: "A Pro World",
     mode: "nm",
     opponentRatingBefore: 1200,
+    positionBefore: null,
+    positionAfter: null,
     sessionId: null,
     ...overrides,
   };
@@ -36,6 +38,7 @@ function round(id: string, gameId: string, countryCode: string | null): StatsRou
     roundNumber: 1,
     startedAtMs: day("2026-11-01T18:00:00Z"),
     countryCode,
+    regionCode: null,
     lat: 0,
     lng: 0,
     damageMultiplier: 1,

@@ -6,12 +6,29 @@ export interface RoundPhaseInterval {
   endedAt: Date;
 }
 
+/** Where a point is, as an offline geocoder sees it (ADR 0004). */
+export interface GeocodedPoint {
+  /** ISO 3166-1 alpha-2. */
+  countryCode: string;
+  /** ISO 3166-2 style Region code (GLOSSARY: Region), or null where the country has none. */
+  regionCode: string | null;
+}
+
+/**
+ * Reverse geocodes a point; null when it is in no country (open water). The
+ * shared package holds no boundary data: the web server supplies a Natural
+ * Earth geocoder, and tests a stub.
+ */
+export type Geocoder = (lat: number, lng: number) => GeocodedPoint | null;
+
 export interface DerivedGuess {
   geoguessrPlayerId: string;
   playerId: string | null;
   nick: string | null;
   isDuo: boolean;
+  /** Where the guess landed, from the geocoder; null for water or a missing pin. */
   countryCode: string | null;
+  regionCode: string | null;
   lat: number | null;
   lng: number | null;
   score: number;
@@ -23,8 +40,10 @@ export interface DerivedGuess {
 
 export interface DerivedRound {
   roundNumber: number;
+  /** GeoGuessr's own country for the location. */
   countryCode: string | null;
-  regionName: string | null;
+  /** The location's Region, from the geocoder; null when it disagrees on the country. */
+  regionCode: string | null;
   lat: number | null;
   lng: number | null;
   panoId: string | null;
@@ -73,7 +92,6 @@ interface RawGuess {
   lng?: number;
   distance?: number;
   score?: number;
-  countryCode?: string;
   created?: string;
 }
 
@@ -106,8 +124,6 @@ interface RawRound {
     lat?: number;
     lng?: number;
     countryCode?: string;
-    subdivision?: string;
-    region?: string;
   };
   startTime?: string;
   timerStartTime?: string | null;
@@ -186,12 +202,14 @@ export function isRankedTeamDuel(raw: unknown): boolean {
 
 /**
  * Pure derivation of Game summary, Rounds, phases, HP deltas, and per-Player guesses
- * from a raw GeoGuessr team-duels JSON payload.
+ * from a raw GeoGuessr team-duels JSON payload. GeoGuessr gives guesses only as
+ * coordinates and no Regions at all, so `geocoder` places them.
  */
 export function deriveGameFromRawDuel(
   raw: unknown,
   duoTeamId: string,
-  playerByGeoguessrId: Readonly<Record<string, string>> = {},
+  playerByGeoguessrId: Readonly<Record<string, string>>,
+  geocoder: Geocoder,
 ): DerivedGame {
   const duel = (raw ?? {}) as RawDuelPayload;
   const teams = Array.isArray(duel.teams) ? duel.teams : [];
@@ -252,15 +270,19 @@ export function deriveGameFromRawDuel(
       const mappedPlayerId = isDuo ? (playerByGeoguessrId[ggPlayerId] ?? null) : null;
       for (const g of player.guesses ?? []) {
         if (typeof g.roundNumber !== "number") continue;
+        const lat = typeof g.lat === "number" ? g.lat : null;
+        const lng = typeof g.lng === "number" ? g.lng : null;
+        const place = lat !== null && lng !== null ? geocoder(lat, lng) : null;
         const list = guessesByRound.get(g.roundNumber) ?? [];
         list.push({
           geoguessrPlayerId: ggPlayerId,
           playerId: mappedPlayerId,
           nick: player.nick ?? null,
           isDuo,
-          countryCode: normalizeCountryCode(g.countryCode),
-          lat: typeof g.lat === "number" ? g.lat : null,
-          lng: typeof g.lng === "number" ? g.lng : null,
+          countryCode: place?.countryCode ?? null,
+          regionCode: place?.regionCode ?? null,
+          lat,
+          lng,
           score: typeof g.score === "number" ? g.score : 0,
           distanceMeters: typeof g.distance === "number" ? g.distance : null,
           guessedAt: parseIsoOrNull(g.created),
@@ -337,12 +359,21 @@ export function deriveGameFromRawDuel(
     const damageMultiplier = typeof r.damageMultiplier === "number" ? r.damageMultiplier : 1;
     const hpDelta = Math.round((duoBestScore - opponentBestScore) * damageMultiplier);
 
+    const countryCode = normalizeCountryCode(r.panorama?.countryCode);
+    const lat = typeof r.panorama?.lat === "number" ? r.panorama.lat : null;
+    const lng = typeof r.panorama?.lng === "number" ? r.panorama.lng : null;
+    const place = lat !== null && lng !== null ? geocoder(lat, lng) : null;
+    // The country is GeoGuessr's; a Region from a geocoder that disagrees on
+    // the country would belong to another country.
+    const regionCode =
+      place && (countryCode === null || place.countryCode === countryCode) ? place.regionCode : null;
+
     return {
       roundNumber,
-      countryCode: normalizeCountryCode(r.panorama?.countryCode),
-      regionName: r.panorama?.subdivision ?? r.panorama?.region ?? null,
-      lat: typeof r.panorama?.lat === "number" ? r.panorama.lat : null,
-      lng: typeof r.panorama?.lng === "number" ? r.panorama.lng : null,
+      countryCode,
+      regionCode,
+      lat,
+      lng,
       panoId: r.panorama?.panoId ?? null,
       damageMultiplier,
       startTime,

@@ -3,6 +3,7 @@ import {
   SESSION_GAP_MS,
   getCountryContinent,
   getCountryName,
+  regionName,
   intervalsOverlap,
   type Continent,
   type DerivedGuess,
@@ -58,12 +59,17 @@ export interface WorkbenchUtterance {
   };
 }
 
+export interface WorkbenchGuess extends DerivedGuess {
+  regionName: string | null;
+}
+
 export interface WorkbenchRound {
   id: string;
   gameId: string;
   roundNumber: number;
   countryCode: string | null;
   countryName: string | null;
+  regionCode: string | null;
   regionName: string | null;
   lat: number | null;
   lng: number | null;
@@ -77,7 +83,7 @@ export interface WorkbenchRound {
   duoBestScore: number;
   opponentBestScore: number;
   hpDelta: number;
-  guesses: DerivedGuess[];
+  guesses: WorkbenchGuess[];
   replayPlayerCount: number;
   utteranceIds: string[];
   learningIds: string[];
@@ -470,7 +476,8 @@ export async function buildWorkbenchData(
       roundNumber: r.roundNumber,
       countryCode: r.countryCode,
       countryName: r.countryCode ? getCountryName(r.countryCode) : null,
-      regionName: r.regionName,
+      regionCode: r.regionCode,
+      regionName: regionName(r.regionCode),
       lat: r.lat,
       lng: r.lng,
       panoId: r.panoId,
@@ -487,7 +494,7 @@ export async function buildWorkbenchData(
       duoBestScore: r.duoBestScore,
       opponentBestScore: r.opponentBestScore,
       hpDelta: r.hpDelta,
-      guesses: r.guesses,
+      guesses: r.guesses.map((g) => ({ ...g, regionName: regionName(g.regionCode) })),
       replayPlayerCount: replayPlayersByRoundKey.get(`${r.gameId}:${r.roundNumber}`) ?? 0,
       utteranceIds: matchingUIds,
       learningIds: [],

@@ -2,12 +2,14 @@ import { and, eq, inArray } from "drizzle-orm";
 import {
   deriveGameFromRawDuel,
   uuidv7,
+  type Geocoder,
   type GeoguessrMissingRequest,
   type UploadGameRequest,
   type UploadReplayRequest,
 } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
 import { duoMemberships, duos, games, players, replays, rounds } from "../db/schema.js";
+import { naturalEarthGeocoder } from "../geocoder/index.js";
 import { DomainError } from "./recordings.js";
 
 async function loadDuoPlayerMap(db: AppDb, duoId: string): Promise<{
@@ -39,9 +41,15 @@ async function loadDuoPlayerMap(db: AppDb, duoId: string): Promise<{
 export async function upsertRawGame(
   db: AppDb,
   input: UploadGameRequest,
+  geocoder?: Geocoder,
 ): Promise<{ gameId: string; created: boolean; roundCount: number }> {
   const { geoguessrTeamId, playerByGeoguessrId } = await loadDuoPlayerMap(db, input.duoId);
-  const derived = deriveGameFromRawDuel(input.rawDuel, geoguessrTeamId, playerByGeoguessrId);
+  const derived = deriveGameFromRawDuel(
+    input.rawDuel,
+    geoguessrTeamId,
+    playerByGeoguessrId,
+    geocoder ?? (await naturalEarthGeocoder()),
+  );
 
   const existing = await db.query.games.findFirst({
     where: and(
@@ -113,7 +121,7 @@ export async function upsertRawGame(
         .update(rounds)
         .set({
           countryCode: r.countryCode,
-          regionName: r.regionName,
+          regionCode: r.regionCode,
           lat: r.lat,
           lng: r.lng,
           panoId: r.panoId,
@@ -136,7 +144,7 @@ export async function upsertRawGame(
         duoId: input.duoId,
         roundNumber: r.roundNumber,
         countryCode: r.countryCode,
-        regionName: r.regionName,
+        regionCode: r.regionCode,
         lat: r.lat,
         lng: r.lng,
         panoId: r.panoId,

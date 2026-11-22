@@ -10,6 +10,8 @@ import {
   linkUtteranceToRounds,
   learningItemInputSchema,
   uuidv7,
+  type GeocodedPoint,
+  type Geocoder,
 } from "../index.js";
 
 describe("uuidv7", () => {
@@ -59,6 +61,20 @@ describe("clock offset and UTC derivation", () => {
 });
 
 describe("deriveGameFromRawDuel", () => {
+  // GeoGuessr guesses carry only coordinates, and panoramas no Region, so the
+  // Geocoder is the only source of either.
+  const places: Record<string, GeocodedPoint> = {
+    "42.7,25.4": { countryCode: "BG", regionCode: "BG-24" },
+    "44.4,26.1": { countryCode: "RO", regionCode: "RO-B" },
+    "42.1,24.7": { countryCode: "BG", regionCode: "BG-16" },
+    "42.6,23.3": { countryCode: "BG", regionCode: "BG-22" },
+    "44.5,26": { countryCode: "RO", regionCode: "RO-IF" },
+    "42.5,25": { countryCode: "BG", regionCode: "BG-24" },
+    "42.69,25.32": { countryCode: "BG", regionCode: "BG-24" },
+    "42.65,23.4": { countryCode: "BG", regionCode: "BG-22" },
+  };
+  const stubGeocoder: Geocoder = (lat, lng) => places[`${lat},${lng}`] ?? null;
+
   const sampleDuel = {
     gameId: "gg_duel_001",
     status: "Finished",
@@ -79,7 +95,6 @@ describe("deriveGameFromRawDuel", () => {
                 lng: 25.4,
                 distance: 18_500,
                 score: 4920,
-                countryCode: "bg",
                 created: "2026-11-20T19:00:25.000Z",
               },
               {
@@ -88,7 +103,6 @@ describe("deriveGameFromRawDuel", () => {
                 lng: 26.1,
                 distance: 310_000,
                 score: 3650,
-                countryCode: "ro",
                 created: "2026-11-20T19:01:40.000Z",
               },
             ],
@@ -112,7 +126,6 @@ describe("deriveGameFromRawDuel", () => {
                 lng: 24.7,
                 distance: 62_000,
                 score: 4710,
-                countryCode: "bg",
                 created: "2026-11-20T19:00:31.000Z",
               },
               {
@@ -121,7 +134,6 @@ describe("deriveGameFromRawDuel", () => {
                 lng: 23.3,
                 distance: 45_000,
                 score: 4820,
-                countryCode: "bg",
                 created: "2026-11-20T19:01:30.000Z",
               },
             ],
@@ -152,7 +164,6 @@ describe("deriveGameFromRawDuel", () => {
                 lng: 26.0,
                 distance: 280_000,
                 score: 3800,
-                countryCode: "ro",
                 created: "2026-11-20T19:00:35.000Z",
               },
               {
@@ -161,7 +172,6 @@ describe("deriveGameFromRawDuel", () => {
                 lng: 25.0,
                 distance: 90_000,
                 score: 4600,
-                countryCode: "bg",
                 created: "2026-11-20T19:01:35.000Z",
               },
             ],
@@ -177,7 +187,6 @@ describe("deriveGameFromRawDuel", () => {
           lat: 42.69,
           lng: 25.32,
           countryCode: "bg",
-          subdivision: "Stara Zagora",
         },
         startTime: "2026-11-20T19:00:00.000Z",
         timerStartTime: "2026-11-20T19:00:25.000Z",
@@ -191,7 +200,6 @@ describe("deriveGameFromRawDuel", () => {
           lat: 42.65,
           lng: 23.40,
           countryCode: "bg",
-          subdivision: "Sofia",
         },
         startTime: "2026-11-20T19:00:53.000Z",
         timerStartTime: null,
@@ -203,10 +211,12 @@ describe("deriveGameFromRawDuel", () => {
   };
 
   it("derives Game rating, win state, Rounds, phases, HP deltas, and per-Player guesses", () => {
-    const derived = deriveGameFromRawDuel(sampleDuel, "gg_team_duo", {
-      gg_p1: "player_miko",
-      gg_p2: "player_sora",
-    });
+    const derived = deriveGameFromRawDuel(
+      sampleDuel,
+      "gg_team_duo",
+      { gg_p1: "player_miko", gg_p2: "player_sora" },
+      stubGeocoder,
+    );
 
     expect(derived.geoguessrGameId).toBe("gg_duel_001");
     expect(derived.won).toBe(true);
@@ -250,6 +260,42 @@ describe("deriveGameFromRawDuel", () => {
     expect(r2.hpDelta).toBe(Math.round((4820 - 4600) * 1.5));
   });
 
+  it("places guesses and the Round's Region with the Geocoder", () => {
+    const derived = deriveGameFromRawDuel(
+      sampleDuel,
+      "gg_team_duo",
+      { gg_p1: "player_miko", gg_p2: "player_sora" },
+      stubGeocoder,
+    );
+
+    const [r1, r2] = derived.rounds;
+    expect(r1!.regionCode).toBe("BG-24");
+    expect(r2!.regionCode).toBe("BG-22");
+    expect(
+      r2!.guesses.map((g) => [g.nick, g.countryCode, g.regionCode]),
+    ).toEqual([
+      ["MikoGeo", "RO", "RO-B"],
+      ["SoraMaps", "BG", "BG-22"],
+      ["OppOne", "BG", "BG-24"],
+    ]);
+  });
+
+  it("leaves water guesses without a country, and drops a Region from another country", () => {
+    const geocoder: Geocoder = (lat, lng) => {
+      if (lat === 42.7 && lng === 25.4) return null; // in the sea
+      if (lat === 42.69 && lng === 25.32) return { countryCode: "TR", regionCode: "TR-22" };
+      return stubGeocoder(lat, lng);
+    };
+    const derived = deriveGameFromRawDuel(sampleDuel, "gg_team_duo", {}, geocoder);
+
+    const r1 = derived.rounds[0]!;
+    const water = r1.guesses.find((g) => g.nick === "MikoGeo")!;
+    expect(water).toMatchObject({ lat: 42.7, lng: 25.4, countryCode: null, regionCode: null });
+    // The Round's country stays GeoGuessr's; the geocoder's Turkish Region is not used.
+    expect(r1.countryCode).toBe("BG");
+    expect(r1.regionCode).toBeNull();
+  });
+
   it("derives the Map, the Mode and the Opponents' rating before the Game", () => {
     const opponentProgress = {
       rankedTeamDuelsProgress: { ratingBefore: 1455, ratingAfter: 1462, winStreak: 4 },
@@ -270,7 +316,7 @@ describe("deriveGameFromRawDuel", () => {
       ],
     };
 
-    const derived = deriveGameFromRawDuel(duel, "gg_team_duo", {});
+    const derived = deriveGameFromRawDuel(duel, "gg_team_duo", {}, stubGeocoder);
 
     expect(derived.mapName).toBe("A Pro World");
     expect(derived.mode).toBe("nm");
@@ -283,6 +329,7 @@ describe("deriveGameFromRawDuel", () => {
         { ...sampleDuel, options: { ...sampleDuel.options, movementOptions } },
         "gg_team_duo",
         {},
+        stubGeocoder,
       ).mode;
 
     expect(modeOf({ forbidMoving: false, forbidZooming: false, forbidRotating: false })).toBe(
@@ -291,16 +338,18 @@ describe("deriveGameFromRawDuel", () => {
     expect(modeOf({ forbidMoving: true, forbidZooming: true, forbidRotating: true })).toBe("nmpz");
     expect(modeOf(undefined)).toBeNull();
 
-    const bare = deriveGameFromRawDuel(sampleDuel, "gg_team_duo", {});
+    const bare = deriveGameFromRawDuel(sampleDuel, "gg_team_duo", {}, stubGeocoder);
     expect(bare.mapName).toBeNull();
     expect(bare.opponentRatingBefore).toBeNull();
   });
 
   it("multi-links boundary-straddling Utterances across adjacent phases and Rounds", () => {
-    const derived = deriveGameFromRawDuel(sampleDuel, "gg_team_duo", {
-      gg_p1: "player_miko",
-      gg_p2: "player_sora",
-    });
+    const derived = deriveGameFromRawDuel(
+      sampleDuel,
+      "gg_team_duo",
+      { gg_p1: "player_miko", gg_p2: "player_sora" },
+      stubGeocoder,
+    );
 
     // Utterance crosses round 1 countdown -> results (19:00:38 to 19:00:43)
     const links1 = linkUtteranceToRounds(

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { uuidv7 } from "@geo-coach/shared";
 import { createTestDb, type TestDbHandle } from "../../db/test-db.js";
-import { duos, duoMemberships, players } from "../../db/schema.js";
+import { duos, duoMemberships, players, rounds } from "../../db/schema.js";
 import {
   addClockOffsetMeasurement,
   completeTranscriptVersion,
@@ -12,6 +12,7 @@ import {
   finishProcessingRun,
   getCurrentTranscriptVersionId,
   insertRunLearnings,
+  rebuildDerivedGamesForDuo,
   setManualOffsetOverride,
   startProcessingRun,
   startRecording,
@@ -526,7 +527,6 @@ describe("Seam 2: Data model, Session grouping, derived staleness & supersession
                   lng: 25.4,
                   distance: 10_000,
                   score: 4950,
-                  countryCode: "bg",
                   created: "2026-11-20T19:05:20.000Z",
                 },
               ],
@@ -580,5 +580,16 @@ describe("Seam 2: Data model, Session grouping, derived staleness & supersession
     const replayRows = await handle.db.query.replays.findMany();
     expect(replayRows).toHaveLength(1);
     expect(replayRows[0]!.hasEvents).toBe(false);
+
+    // Rebuilding derived data backfills Regions and guessed countries on Rounds
+    // stored before the geocoder existed.
+    await handle.db.update(rounds).set({ regionCode: null, guesses: [] });
+    await rebuildDerivedGamesForDuo(handle.db, duoId);
+    const [round] = await handle.db.query.rounds.findMany();
+    expect(round!.countryCode).toBe("BG");
+    expect(round!.regionCode).toBe("BG-24");
+    expect(round!.guesses).toEqual([
+      expect.objectContaining({ countryCode: "BG", regionCode: "BG-24", lat: 42.7, lng: 25.4 }),
+    ]);
   });
 });

@@ -270,7 +270,7 @@ export const rounds = pgTable(
       .references(() => duos.id, { onDelete: "cascade" }),
     roundNumber: integer("round_number").notNull(),
     countryCode: text("country_code"),
-    regionName: text("region_name"),
+    regionCode: text("region_code"),
     lat: doublePrecision("lat"),
     lng: doublePrecision("lng"),
     panoId: text("pano_id"),

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { uuidv7 } from "@geo-coach/shared";
+import { guessedCountryLabel, isWrongCountry } from "$lib/round-countries.js";
 import { createTestDb, type TestDbHandle } from "../../db/test-db.js";
 import { duos, duoMemberships, players } from "../../db/schema.js";
 import {
@@ -136,7 +137,6 @@ describe("Seam 6: A3 Atlas + Command Deck coaching workbench view-model", () => 
                     lng: 26.1,
                     distance: 280_000,
                     score: 3700,
-                    countryCode: "ro",
                     created: "2026-11-20T19:00:20.000Z",
                   },
                   {
@@ -145,7 +145,6 @@ describe("Seam 6: A3 Atlas + Command Deck coaching workbench view-model", () => 
                     lng: 36.8,
                     distance: 30_000,
                     score: 4850,
-                    countryCode: "ke",
                     created: "2026-11-20T19:01:20.000Z",
                   },
                 ],
@@ -170,7 +169,6 @@ describe("Seam 6: A3 Atlas + Command Deck coaching workbench view-model", () => 
                     lng: 25.4,
                     distance: 20_000,
                     score: 4900,
-                    countryCode: "bg",
                     created: "2026-11-20T19:00:22.000Z",
                   },
                   {
@@ -179,7 +177,6 @@ describe("Seam 6: A3 Atlas + Command Deck coaching workbench view-model", () => 
                     lng: 37.0,
                     distance: 50_000,
                     score: 4700,
-                    countryCode: "ke",
                     created: "2026-11-20T19:01:25.000Z",
                   },
                 ],
@@ -298,6 +295,14 @@ describe("Seam 6: A3 Atlas + Command Deck coaching workbench view-model", () => 
     // Round 1 shows replay count > 0
     const r1Card = wb.roundsById[r1.id]!;
     expect(r1Card.replayPlayerCount).toBe(1);
+
+    // Guesses and the Round's Region come from the geocoder: R1 was guessed in Bucharest
+    expect(r1Card.regionCode).toBe("BG-24");
+    expect(r1Card.regionName).toBe("Stara Zagora");
+    const duoGuess = r1Card.guesses.find((g) => g.isDuo)!;
+    expect(duoGuess).toMatchObject({ countryCode: "RO", regionCode: "RO-B", regionName: "Bucharest" });
+    expect(isWrongCountry(r1Card.countryCode, duoGuess)).toBe(true);
+    expect(guessedCountryLabel(duoGuess)).toBe("RO");
 
     // Free-text search finds uncited raw speech ("snorkel") grouped under "Unprocessed range"
     const searchRes = searchWorkbench(wb, "snorkel");

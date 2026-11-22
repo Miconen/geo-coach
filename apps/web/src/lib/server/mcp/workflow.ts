@@ -2,6 +2,7 @@ import { and, asc, eq, gt, inArray, lt } from "drizzle-orm";
 import {
   intervalsOverlap,
   learningItemInputSchema,
+  regionName,
   type ProcessingRunPurpose,
 } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
@@ -361,10 +362,13 @@ export async function mcpReadRange(db: AppDb, playerId: string, runId: string) {
             : (gr.nick ?? "Duo");
           const km =
             gr.distanceMeters !== null ? `${Math.round(gr.distanceMeters / 1000)}km` : "?km";
-          return `${who}:${gr.countryCode ?? "?"}(${km},${gr.score}pt)`;
+          const where = gr.countryCode ?? (gr.lat !== null ? "water" : "?");
+          const guessRegion = regionName(gr.regionCode);
+          return `${who}:${where}${guessRegion ? ` ${guessRegion}` : ""}(${km},${gr.score}pt)`;
         })
         .join(", ");
-      const regionPart = r.regionName ? ` / ${r.regionName}` : "";
+      const region = regionName(r.regionCode);
+      const regionPart = region ? ` / ${region}` : "";
       timeline.push({
         ts: r.startTime.getTime(),
         order: 1,

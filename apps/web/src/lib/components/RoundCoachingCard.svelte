@@ -1,6 +1,7 @@
 <script lang="ts">
   import Inspect from "$lib/inspect/Inspect.svelte";
   import type { WorkbenchPlayer, WorkbenchRound, WorkbenchUtterance } from "$lib/server/workbench/view-model.js";
+  import { guessedCountryLabel, isWrongCountry } from "$lib/round-countries.js";
 
   interface Props {
     round: WorkbenchRound;
@@ -28,9 +29,7 @@
 
   const duoGuesses = $derived(round.guesses.filter((g) => g.isDuo));
   const bestDuoGuess = $derived(duoGuesses.find((g) => g.isBestForTeam) ?? duoGuesses[0] ?? null);
-  const wrongCountry = $derived(
-    Boolean(bestDuoGuess?.countryCode && round.countryCode && bestDuoGuess.countryCode !== round.countryCode),
-  );
+  const wrongCountry = $derived(isWrongCountry(round.countryCode, bestDuoGuess));
 
   const phaseFractions = $derived(
     round.phases.map((p) => ({
@@ -77,7 +76,7 @@
             : 'bg-[var(--ok-bg)] text-[var(--ok)]'}"
         >
           {#if wrongCountry}
-            {bestDuoGuess?.countryCode ?? "?"} → {round.countryCode ?? "?"}
+            {bestDuoGuess ? guessedCountryLabel(bestDuoGuess) : "?"} → {round.countryCode ?? "?"}
           {:else}
             {round.countryCode ?? "?"} {round.countryName ?? ""}
           {/if}
@@ -127,6 +126,7 @@
       {#each duoGuesses as g}
         {@const pl = g.playerId ? players[g.playerId] : null}
         <span
+          title={g.regionName ?? undefined}
           class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 bg-[var(--surface)] {g.isBestForTeam
             ? 'border-[var(--accent)] font-medium text-[var(--ink)]'
             : 'border-[var(--border)] text-[var(--muted)]'}"
@@ -135,7 +135,7 @@
             class="h-2 w-2 rounded-full"
             style="background: color-mix(in srgb, {pl?.avatarColor ?? '#2563eb'}, #ffffff var(--speaker-lighten))"
           ></span>
-          {pl?.displayName ?? g.nick ?? "Duo"}: {g.countryCode ?? "?"} · {g.score}pt
+          {pl?.displayName ?? g.nick ?? "Duo"}: {guessedCountryLabel(g)} · {g.score}pt
           {#if g.distanceMeters !== null}
             · {Math.round(g.distanceMeters / 1000)}km
           {/if}

@@ -117,7 +117,6 @@ describe("Seam 4: Remote MCP tools & Processing run workflow", () => {
                     lng: 25.4,
                     distance: 15_000,
                     score: 4930,
-                    countryCode: "bg",
                     created: "2026-11-20T19:03:20.000Z",
                   },
                 ],
@@ -139,7 +138,6 @@ describe("Seam 4: Remote MCP tools & Processing run workflow", () => {
                     lng: 26.1,
                     distance: 250_000,
                     score: 3930,
-                    countryCode: "ro",
                     created: "2026-11-20T19:03:25.000Z",
                   },
                 ],
@@ -155,7 +153,6 @@ describe("Seam 4: Remote MCP tools & Processing run workflow", () => {
               lat: 42.69,
               lng: 25.32,
               countryCode: "bg",
-              subdivision: "Stara Zagora",
             },
             startTime: "2026-11-20T19:03:00.000Z",
             timerStartTime: "2026-11-20T19:03:20.000Z",
@@ -221,7 +218,7 @@ describe("Seam 4: Remote MCP tools & Processing run workflow", () => {
     expect(rangeView.transcript).toMatch(/\[19:03:05\] u1 Miko: Yellow top bollards/);
     expect(rangeView.transcript).toContain("(?)");
     expect(rangeView.transcript).toContain("Round 1");
-    expect(rangeView.transcript).toContain("BG");
+    expect(rangeView.transcript).toContain("True: BG / Stara Zagora");
     expect(rangeView.transcript).toContain("Duo 6000 / Opp 5000");
 
     // add_learnings accepts valid items and reports per-item errors without losing valid ones (including invalid roundIds)

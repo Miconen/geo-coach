@@ -92,6 +92,8 @@ pnpm db:generate                # Generate a new Drizzle SQL migration
 pnpm db:migrate                 # Apply Drizzle migrations to DATABASE_URL
 pnpm db:seed                    # Seed Duos and Players (set SEED_CONFIG_PATH for custom JSON)
 pnpm --filter @geo-coach/web db:rebuild-derived  # Rebuild derived Games & Rounds from raw jsonb
+pnpm --filter @geo-coach/web db:check-geocoder   # Geocoder vs GeoGuessr country agreement on stored Rounds
+pnpm --filter @geo-coach/web geocoder:build-data # Regenerate the Natural Earth TopoJSON and Region table
 ```
 
 ## Production deployment

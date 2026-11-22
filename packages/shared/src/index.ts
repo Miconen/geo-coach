@@ -1,5 +1,6 @@
 export * from "./uuid.js";
 export * from "./countries.js";
+export * from "./regions.js";
 export * from "./clock.js";
 export * from "./geoguessr.js";
 export * from "./linking.js";

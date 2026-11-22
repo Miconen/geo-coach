@@ -15,6 +15,13 @@
       "when": 1795341758183,
       "tag": "0001_game_map_mode_opponent_rating",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795343668711,
+      "tag": "0002_round_region_code",
+      "breakpoints": true
     }
   ]
 }

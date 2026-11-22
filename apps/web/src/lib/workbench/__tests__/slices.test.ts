@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { DerivedGuess } from "@geo-coach/shared";
 import type {
   WorkbenchData,
   WorkbenchGame,
+  WorkbenchGuess,
   WorkbenchLearning,
   WorkbenchPlayer,
   WorkbenchRound,
@@ -38,13 +38,15 @@ function utterance(id: string, playerId: string): WorkbenchUtterance {
   };
 }
 
-function guess(playerId: string | null): DerivedGuess {
+function guess(playerId: string | null): WorkbenchGuess {
   return {
     geoguessrPlayerId: `gg-${playerId ?? "opp"}`,
     playerId,
     nick: null,
     isDuo: playerId !== null,
     countryCode: "FI",
+    regionCode: null,
+    regionName: null,
     lat: null,
     lng: null,
     score: 4000,
@@ -62,6 +64,7 @@ function round(id: string, overrides: Partial<WorkbenchRound> = {}): WorkbenchRo
     roundNumber: 1,
     countryCode: "FI",
     countryName: "Finland",
+    regionCode: null,
     regionName: null,
     lat: null,
     lng: null,

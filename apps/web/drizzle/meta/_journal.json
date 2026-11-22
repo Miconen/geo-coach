@@ -8,6 +8,13 @@
       "when": 1795284521031,
       "tag": "0000_oval_dark_phoenix",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795341758183,
+      "tag": "0001_game_map_mode_opponent_rating",
+      "breakpoints": true
     }
   ]
 }

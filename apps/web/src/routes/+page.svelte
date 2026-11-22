@@ -411,6 +411,12 @@
           + Manual Learning
         </button>
         <a
+          href="/stats?duo={wb.duo.id}"
+          class="rounded-lg border border-[var(--border-strong)] bg-[var(--surface-subtle)] px-2.5 py-1.5 font-medium text-[var(--ink)] hover:bg-[var(--surface-hover)]"
+        >
+          Stats
+        </a>
+        <a
           href="/settings"
           class="rounded-lg border border-[var(--border-strong)] bg-[var(--surface-subtle)] px-2.5 py-1.5 font-medium text-[var(--ink)] hover:bg-[var(--surface-hover)]"
         >

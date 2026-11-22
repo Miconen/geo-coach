@@ -40,8 +40,16 @@ export interface DerivedRound {
   guesses: DerivedGuess[];
 }
 
+/** The movement rules a Game is played with (GLOSSARY: Mode). */
+export type GameMode = "moving" | "nm" | "nmpz";
+
+export const GAME_MODES: readonly GameMode[] = ["moving", "nm", "nmpz"];
+
 export interface DerivedGame {
   geoguessrGameId: string;
+  mapName: string | null;
+  mode: GameMode | null;
+  opponentRatingBefore: number | null;
   startedAt: Date;
   endedAt: Date;
   won: boolean | null;
@@ -107,13 +115,22 @@ interface RawRound {
   damageMultiplier?: number;
 }
 
+interface RawMovementOptions {
+  forbidMoving?: boolean;
+  forbidZooming?: boolean;
+  forbidRotating?: boolean;
+}
+
 export interface RawDuelPayload {
   gameId?: string;
   status?: string;
   options?: {
     isTeamDuels?: boolean;
     isRated?: boolean;
+    map?: { name?: string };
+    movementOptions?: RawMovementOptions;
   };
+  movementOptions?: RawMovementOptions;
   teams?: RawTeam[];
   rounds?: RawRound[];
   result?: {
@@ -132,6 +149,12 @@ function normalizeCountryCode(value: string | null | undefined): string | null {
   if (!value || typeof value !== "string") return null;
   const trimmed = value.trim().toUpperCase();
   return trimmed.length === 2 ? trimmed : null;
+}
+
+function deriveMode(options: RawMovementOptions | undefined): GameMode | null {
+  if (!options || typeof options !== "object") return null;
+  if (!options.forbidMoving) return "moving";
+  return options.forbidZooming && options.forbidRotating ? "nmpz" : "nm";
 }
 
 /**
@@ -195,6 +218,15 @@ export function deriveGameFromRawDuel(
       duoPositionBefore = prog.positionBefore ?? duoPositionBefore;
       duoPositionAfter = prog.positionAfter ?? duoPositionAfter;
       winStreak = prog.winStreak ?? winStreak;
+      break;
+    }
+  }
+
+  let opponentRatingBefore: number | null = null;
+  for (const player of oppTeam?.players ?? []) {
+    const before = player.progressChange?.rankedTeamDuelsProgress?.ratingBefore;
+    if (typeof before === "number") {
+      opponentRatingBefore = before;
       break;
     }
   }
@@ -330,6 +362,9 @@ export function deriveGameFromRawDuel(
 
   return {
     geoguessrGameId: duel.gameId ?? "",
+    mapName: typeof duel.options?.map?.name === "string" ? duel.options.map.name : null,
+    mode: deriveMode(duel.options?.movementOptions ?? duel.movementOptions),
+    opponentRatingBefore,
     startedAt,
     endedAt,
     won,

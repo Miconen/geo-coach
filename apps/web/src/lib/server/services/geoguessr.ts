@@ -69,6 +69,9 @@ export async function upsertRawGame(
         duoFinalHealth: derived.duoFinalHealth,
         opponentFinalHealth: derived.opponentFinalHealth,
         opponentTeamName: derived.opponentTeamName,
+        opponentRatingBefore: derived.opponentRatingBefore,
+        mapName: derived.mapName,
+        mode: derived.mode,
         roundCount: derived.roundCount,
       })
       .where(eq(games.id, gameId));
@@ -90,6 +93,9 @@ export async function upsertRawGame(
       duoFinalHealth: derived.duoFinalHealth,
       opponentFinalHealth: derived.opponentFinalHealth,
       opponentTeamName: derived.opponentTeamName,
+      opponentRatingBefore: derived.opponentRatingBefore,
+      mapName: derived.mapName,
+      mode: derived.mode,
       roundCount: derived.roundCount,
     });
   }

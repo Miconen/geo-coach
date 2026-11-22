@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import type {
   DerivedGuess,
+  GameMode,
   LearningRegion,
   RoundPhaseInterval,
   WordTiming,
@@ -245,6 +246,9 @@ export const games = pgTable(
     duoFinalHealth: integer("duo_final_health"),
     opponentFinalHealth: integer("opponent_final_health"),
     opponentTeamName: text("opponent_team_name"),
+    opponentRatingBefore: integer("opponent_rating_before"),
+    mapName: text("map_name"),
+    mode: text("mode").$type<GameMode>(),
     roundCount: integer("round_count").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

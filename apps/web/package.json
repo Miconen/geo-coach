@@ -17,6 +17,7 @@
   "dependencies": {
     "@geo-coach/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.11.0",
+    "@observablehq/plot": "^0.6.19",
     "arctic": "^3.6.0",
     "drizzle-orm": "^0.41.0",
     "postgres": "^3.4.5",

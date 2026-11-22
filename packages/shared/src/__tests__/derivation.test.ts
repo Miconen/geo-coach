@@ -250,6 +250,52 @@ describe("deriveGameFromRawDuel", () => {
     expect(r2.hpDelta).toBe(Math.round((4820 - 4600) * 1.5));
   });
 
+  it("derives the Map, the Mode and the Opponents' rating before the Game", () => {
+    const opponentProgress = {
+      rankedTeamDuelsProgress: { ratingBefore: 1455, ratingAfter: 1462, winStreak: 4 },
+    };
+    const duel = {
+      ...sampleDuel,
+      options: {
+        ...sampleDuel.options,
+        map: { name: "A Pro World", slug: "pro-world" },
+        movementOptions: { forbidMoving: true, forbidZooming: false, forbidRotating: false },
+      },
+      teams: [
+        sampleDuel.teams[0]!,
+        {
+          ...sampleDuel.teams[1]!,
+          players: [{ ...sampleDuel.teams[1]!.players[0]!, progressChange: opponentProgress }],
+        },
+      ],
+    };
+
+    const derived = deriveGameFromRawDuel(duel, "gg_team_duo", {});
+
+    expect(derived.mapName).toBe("A Pro World");
+    expect(derived.mode).toBe("nm");
+    expect(derived.opponentRatingBefore).toBe(1455);
+  });
+
+  it("tells Moving, NoMove and NMPZ apart, and leaves unknowns null", () => {
+    const modeOf = (movementOptions: unknown) =>
+      deriveGameFromRawDuel(
+        { ...sampleDuel, options: { ...sampleDuel.options, movementOptions } },
+        "gg_team_duo",
+        {},
+      ).mode;
+
+    expect(modeOf({ forbidMoving: false, forbidZooming: false, forbidRotating: false })).toBe(
+      "moving",
+    );
+    expect(modeOf({ forbidMoving: true, forbidZooming: true, forbidRotating: true })).toBe("nmpz");
+    expect(modeOf(undefined)).toBeNull();
+
+    const bare = deriveGameFromRawDuel(sampleDuel, "gg_team_duo", {});
+    expect(bare.mapName).toBeNull();
+    expect(bare.opponentRatingBefore).toBeNull();
+  });
+
   it("multi-links boundary-straddling Utterances across adjacent phases and Rounds", () => {
     const derived = deriveGameFromRawDuel(sampleDuel, "gg_team_duo", {
       gg_p1: "player_miko",

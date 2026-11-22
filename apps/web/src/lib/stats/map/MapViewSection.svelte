@@ -92,6 +92,10 @@
   let h3 = $state.raw<HexGrid | null>(null);
   let regionsGeo = $state.raw<FeatureCollection | null>(null);
 
+  let toolbarHeight = $state(44);
+  /** Docked panels sit under the toolbar, however many rows it wraps to. */
+  const dockTop = $derived(toolbarHeight + 24);
+
   let wrapper: HTMLDivElement;
   let container: HTMLDivElement;
   let map: MapboxMap | undefined;
@@ -381,6 +385,8 @@
         style: STYLE_URL[mapStyle],
         ...WORLD_CAMERA,
         projection: "globe",
+        // Shift-drag box zoom would swallow shift-clicks on Regions; the Box tool replaces it.
+        boxZoom: false,
       });
       map.addControl(new mapbox.NavigationControl({ visualizePitch: true }), "bottom-right");
       // Fullscreen the whole explorer, not only the canvas, so the toolbar and cards come along.
@@ -426,7 +432,7 @@
   {#if error}<div class="absolute inset-0 grid place-items-center px-6 text-center text-sm text-red-300">{error}</div>{/if}
 
   <!-- One toolbar row; every group has the same height and style. -->
-  <div class="absolute left-3 right-3 top-3 z-10 flex flex-wrap items-center gap-2 text-white">
+  <div bind:clientHeight={toolbarHeight} class="absolute left-3 right-3 top-3 z-10 flex flex-wrap items-center gap-2 text-white">
     {#if view.country && focusStats}
       <div class="pill-group pr-4">
         <button type="button" class="pill pill-off" onclick={() => setView(backToWorld(view))} title="Back to the world (Esc)">← World</button>
@@ -525,7 +531,10 @@
   {/if}
 
   {#if openRound}
-    <aside class="absolute top-16 z-20 max-h-[calc(100%-5rem)] w-[22rem] overflow-y-auto rounded-2xl bg-[#111827]/95 p-4 text-white shadow-2xl {hits ? 'right-[27.5rem]' : 'right-14'}">
+    <aside
+      class="absolute z-20 w-[22rem] overflow-y-auto rounded-2xl bg-[#111827]/95 p-4 text-white shadow-2xl {hits ? 'right-[27.5rem]' : 'right-14'}"
+      style="top: {dockTop}px; max-height: calc(100% - {dockTop + 12}px)"
+    >
       <RoundCard
         round={openRound}
         {payload}
@@ -542,6 +551,7 @@
   {#if hits}
     <AreaDrawer
       {hits}
+      top={dockTop}
       target={areaTarget}
       openRoundId={view.roundId}
       ontarget={(t) => (areaTarget = t)}

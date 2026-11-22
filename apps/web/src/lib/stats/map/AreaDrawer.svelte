@@ -11,6 +11,7 @@
 
   let {
     hits,
+    top,
     target,
     openRoundId,
     ontarget,
@@ -18,6 +19,8 @@
     onclose,
   }: {
     hits: readonly AreaHit[];
+    /** Pixels from the map's top, below the toolbar. */
+    top: number;
     target: AreaTarget;
     openRoundId: string | null;
     ontarget: (target: AreaTarget) => void;
@@ -35,7 +38,7 @@
   ] as const;
 </script>
 
-<aside class="absolute bottom-3 right-14 top-16 z-10 flex w-96 flex-col rounded-2xl bg-black/85 text-white shadow-2xl backdrop-blur">
+<aside style="top: {top}px" class="absolute bottom-3 right-14 z-10 flex w-96 flex-col rounded-2xl bg-black/85 text-white shadow-2xl backdrop-blur">
   <div class="flex items-center gap-2 border-b border-white/10 p-3">
     <Pills label="List" options={targets} value={target} onselect={ontarget} />
     <button type="button" class="ml-auto text-white/60 hover:text-white" onclick={onclose} title="Clear the area (Esc)" aria-label="Clear the area">✕</button>

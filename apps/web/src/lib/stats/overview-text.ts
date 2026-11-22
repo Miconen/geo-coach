@@ -9,6 +9,13 @@ export const MISTAKE_CLASS_LABELS: Record<MistakeClass, string> = {
   close: "Right country, close",
 };
 
+/** Theme colours for the mistake classes, shared by every chart that shows them. */
+export const MISTAKE_CLASS_COLORS: Record<MistakeClass, string> = {
+  "wrong-country": "var(--danger)",
+  far: "var(--warn)",
+  close: "var(--ok)",
+};
+
 export function formatNumber(n: number | null, digits = 0): string {
   return n === null
     ? "–"

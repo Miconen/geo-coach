@@ -14,6 +14,7 @@
   } from "@geo-coach/shared";
   import ThemeSwitcher from "$lib/components/ThemeSwitcher.svelte";
   import OverviewSection from "$lib/stats/OverviewSection.svelte";
+  import RankingsSection from "$lib/stats/RankingsSection.svelte";
 
   let { data } = $props();
 
@@ -240,6 +241,10 @@
       {#if section.id === "overview"}
         <div class="mt-3">
           <OverviewSection payload={data.stats} {filter} />
+        </div>
+      {:else if section.id === "rankings"}
+        <div class="mt-3">
+          <RankingsSection payload={data.stats} {filter} />
         </div>
       {/if}
     </section>

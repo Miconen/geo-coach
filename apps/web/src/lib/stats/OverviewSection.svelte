@@ -6,7 +6,6 @@
     overview,
     regionName,
     type LostRoundPoint,
-    type MistakeClass,
     type RatingGapBand,
     type RatingGapPoint,
     type RatingPoint,
@@ -17,6 +16,7 @@
   import PlotChart from "./PlotChart.svelte";
   import {
     COUNTRY_FILTER_NOTE,
+    MISTAKE_CLASS_COLORS,
     MISTAKE_CLASS_LABELS,
     climbingTakeaway,
     damageTakeaway,
@@ -34,11 +34,7 @@
 
   let xAxis = $state<"game" | "date">("game");
 
-  const CLASS_COLOR: Record<MistakeClass, string> = {
-    "wrong-country": "var(--danger)",
-    far: "var(--warn)",
-    close: "var(--ok)",
-  };
+  const CLASS_COLOR = MISTAKE_CLASS_COLORS;
   const resultColor = (won: boolean | null) =>
     won === null ? "var(--muted)" : won ? "var(--ok)" : "var(--danger)";
   // Wider than Plot's default so tooltip lines don't wrap mid-phrase.

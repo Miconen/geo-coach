@@ -8,3 +8,5 @@ export * from "./headline.js";
 export * from "./rating-gap.js";
 export * from "./overview.js";
 export * from "./ranking-method.js";
+export * from "./confusion.js";
+export * from "./rankings.js";

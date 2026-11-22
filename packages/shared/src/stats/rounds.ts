@@ -15,12 +15,12 @@ export function isPlaced(guess: StatsGuess): boolean {
 }
 
 /** Damage (GLOSSARY) the Duo dealt in the Round, overkill counted; 0 when it took Damage. */
-export function damageDealt(round: StatsRound): number {
+export function damageDealt(round: Pick<StatsRound, "hpDelta">): number {
   return Math.max(0, round.hpDelta);
 }
 
 /** Damage (GLOSSARY) the Duo took in the Round, overkill counted; 0 when it dealt Damage. */
-export function damageTaken(round: StatsRound): number {
+export function damageTaken(round: Pick<StatsRound, "hpDelta">): number {
   return Math.max(0, -round.hpDelta);
 }
 

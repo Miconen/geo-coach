@@ -1,10 +1,13 @@
 import { asc, desc, eq, inArray } from "drizzle-orm";
 import {
+  PLAIN_COUNTRY,
   SESSION_GAP_MS,
+  confusionPairs as directedConfusionPairs,
   getCountryContinent,
   getCountryName,
   regionName,
   intervalsOverlap,
+  undirectedConfusionPairs,
   type Continent,
   type DerivedGuess,
   type LearningKind,
@@ -759,8 +762,14 @@ export async function buildWorkbenchData(
     const bestDuoGuess = r.guesses.find((g) => g.isDuo && g.isBestForTeam);
     if (bestDuoGuess?.countryCode && bestDuoGuess.countryCode !== r.countryCode) {
       entry.missCount += 1;
-      touchPair(r.countryCode, bestDuoGuess.countryCode).missCount += 1;
     }
+  }
+
+  // Order-free: both directions of the shared directed pairs added up, water left out,
+  // plain country codes (overseas Regions not split off).
+  const roundPairs = directedConfusionPairs(Object.values(roundsById), PLAIN_COUNTRY);
+  for (const p of undirectedConfusionPairs(roundPairs)) {
+    touchPair(p.countries[0], p.countries[1]).missCount += p.count;
   }
 
   for (const l of wbLearnings) {

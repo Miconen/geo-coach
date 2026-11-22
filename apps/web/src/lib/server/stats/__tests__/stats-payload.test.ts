@@ -77,7 +77,16 @@ const rawDuel = {
   rounds: [
     {
       roundNumber: 1,
-      panorama: { panoId: "p1", lat: 42.69, lng: 25.32, countryCode: "bg" },
+      panorama: {
+        // Google's pano id "tcJQ", hex-encoded as GeoGuessr stores it.
+        panoId: "74634A51",
+        lat: 42.69,
+        lng: 25.32,
+        countryCode: "bg",
+        heading: 123.5,
+        pitch: -4,
+        zoom: 1,
+      },
       startTime: "2026-11-20T19:05:00.000Z",
       timerStartTime: "2026-11-20T19:05:12.500Z",
       endTime: "2026-11-20T19:05:27.500Z",
@@ -161,6 +170,8 @@ describe("buildStatsPayload", () => {
     expect(round).toMatchObject({
       countryCode: "BG",
       regionCode: "BG-24",
+      panoId: "74634A51",
+      panoView: { heading: 123.5, pitch: -4, zoom: 1 },
       duoBestScore: 4950,
       opponentBestScore: 3500,
     });

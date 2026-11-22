@@ -9,6 +9,30 @@ export function bestDuoGuess(round: StatsRound): StatsGuess | null {
   return round.guesses.find((g) => g.isDuo && g.isBestForTeam) ?? null;
 }
 
+/** The Opponents' guess that counted (their best score), or null when they didn't guess. */
+export function opponentBestGuess(round: StatsRound): StatsGuess | null {
+  const theirs = round.guesses.filter((g) => !g.isDuo);
+  return (
+    theirs.find((g) => g.isBestForTeam) ??
+    theirs.reduce<StatsGuess | null>((best, g) => (!best || g.score > best.score ? g : best), null)
+  );
+}
+
+/**
+ * Two Duo guesses closer in time than this were both submitted by the Round's
+ * timer, so neither Player was slower.
+ */
+export const SAME_TIME_SECONDS = 0.5;
+
+/** The Duo's later guess in a Round, or null without two timed Duo guesses far enough apart. */
+export function slowerDuoGuess(round: StatsRound): StatsGuess | null {
+  const timed = round.guesses.filter((g) => g.isDuo && g.secondsToGuess !== null);
+  if (timed.length !== 2) return null;
+  const [a, b] = timed as [StatsGuess, StatsGuess];
+  if (Math.abs(a.secondsToGuess! - b.secondsToGuess!) < SAME_TIME_SECONDS) return null;
+  return a.secondsToGuess! > b.secondsToGuess! ? a : b;
+}
+
 /** A guess with a pin on the map (a missing pin has no coordinates). */
 export function isPlaced(guess: StatsGuess): boolean {
   return guess.lat !== null && guess.lng !== null;

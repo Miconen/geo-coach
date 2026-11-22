@@ -78,6 +78,12 @@ importers:
       flatbush:
         specifier: ^4.7.0
         version: 4.7.0
+      h3-js:
+        specifier: ^4.5.0
+        version: 4.5.0
+      mapbox-gl:
+        specifier: ^3.35.2
+        version: 3.35.2
       postgres:
         specifier: ^3.4.5
         version: 3.4.9
@@ -152,6 +158,9 @@ importers:
         specifier: ^3.24.4
         version: 3.25.76
     devDependencies:
+      h3-js:
+        specifier: ^4.5.0
+        version: 4.5.0
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -2206,6 +2215,10 @@ packages:
   graceful-fs@4.2.12:
     resolution: {integrity: sha512-iuyGF2E4oafQfPsRrG2wtY2ILupMhvtdrhzrxB+0VcjsPpSPttpfYdjnGFGsTi5MaJFjI1jOKHPQ6UTbTj9TAw==}
 
+  h3-js@4.5.0:
+    resolution: {integrity: sha512-uKmdPc+DuarnR+XqZxEuWOMw7KzzKROrx3MLeJpFnMOs78S9M5eZ+X5RieS9UcSFQqbeXzbfWuX/W9Pyajinqw==}
+    engines: {node: '>=4', npm: '>=3', yarn: '>=1.3.0'}
+
   has-flag@4.0.0:
     resolution: {integrity: sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==}
     engines: {node: '>=8'}
@@ -2465,6 +2478,9 @@ packages:
 
   map-stream@0.0.7:
     resolution: {integrity: sha512-C0X0KQmGm3N2ftbTGBhSyuydQ+vV1LC3f3zPvT3RXHXNZrvfPZcoXp/N5DOa8vedX/rTMm2CjTtivFg2STJMRQ==}
+
+  mapbox-gl@3.35.2:
+    resolution: {integrity: sha512-xM+0319FNTS2iOxl0Jelousi31L+ckzOxaXKkIlelanSe2jMlRRNVv3ESezPj6eUGlTDrfaxefk5QM6wQ3ICgg==}
 
   mapshaper@0.8.7:
     resolution: {integrity: sha512-HxgbPr4OkHj9ep1ltg/oVvLuwjbR5IdOiGvQkeKO2A9AREYsq0471SVk0OCfhTwFwq8tj8Z2MBYv4FKIxnL9Gw==}
@@ -5006,6 +5022,8 @@ snapshots:
 
   graceful-fs@4.2.12: {}
 
+  h3-js@4.5.0: {}
+
   has-flag@4.0.0:
     optional: true
 
@@ -5206,6 +5224,8 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.6.0
 
   map-stream@0.0.7: {}
+
+  mapbox-gl@3.35.2: {}
 
   mapshaper@0.8.7(@types/geojson@7946.0.16)(@types/node@22.20.5):
     dependencies:

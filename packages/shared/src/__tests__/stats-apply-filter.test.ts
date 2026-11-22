@@ -41,6 +41,8 @@ function round(id: string, gameId: string, countryCode: string | null): StatsRou
     regionCode: null,
     lat: 0,
     lng: 0,
+    panoId: null,
+    panoView: null,
     damageMultiplier: 1,
     hpDelta: 0,
     duoBestScore: 4000,

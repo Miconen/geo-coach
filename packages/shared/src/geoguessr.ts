@@ -135,6 +135,10 @@ interface RawRound {
     lat?: number;
     lng?: number;
     countryCode?: string;
+    /** The starting camera: degrees, and GeoGuessr's zoom level (0 = widest). */
+    heading?: number;
+    pitch?: number;
+    zoom?: number;
   };
   startTime?: string;
   timerStartTime?: string | null;

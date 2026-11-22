@@ -1,10 +1,13 @@
 import { asc, eq, inArray } from "drizzle-orm";
-import type {
-  StatsCall,
-  StatsGame,
-  StatsPayload,
-  StatsRound,
-  StatsSession,
+import {
+  panoViewsByRound,
+  type PanoView,
+  type RawDuelPayload,
+  type StatsCall,
+  type StatsGame,
+  type StatsPayload,
+  type StatsRound,
+  type StatsSession,
 } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
 import { duoMemberships, games, players, recordings, rounds } from "../db/schema.js";
@@ -83,6 +86,11 @@ export async function buildStatsPayload(db: AppDb, duoId: string): Promise<Stats
     };
   });
 
+  // Each Round's starting camera stays in the raw duel; no derived column holds it.
+  const panoViews = new Map<string, Map<number, PanoView>>(
+    allGames.map((g) => [g.id, panoViewsByRound(g.rawDuel as RawDuelPayload)]),
+  );
+
   const statsRounds: StatsRound[] = allRounds.map((r) => {
     const roundStartMs = r.startTime.getTime();
     return {
@@ -94,6 +102,8 @@ export async function buildStatsPayload(db: AppDb, duoId: string): Promise<Stats
       regionCode: r.regionCode,
       lat: r.lat,
       lng: r.lng,
+      panoId: r.panoId,
+      panoView: panoViews.get(r.gameId)?.get(r.roundNumber) ?? null,
       damageMultiplier: r.damageMultiplier,
       hpDelta: r.hpDelta,
       duoBestScore: r.duoBestScore,

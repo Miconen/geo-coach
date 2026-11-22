@@ -51,6 +51,10 @@ export interface StatsRound {
   regionCode: string | null;
   lat: number | null;
   lng: number | null;
+  /** GeoGuessr's Street View pano id for the location, as stored: hex-encoded (see `decodePanoId`). */
+  panoId: string | null;
+  /** Where GeoGuessr pointed the camera at the start of the Round; null when the duel doesn't say. */
+  panoView: PanoView | null;
   damageMultiplier: number;
   /** The Round's Damage (GLOSSARY) from the Duo's side: positive when dealt, negative when taken. */
   hpDelta: number;
@@ -63,6 +67,13 @@ export interface StatsRound {
    * is not a Split or Spread: show it as "unlabelled", never as "not called".
    */
   call: StatsCall | null;
+}
+
+/** A Street View camera as GeoGuessr gives it: degrees, and its own zoom level (0 = widest). */
+export interface PanoView {
+  heading: number;
+  pitch: number;
+  zoom: number;
 }
 
 export type StatsCall = "called" | "not-called";

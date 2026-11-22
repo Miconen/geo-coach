@@ -13,3 +13,7 @@ export * from "./confusion.js";
 export * from "./rankings.js";
 export * from "./players.js";
 export * from "./best-guesses.js";
+export * from "./map-areas.js";
+export * from "./hex-surface.js";
+export * from "./game-state.js";
+export * from "./street-view.js";

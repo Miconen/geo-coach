@@ -25,6 +25,8 @@
     "arctic": "^3.6.0",
     "drizzle-orm": "^0.41.0",
     "flatbush": "^4.7.0",
+    "h3-js": "^4.5.0",
+    "mapbox-gl": "^3.35.2",
     "postgres": "^3.4.5",
     "topojson-client": "^3.1.0",
     "zod": "^3.24.4"

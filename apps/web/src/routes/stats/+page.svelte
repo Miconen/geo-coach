@@ -13,6 +13,7 @@
     type StatsFilter,
   } from "@geo-coach/shared";
   import ThemeSwitcher from "$lib/components/ThemeSwitcher.svelte";
+  import OverviewSection from "$lib/stats/OverviewSection.svelte";
 
   let { data } = $props();
 
@@ -236,6 +237,11 @@
           {filtered.games.length} Games · {filtered.rounds.length} Rounds
         </span>
       </div>
+      {#if section.id === "overview"}
+        <div class="mt-3">
+          <OverviewSection payload={data.stats} {filter} />
+        </div>
+      {/if}
     </section>
   {/each}
 </div>

@@ -1,8 +1,28 @@
 import { asc, eq, inArray } from "drizzle-orm";
-import type { StatsGame, StatsPayload, StatsRound, StatsSession } from "@geo-coach/shared";
+import type {
+  StatsCall,
+  StatsGame,
+  StatsPayload,
+  StatsRound,
+  StatsSession,
+} from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
 import { duoMemberships, games, players, recordings, rounds } from "../db/schema.js";
-import { deriveLearningsWithStatus } from "../services/index.js";
+import {
+  deriveCurrentCallLabels,
+  deriveLearningsWithStatus,
+  isCallableRound,
+  type CurrentCallLabel,
+} from "../services/index.js";
+
+/** A Round's Call (GLOSSARY: Call); null when unlabelled or not a Split or Spread. */
+function roundCall(
+  round: typeof rounds.$inferSelect,
+  label: CurrentCallLabel | undefined,
+): StatsCall | null {
+  if (!label || !isCallableRound(round)) return null;
+  return label.called ? "called" : "not-called";
+}
 
 /**
  * The compact payload the statistics page computes every panel from, in the
@@ -10,6 +30,7 @@ import { deriveLearningsWithStatus } from "../services/index.js";
  * `isDuo: false` tells them apart from the Duo's Players.
  */
 export async function buildStatsPayload(db: AppDb, duoId: string): Promise<StatsPayload> {
+  const callLabels = await deriveCurrentCallLabels(db, duoId);
   const [memberships, allRecordings, allGames, allRounds, derivedLearnings] = await Promise.all([
     db.query.duoMemberships.findMany({ where: eq(duoMemberships.duoId, duoId) }),
     db.query.recordings.findMany({ where: eq(recordings.duoId, duoId) }),
@@ -94,6 +115,7 @@ export async function buildStatsPayload(db: AppDb, duoId: string): Promise<Stats
               : null,
         };
       }),
+      call: roundCall(r, callLabels.get(r.id)),
     };
   });
 

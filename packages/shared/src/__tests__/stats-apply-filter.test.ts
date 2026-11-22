@@ -43,6 +43,7 @@ function round(id: string, gameId: string, countryCode: string | null): StatsRou
     duoBestScore: 4000,
     opponentBestScore: 4000,
     guesses: [],
+    call: null,
   };
 }
 

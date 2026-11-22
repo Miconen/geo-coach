@@ -16,6 +16,7 @@ import type {
   DerivedGuess,
   GameMode,
   LearningRegion,
+  ProcessingRunPurpose,
   RoundPhaseInterval,
   WordTiming,
 } from "@geo-coach/shared";
@@ -330,7 +331,7 @@ export const processingRuns = pgTable(
     startedByPlayerId: uuid("started_by_player_id")
       .notNull()
       .references(() => players.id, { onDelete: "cascade" }),
-    purpose: text("purpose").$type<"extract" | "tips">().notNull(),
+    purpose: text("purpose").$type<ProcessingRunPurpose>().notNull(),
     agent: text("agent").notNull(),
     model: text("model").notNull(),
     promptVersion: text("prompt_version").notNull(),
@@ -438,4 +439,46 @@ export const learningReactions = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.learningId, table.playerId, table.reaction] })],
+);
+
+/**
+ * A `calls` Processing run's label for one Split or Spread Round (GLOSSARY: Call).
+ * Like Learnings, labels take effect when their run finishes and are replaced by
+ * a later finished `calls` run over the Round, never deleted (ADR 0001, 0002).
+ */
+export const callLabels = pgTable(
+  "call_labels",
+  {
+    id: uuid("id").primaryKey(),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => processingRuns.id, { onDelete: "cascade" }),
+    roundId: uuid("round_id")
+      .notNull()
+      .references(() => rounds.id, { onDelete: "cascade" }),
+    called: boolean("called").notNull(),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("call_labels_run_round_uidx").on(table.runId, table.roundId),
+    index("call_labels_duo_idx").on(table.duoId),
+    index("call_labels_round_idx").on(table.roundId),
+  ],
+);
+
+export const callLabelUtterances = pgTable(
+  "call_label_utterances",
+  {
+    callLabelId: uuid("call_label_id")
+      .notNull()
+      .references(() => callLabels.id, { onDelete: "cascade" }),
+    utteranceId: uuid("utterance_id")
+      .notNull()
+      .references(() => utterances.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.callLabelId, table.utteranceId] })],
 );

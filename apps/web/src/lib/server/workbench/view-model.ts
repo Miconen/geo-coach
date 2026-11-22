@@ -629,7 +629,7 @@ export async function buildWorkbenchData(
       }
 
       // Check whether any cited Utterance currently sits in a stale range for THIS Learning's purpose (ADR 0002)
-      const purposeKey: ProcessingRunPurpose = l.purpose === "tips" ? "tips" : "extract";
+      const purposeKey: "extract" | "tips" = l.purpose === "tips" ? "tips" : "extract";
       const isStale =
         l.status === "current" &&
         l.origin !== "manual" &&

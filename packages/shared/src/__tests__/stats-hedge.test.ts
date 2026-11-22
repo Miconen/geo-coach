@@ -52,7 +52,8 @@ describe("hedgeKind (GLOSSARY: Committed, Spread, Split)", () => {
       { ...madrid, isDuo: false, playerId: null },
     ];
     expect(hedgeKind(opponents)).toBe("split");
-    expect(hedgeKind([{ ...madrid, isDuo: false }, { ...toledo, isDuo: false }])).toBe("spread");
+    const spreadOpponents = [madrid, toledo].map((g) => ({ ...g, isDuo: false }));
+    expect(hedgeKind(spreadOpponents)).toBe("spread");
   });
 });
 

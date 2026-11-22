@@ -35,8 +35,10 @@ export type LearningOrigin = z.infer<typeof learningOriginSchema>;
 export const reactionTypeSchema = z.enum(["star", "dismiss", "done"]);
 export type ReactionType = z.infer<typeof reactionTypeSchema>;
 
-export const processingRunPurposeSchema = z.enum(["extract", "tips"]);
+export const processingRunPurposeSchema = z.enum(["extract", "tips", "calls"]);
 export type ProcessingRunPurpose = z.infer<typeof processingRunPurposeSchema>;
+/** The purposes whose runs produce Learnings; `calls` runs produce Call labels (ADR 0002). */
+export type LearningRunPurpose = Exclude<ProcessingRunPurpose, "calls">;
 
 export const processingRunStatusSchema = z.enum(["open", "finished", "abandoned"]);
 export type ProcessingRunStatus = z.infer<typeof processingRunStatusSchema>;
@@ -87,6 +89,29 @@ export const learningItemInputSchema = z
   })
   .superRefine(validateRegionsInCountries);
 export type LearningItemInput = z.infer<typeof learningItemInputSchema>;
+
+/**
+ * One Call label from a `calls` Processing run (GLOSSARY: Call): whether the Duo
+ * agreed aloud on a Split or Spread Round. A Call must cite the Utterances it
+ * rests on; "not called" may cite none when nobody spoke while guessing.
+ */
+export const callLabelInputSchema = z
+  .object({
+    roundId: z.string().uuid(),
+    called: z.boolean(),
+    utteranceRefs: z.array(z.string().min(1)).default([]),
+    note: z.string().trim().max(500).nullable().optional(),
+  })
+  .superRefine((item, ctx) => {
+    if (item.called && item.utteranceRefs.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["utteranceRefs"],
+        message: "A Call must cite at least one Utterance",
+      });
+    }
+  });
+export type CallLabelInput = z.infer<typeof callLabelInputSchema>;
 
 export const manualLearningInputSchema = z
   .object({

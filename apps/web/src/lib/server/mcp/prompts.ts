@@ -25,6 +25,7 @@ function resolvePromptsDir(): string {
 const CURRENT_VERSIONS: Record<ProcessingRunPurpose, { version: string; file: string }> = {
   extract: { version: "extract-v1", file: "extract-v1.md" },
   tips: { version: "tips-v1", file: "tips-v1.md" },
+  calls: { version: "calls-v1", file: "calls-v1.md" },
 };
 
 export function getCurrentPromptVersion(purpose: ProcessingRunPurpose): string {

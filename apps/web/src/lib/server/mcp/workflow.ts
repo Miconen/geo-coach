@@ -1,8 +1,12 @@
 import { and, asc, eq, gt, inArray, lt } from "drizzle-orm";
 import {
+  callLabelInputSchema,
+  hedgeKind,
   intervalsOverlap,
   learningItemInputSchema,
   regionName,
+  roundHedge,
+  type DerivedGuess,
   type ProcessingRunPurpose,
 } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
@@ -20,11 +24,15 @@ import {
 } from "../db/schema.js";
 import {
   DomainError,
+  deriveCurrentCallLabels,
   deriveLearningsWithStatus,
   deriveSessionWorkRanges,
   finishProcessingRun,
   getCurrentTranscriptVersionId,
+  insertRunCallLabels,
   insertRunLearnings,
+  isCallableRound,
+  roundGuessingInterval,
   startProcessingRun,
 } from "../services/index.js";
 import { duoEventBus } from "../events/bus.js";
@@ -290,6 +298,9 @@ export async function mcpReadRange(db: AppDb, playerId: string, runId: string) {
     throw new DomainError("NOT_FOUND", "Processing run not found", 404);
   }
   await resolveDuoForPlayer(db, playerId, run.duoId);
+  if (run.purpose === "calls") {
+    return readCallsRange(db, run);
+  }
 
   const padStart = new Date(run.rangeStart.getTime() - CONTEXT_PADDING_MS);
   const padEnd = new Date(run.rangeEnd.getTime() + CONTEXT_PADDING_MS);
@@ -452,6 +463,13 @@ export async function mcpAddLearnings(
   if (run.status !== "open") {
     throw new DomainError("CONFLICT", `Processing run is already ${run.status}`, 409);
   }
+  if (run.purpose === "calls") {
+    throw new DomainError(
+      "WRONG_PURPOSE",
+      "A calls Processing run produces Call labels, not Learnings; use add_call_labels",
+      400,
+    );
+  }
 
   const { refToUtterance } = await getRunInRangeUtterances(db, run);
   const duoRounds = await db
@@ -547,4 +565,195 @@ export async function mcpFinishRun(db: AppDb, playerId: string, runId: string) {
   const res = await finishProcessingRun(db, runId);
   duoEventBus.emitChanged(run.duoId, "run", run.id);
   return res;
+}
+
+type RunRow = typeof processingRuns.$inferSelect;
+type RoundRow = typeof rounds.$inferSelect;
+
+/** The Duo's Rounds whose guessing phase overlaps a run's range. */
+async function loadRunRangeRounds(db: AppDb, run: RunRow): Promise<RoundRow[]> {
+  const candidates = await db.query.rounds.findMany({
+    where: and(
+      eq(rounds.duoId, run.duoId),
+      lt(rounds.startTime, run.rangeEnd),
+      gt(rounds.endTime, run.rangeStart),
+    ),
+    orderBy: [asc(rounds.startTime)],
+  });
+  return candidates.filter((r) =>
+    intervalsOverlap(roundGuessingInterval(r), { startedAt: run.rangeStart, endedAt: run.rangeEnd }),
+  );
+}
+
+/**
+ * `read_range` for a `calls` run: the range's Split and Spread Rounds, each with
+ * both teams' guessed countries and Regions and the citable Utterances spoken
+ * during that Round's guessing phase.
+ */
+async function readCallsRange(db: AppDb, run: RunRow) {
+  const [{ inRange, utteranceToRef }, rangeRounds, allPlayers, currentLabels] = await Promise.all([
+    getRunInRangeUtterances(db, run),
+    loadRunRangeRounds(db, run),
+    db.query.players.findMany(),
+    deriveCurrentCallLabels(db, run.duoId),
+  ]);
+  const playerNameById = new Map(allPlayers.map((p) => [p.id, p.displayName]));
+  const gameIds = [...new Set(rangeRounds.map((r) => r.gameId))];
+  const rangeGames =
+    gameIds.length > 0 ? await db.query.games.findMany({ where: inArray(games.id, gameIds) }) : [];
+  const ggGameIdById = new Map(rangeGames.map((g) => [g.id, g.geoguessrGameId]));
+
+  const describeGuess = (g: DerivedGuess) => ({
+    player: g.isDuo
+      ? g.playerId
+        ? (playerNameById.get(g.playerId) ?? g.nick ?? "Duo")
+        : (g.nick ?? "Duo")
+      : null,
+    country: g.countryCode,
+    region: regionName(g.regionCode) ?? g.regionCode,
+    km: g.distanceMeters !== null ? Math.round(g.distanceMeters / 1000) : null,
+    score: g.score,
+  });
+
+  const callableRounds = rangeRounds
+    .filter((r) => isCallableRound(r))
+    .map((r) => {
+      const duoGuesses = r.guesses.filter((g) => g.isDuo);
+      const oppGuesses = r.guesses.filter((g) => !g.isDuo);
+      const duoHedge = roundHedge(r, duoGuesses);
+      const guessing = roundGuessingInterval(r);
+      const linked = inRange
+        .filter((u) => intervalsOverlap({ startedAt: u.startedAt, endedAt: u.endedAt }, guessing))
+        .map((u) => ({
+          ref: utteranceToRef.get(u.id)!,
+          at: formatHmsUtc(u.startedAt),
+          speaker: playerNameById.get(u.playerId) ?? "Player",
+          text: u.text,
+        }));
+      const label = currentLabels.get(r.id);
+      return {
+        roundId: r.id,
+        game: ggGameIdById.get(r.gameId) ?? r.gameId,
+        roundNumber: r.roundNumber,
+        kind: duoHedge.kind,
+        guessDistanceKm:
+          duoHedge.distanceMeters !== null ? Math.round(duoHedge.distanceMeters / 1000) : null,
+        trueCountry: r.countryCode,
+        trueRegion: regionName(r.regionCode) ?? r.regionCode,
+        duoBestScore: r.duoBestScore,
+        opponentBestScore: r.opponentBestScore,
+        duoGuesses: duoGuesses.map(describeGuess),
+        opponentKind: hedgeKind(oppGuesses),
+        opponentGuesses: oppGuesses.map(describeGuess),
+        utterances: linked,
+        currentLabel: label ? { called: label.called, note: label.note } : null,
+      };
+    });
+
+  const lines: string[] = [];
+  for (const r of callableRounds) {
+    const fmt = (gs: ReturnType<typeof describeGuess>[]) =>
+      gs
+        .map((g) => `${g.player ? `${g.player}:` : ""}${g.country ?? "?"}${g.region ? ` ${g.region}` : ""}`)
+        .join(", ") || "none";
+    lines.push(
+      `--- ${r.kind!.toUpperCase()} | Game ${r.game} Round ${r.roundNumber} [roundId=${r.roundId}] | True: ${r.trueCountry ?? "?"}${r.trueRegion ? ` / ${r.trueRegion}` : ""} | Duo: ${fmt(r.duoGuesses)} (${r.guessDistanceKm ?? "?"}km apart) | Opponents (${r.opponentKind ?? "unclassified"}): ${fmt(r.opponentGuesses)} | Score ${r.duoBestScore} vs ${r.opponentBestScore}${r.currentLabel ? ` | Current label: ${r.currentLabel.called ? "called" : "not called"}` : ""} ---`,
+    );
+    if (r.utterances.length === 0) lines.push("(no speech while guessing)");
+    for (const u of r.utterances) lines.push(`[${u.at}] ${u.ref} ${u.speaker}: ${u.text}`);
+  }
+
+  return {
+    runId: run.id,
+    purpose: "calls" as const,
+    rangeStart: run.rangeStart.toISOString(),
+    rangeEnd: run.rangeEnd.toISOString(),
+    citableUtteranceCount: inRange.length,
+    rounds: callableRounds,
+    transcript: lines.join("\n") || "(no Split or Spread Rounds in this range)",
+  };
+}
+
+/**
+ * Adds a batch of Call labels to an open `calls` run. Each label must name a
+ * Split or Spread Round in the run's range and cite only Utterances from that
+ * Round's guessing phase; invalid items are reported and the rest saved.
+ */
+export async function mcpAddCallLabels(
+  db: AppDb,
+  playerId: string,
+  runId: string,
+  rawItems: unknown[],
+) {
+  const run = await db.query.processingRuns.findFirst({
+    where: eq(processingRuns.id, runId),
+  });
+  if (!run) {
+    throw new DomainError("NOT_FOUND", "Processing run not found", 404);
+  }
+  await resolveDuoForPlayer(db, playerId, run.duoId);
+  if (run.status !== "open") {
+    throw new DomainError("CONFLICT", `Processing run is already ${run.status}`, 409);
+  }
+  if (run.purpose !== "calls") {
+    throw new DomainError(
+      "WRONG_PURPOSE",
+      `A ${run.purpose} Processing run produces Learnings; use add_learnings`,
+      400,
+    );
+  }
+
+  const [{ refToUtterance }, rangeRounds] = await Promise.all([
+    getRunInRangeUtterances(db, run),
+    loadRunRangeRounds(db, run),
+  ]);
+  const roundById = new Map(rangeRounds.map((r) => [r.id, r]));
+
+  const valid: Parameters<typeof insertRunCallLabels>[3] = [];
+  const errors: Array<{ index: number; message: string }> = [];
+
+  for (let i = 0; i < rawItems.length; i++) {
+    const parsed = callLabelInputSchema.safeParse(rawItems[i]);
+    if (!parsed.success) {
+      errors.push({
+        index: i,
+        message: parsed.error.issues.map((iss) => `${iss.path.join(".")}: ${iss.message}`).join("; "),
+      });
+      continue;
+    }
+    const item = parsed.data;
+    const round = roundById.get(item.roundId);
+    if (!round) {
+      errors.push({ index: i, message: `Round ${item.roundId} is not in this run's range` });
+      continue;
+    }
+    if (!isCallableRound(round)) {
+      errors.push({
+        index: i,
+        message: `Round ${round.roundNumber} [${round.id}] is not a Split or Spread`,
+      });
+      continue;
+    }
+    const guessing = roundGuessingInterval(round);
+    const badRefs = item.utteranceRefs.filter((ref) => {
+      const u = refToUtterance.get(ref);
+      return !u || !intervalsOverlap({ startedAt: u.startedAt, endedAt: u.endedAt }, guessing);
+    });
+    if (badRefs.length > 0) {
+      errors.push({
+        index: i,
+        message: `utteranceRefs outside Round ${round.roundNumber}'s guessing phase: ${badRefs.join(", ")}`,
+      });
+      continue;
+    }
+    valid.push({
+      roundId: round.id,
+      called: item.called,
+      note: item.note ?? null,
+      utteranceIds: item.utteranceRefs.map((ref) => refToUtterance.get(ref)!.id),
+    });
+  }
+
+  const savedIds = valid.length > 0 ? await insertRunCallLabels(db, run.id, run.duoId, valid) : [];
+  return { savedCount: savedIds.length, savedIds, errors };
 }

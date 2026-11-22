@@ -50,7 +50,15 @@ export interface StatsRound {
   duoBestScore: number;
   opponentBestScore: number;
   guesses: StatsGuess[];
+  /**
+   * Whether the Duo agreed this Split or Spread aloud (GLOSSARY: Call), from the
+   * current `calls` Processing run. Null when never labelled, or when the Round
+   * is not a Split or Spread: show it as "unlabelled", never as "not called".
+   */
+  call: StatsCall | null;
 }
+
+export type StatsCall = "called" | "not-called";
 
 /** One guess, trimmed: Opponents carry no identity beyond `isDuo: false`. */
 export interface StatsGuess {

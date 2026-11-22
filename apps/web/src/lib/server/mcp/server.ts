@@ -5,6 +5,7 @@ import { processingRunPurposeSchema } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
 import { extractBearerToken, verifyApiToken } from "../auth/index.js";
 import {
+  mcpAddCallLabels,
   mcpAddLearnings,
   mcpFinishRun,
   mcpGetInstructions,
@@ -21,7 +22,7 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
 
   server.tool(
     "get_instructions",
-    "Return the versioned processing instructions for extract or tips runs.",
+    "Return the versioned processing instructions for extract, tips or calls runs.",
     {
       purpose: processingRunPurposeSchema,
     },
@@ -70,12 +71,21 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
 
   server.tool(
     "read_range",
-    "Read the compact transcript, Round markers, ±2 min uncitable context, existing Learnings, and topic tags for an open Processing run.",
+    "Read an open Processing run's range. extract/tips: compact transcript, Round markers, ±2 min uncitable context, existing Learnings, and topic tags. calls: the Split and Spread Rounds with both teams' guessed countries and Regions and the Utterances spoken while guessing.",
     {
       runId: z.string().uuid(),
     },
     async ({ runId }) => {
       const res = await mcpReadRange(db, playerId, runId);
+      if (res.purpose === "calls") {
+        const text = [
+          `Run: ${res.runId} (calls)`,
+          `Range: ${res.rangeStart} .. ${res.rangeEnd} (${res.rounds.length} Split/Spread Rounds, ${res.citableUtteranceCount} citable utterances)`,
+          "",
+          res.transcript,
+        ].join("\n");
+        return { content: [{ type: "text", text }] };
+      }
       const header = [
         `Run: ${res.runId} (${res.purpose})`,
         `Range: ${res.rangeStart} .. ${res.rangeEnd} (${res.citableUtteranceCount} citable utterances)`,
@@ -106,8 +116,23 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
   );
 
   server.tool(
+    "add_call_labels",
+    "Add a batch of Call labels to an open calls Processing run: { roundId, called, utteranceRefs, note? } per Split or Spread Round. Valid items are saved even if other items fail validation.",
+    {
+      runId: z.string().uuid(),
+      items: z.array(z.record(z.unknown())).min(1),
+    },
+    async ({ runId, items }) => {
+      const res = await mcpAddCallLabels(db, playerId, runId, items);
+      return {
+        content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
     "finish_run",
-    "Finish a Processing run so its Learnings take effect and inputs are snapshotted.",
+    "Finish a Processing run so its Learnings or Call labels take effect and inputs are snapshotted.",
     {
       runId: z.string().uuid(),
     },
@@ -129,6 +154,13 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
 
   server.prompt("tips", "Add GeoGuessr Tips prompted by a geo-coach Session", async () => {
     const { instructions } = await mcpGetInstructions("tips");
+    return {
+      messages: [{ role: "user", content: { type: "text", text: instructions } }],
+    };
+  });
+
+  server.prompt("calls", "Label Calls on Split and Spread Rounds in a geo-coach Session", async () => {
+    const { instructions } = await mcpGetInstructions("calls");
     return {
       messages: [{ role: "user", content: { type: "text", text: instructions } }],
     };

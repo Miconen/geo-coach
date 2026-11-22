@@ -5,12 +5,14 @@ import {
   uuidv7,
   type LearningKind,
   type LearningRegion,
+  type LearningRunPurpose,
   type ManualLearningInput,
   type ProcessingRunPurpose,
   type ReactionType,
 } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
 import {
+  callLabels,
   learnings,
   learningReactions,
   learningRounds,
@@ -346,7 +348,7 @@ export async function insertRunLearnings(
   db: AppDb,
   runId: string,
   duoId: string,
-  purpose: ProcessingRunPurpose,
+  purpose: LearningRunPurpose,
   items: Array<{
     kind: LearningKind;
     text: string;
@@ -403,7 +405,7 @@ export async function finishProcessingRun(
   db: AppDb,
   runId: string,
   now: Date = new Date(),
-): Promise<{ runId: string; inputCount: number; learningCount: number }> {
+): Promise<{ runId: string; inputCount: number; learningCount: number; callLabelCount: number }> {
   const run = await db.query.processingRuns.findFirst({
     where: eq(processingRuns.id, runId),
   });
@@ -444,14 +446,16 @@ export async function finishProcessingRun(
     .set({ status: "finished", finishedAt: now })
     .where(eq(processingRuns.id, run.id));
 
-  const runLearnings = await db.query.learnings.findMany({
-    where: eq(learnings.runId, run.id),
-  });
+  const [runLearnings, runCallLabels] = await Promise.all([
+    db.query.learnings.findMany({ where: eq(learnings.runId, run.id) }),
+    db.query.callLabels.findMany({ where: eq(callLabels.runId, run.id) }),
+  ]);
 
   return {
     runId: run.id,
     inputCount: overlapping.length,
     learningCount: runLearnings.length,
+    callLabelCount: runCallLabels.length,
   };
 }
 

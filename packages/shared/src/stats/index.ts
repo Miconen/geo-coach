@@ -20,3 +20,4 @@ export * from "./street-view.js";
 export * from "./smoothing.js";
 export * from "./speed.js";
 export * from "./versus.js";
+export * from "./effects.js";

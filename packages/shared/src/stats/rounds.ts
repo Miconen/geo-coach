@@ -4,6 +4,11 @@ import { hedgeKind } from "./hedge.js";
 import { quantile } from "./math.js";
 import type { StatsGuess, StatsRound } from "./payload.js";
 
+/** Rounds in play order: by start time, then Round number. */
+export function inRoundOrder(rounds: readonly StatsRound[]): StatsRound[] {
+  return [...rounds].sort((a, b) => a.startedAtMs - b.startedAtMs || a.roundNumber - b.roundNumber);
+}
+
 /** The Duo's guess that counted (its best score), or null when the Duo didn't guess. */
 export function bestDuoGuess(round: StatsRound): StatsGuess | null {
   return round.guesses.find((g) => g.isDuo && g.isBestForTeam) ?? null;

@@ -17,3 +17,4 @@ export * from "./map-areas.js";
 export * from "./hex-surface.js";
 export * from "./game-state.js";
 export * from "./street-view.js";
+export * from "./smoothing.js";

@@ -6,7 +6,8 @@ import { duoFirstGuesser } from "./first-guesser.js";
 import { mean, median } from "./math.js";
 import type { StatsGuess, StatsRound } from "./payload.js";
 import { isGreyedOut, type CountryRow } from "./rankings.js";
-import { bestDuoGuess, isPlaced, isSplit } from "./rounds.js";
+import { bestDuoGuess, inRoundOrder, isPlaced, isSplit } from "./rounds.js";
+import { rollingWindows } from "./smoothing.js";
 
 /** A carry chip names a country where the Player had the Duo's best guess at least this share of the time. */
 export const CARRY_SHARE = 0.6;
@@ -203,11 +204,6 @@ export interface RollingPoint {
   medianKm: number | null;
 }
 
-/** Rounds in play order: by start time, then Round number. */
-function inRoundOrder(rounds: readonly StatsRound[]): StatsRound[] {
-  return [...rounds].sort((a, b) => a.startedAtMs - b.startedAtMs || a.roundNumber - b.roundNumber);
-}
-
 /**
  * The Player's trend: one point per full window of `window` Rounds, in Round
  * order. Empty with fewer Rounds than the window, never a partial window.
@@ -217,15 +213,9 @@ export function rollingSeries(
   playerId: string,
   window: number,
 ): RollingPoint[] {
-  const ordered = inRoundOrder(rounds);
-  const points: RollingPoint[] = [];
-  for (let end = window; end <= ordered.length; end += 1) {
-    const slice = ordered.slice(end - window, end);
-    points.push({
-      roundIndex: end,
-      bestShare: slice.filter((r) => isPlayerBest(r, playerId)).length / window,
-      medianKm: medianKmNotSplit(slice, playerId),
-    });
-  }
-  return points;
+  return rollingWindows(inRoundOrder(rounds), window).map(({ end, items }) => ({
+    roundIndex: end,
+    bestShare: items.filter((r) => isPlayerBest(r, playerId)).length / window,
+    medianKm: medianKmNotSplit(items, playerId),
+  }));
 }

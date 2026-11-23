@@ -148,7 +148,9 @@ export function createGeoCoachMcpServer(
         `Existing topics: ${res.existingTopics.join(", ") || "(none)"}`,
         `Existing Learnings in range: ${JSON.stringify(res.existingLearnings)}`,
         `Claims for this range's countries (${res.claimCountries.join(", ") || "none"}):`,
-        ...(res.claims.length > 0
+        ...(job
+          ? [`${res.claims.length} exist. Find the ones you need with search_claims.`]
+          : res.claims.length > 0
           ? res.claims.map(
               (c) =>
                 `- [claimId=${c.id}] ${c.status.toUpperCase()} (${c.evidence}) ${c.countries.join("/") || "-"}: ${c.text}${c.topics.length > 0 ? ` #${c.topics.join(" #")}` : ""}`,
@@ -192,7 +194,7 @@ export function createGeoCoachMcpServer(
     async (args) => {
       const res = await mcpSearchClaims(db, playerId, job ? { ...args, duo: job.duoId } : args);
       return {
-        content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(res, null, job ? undefined : 2) }],
       };
     },
   );
@@ -330,6 +332,10 @@ export function createGeoCoachMcpServer(
     for (const [name, tool] of registeredTools) {
       if (!JOB_TOOLS.has(name)) tool.remove();
     }
+    // Jobs have no file tools, so a result Claude Code moves to a file would be lost.
+    registeredTools.get("read_range")?.update({
+      _meta: { "anthropic/maxResultSizeChars": 200_000 },
+    });
     return server;
   }
 

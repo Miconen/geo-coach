@@ -123,6 +123,47 @@ export const claimItemInputSchema = z
   });
 export type ClaimItemInput = z.infer<typeof claimItemInputSchema>;
 
+/**
+ * One `edit_claims` item: the fields of an existing Claim to change. Evidence is
+ * never touched. Changing `text` on a Claim a Player or a Round has already
+ * confirmed needs `force`, since that Evidence vouched for the old wording.
+ */
+export const claimEditItemInputSchema = z
+  .object({
+    claimId: z.string().uuid(),
+    text: z.string().trim().min(1).max(500).optional(),
+    countries: z.array(isoCountryCodeSchema).optional(),
+    regions: z.array(learningRegionSchema).optional(),
+    topics: z.array(z.string().trim().toLowerCase().min(1).max(60)).optional(),
+    force: z.boolean().default(false),
+  })
+  .superRefine((val, ctx) => {
+    if (
+      val.text === undefined &&
+      val.countries === undefined &&
+      val.regions === undefined &&
+      val.topics === undefined
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["claimId"],
+        message: "Pass at least one of text, countries, regions or topics to change",
+      });
+    }
+  });
+export type ClaimEditItemInput = z.infer<typeof claimEditItemInputSchema>;
+
+/**
+ * `delete_claims` input. Deleting removes the Claim with its Evidence and image
+ * links; Learnings that cited it keep their text but lose the link. A Claim a
+ * Player or a Round has confirmed is only deleted with `force`.
+ */
+export const claimDeleteInputSchema = z.object({
+  claimIds: z.array(z.string().uuid()).min(1).max(200),
+  force: z.boolean().default(false),
+});
+export type ClaimDeleteInput = z.infer<typeof claimDeleteInputSchema>;
+
 export const searchClaimsInputSchema = z.object({
   query: z.string().trim().max(200).optional(),
   countries: z.array(isoCountryCodeSchema).optional(),

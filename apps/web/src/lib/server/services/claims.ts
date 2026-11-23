@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import {
   deriveClaimStatus,
   getCountryName,
@@ -289,4 +289,61 @@ export async function setPlayerEvidence(
     });
   }
   return { duoId: claim.duoId, direction };
+}
+
+/** What a Claim's Evidence amounts to for edit/delete safety: Player and Round Evidence can't be recreated by an agent. */
+export interface ClaimEvidenceFacts {
+  hasPlayerEvidence: boolean;
+  hasRoundEvidence: boolean;
+  evidenceCount: number;
+}
+
+/** Per-Claim facts about Evidence, for the Claims among `ids` that belong to the Duo. */
+export async function claimEvidenceFacts(
+  db: AppDb,
+  duoId: string,
+  ids: string[],
+): Promise<Map<string, ClaimEvidenceFacts>> {
+  const facts = new Map<string, ClaimEvidenceFacts>();
+  if (ids.length === 0) return facts;
+  const rows = await db
+    .select({ claimId: claimEvidence.claimId, kind: claimEvidence.kind, n: sql<number>`count(*)::int` })
+    .from(claimEvidence)
+    .where(and(eq(claimEvidence.duoId, duoId), inArray(claimEvidence.claimId, ids)))
+    .groupBy(claimEvidence.claimId, claimEvidence.kind);
+  for (const id of ids) facts.set(id, { hasPlayerEvidence: false, hasRoundEvidence: false, evidenceCount: 0 });
+  for (const r of rows) {
+    const f = facts.get(r.claimId)!;
+    f.evidenceCount += r.n;
+    if (r.kind === "player") f.hasPlayerEvidence = true;
+    if (r.kind === "round") f.hasRoundEvidence = true;
+  }
+  return facts;
+}
+
+export interface ClaimPatch {
+  text?: string;
+  countries?: string[];
+  regions?: LearningRegion[];
+  topics?: string[];
+}
+
+/** Changes a Claim's wording, countries, regions or topics. Evidence stays as it is. */
+export async function updateClaim(db: AppDb, duoId: string, claimId: string, patch: ClaimPatch): Promise<void> {
+  const set: Partial<typeof claims.$inferInsert> = {};
+  if (patch.text !== undefined) set.text = patch.text;
+  if (patch.countries !== undefined) set.countries = patch.countries;
+  if (patch.regions !== undefined) set.regions = patch.regions;
+  if (patch.topics !== undefined) set.topics = patch.topics;
+  if (Object.keys(set).length === 0) return;
+  await db.update(claims).set(set).where(and(eq(claims.id, claimId), eq(claims.duoId, duoId)));
+}
+
+/**
+ * Deletes Claims of a Duo. Their Evidence and image links go with them; Learnings
+ * that cited one keep their text and only lose the link.
+ */
+export async function deleteClaimsById(db: AppDb, duoId: string, ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await db.delete(claims).where(and(eq(claims.duoId, duoId), inArray(claims.id, ids)));
 }

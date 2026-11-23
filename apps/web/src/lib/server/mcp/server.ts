@@ -16,6 +16,8 @@ import {
   mcpAddLearnings,
   mcpAddSource,
   mcpAddSourceImage,
+  mcpDeleteClaims,
+  mcpEditClaims,
   mcpFinishRun,
   mcpGetInstructions,
   mcpListSources,
@@ -161,6 +163,37 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
     },
     async (args) => {
       const res = await mcpAddClaims(db, playerId, args);
+      return {
+        content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    "edit_claims",
+    "Change existing Claims: items of { claimId, text?, countries?, regions?, topics?, force? }. Evidence is never touched. Rewording a Claim a Player or a Round has confirmed needs force: true. Valid items are saved even if other items fail validation.",
+    {
+      duo: z.string().optional(),
+      items: z.array(z.record(z.unknown())).min(1),
+    },
+    async (args) => {
+      const res = await mcpEditClaims(db, playerId, args);
+      return {
+        content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    "delete_claims",
+    "Delete Claims by id, with their Evidence and image links. A Claim a Player or a Round has confirmed is kept unless force: true. Returns what was deleted and what was kept and why.",
+    {
+      claimIds: z.array(z.string().uuid()).min(1).max(200),
+      force: z.boolean().optional(),
+      duo: z.string().optional(),
+    },
+    async (args) => {
+      const res = await mcpDeleteClaims(db, playerId, args);
       return {
         content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
       };

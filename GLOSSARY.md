@@ -62,6 +62,18 @@ _Avoid_: advice, AI note
 A Learning that names something the Duo wants to learn, rather than a fact ("we should learn Brazilian states"). A Player marks it done when they've covered it.
 _Avoid_: todo, goal
 
+**Claim**
+One statement about the world that the Duo keeps in its knowledge bank ("Panama has truck coverage"). It is *speculated* until Evidence verifies it, and *disproved* when Evidence shows it's wrong. A speculated Claim is never treated as fact.
+_Avoid_: fact, knowledge item
+
+**Evidence**
+Something that counts for or against a Claim: a *Round* whose true location confirms it, a *Player* confirming or rejecting it, or *Documentation*. A Round only ever counts for a Claim, since a country can be covered by several vehicles and generations.
+_Avoid_: proof, source (for Evidence itself)
+
+**Source**
+A reference document the Duo has fed into its knowledge bank, such as a Plonkit country page or a PDF guide, kept as text and images split into sections. Documentation Evidence points at a section of a Source.
+_Avoid_: document, reference, doc
+
 **Utterance**
 A timestamped piece of speech by one player, as transcribed.
 

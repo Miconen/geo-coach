@@ -15,7 +15,7 @@ function resolvePromptsDir(): string {
   ].filter((p): p is string => Boolean(p));
 
   for (const dir of candidates) {
-    if (existsSync(path.join(dir, "extract-v1.md"))) {
+    if (existsSync(path.join(dir, "extract-v2.md"))) {
       return dir;
     }
   }
@@ -23,8 +23,8 @@ function resolvePromptsDir(): string {
 }
 
 const CURRENT_VERSIONS: Record<ProcessingRunPurpose, { version: string; file: string }> = {
-  extract: { version: "extract-v1", file: "extract-v1.md" },
-  tips: { version: "tips-v1", file: "tips-v1.md" },
+  extract: { version: "extract-v2", file: "extract-v2.md" },
+  tips: { version: "tips-v2", file: "tips-v2.md" },
   calls: { version: "calls-v1", file: "calls-v1.md" },
 };
 

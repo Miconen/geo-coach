@@ -1,5 +1,5 @@
 {
-  "id": "1b6e086f-910c-4983-8d4b-b0906f74b3c4",
+  "id": "6ee6701d-a3c0-4168-bb55-8bd2f0ae3189",
   "prevId": "959fa15a-1720-48f2-be78-9769201adef8",
   "version": "7",
   "dialect": "postgresql",
@@ -389,6 +389,361 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.claim_evidence": {
+      "name": "claim_evidence",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "claim_id": {
+          "name": "claim_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "duo_id": {
+          "name": "duo_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "direction": {
+          "name": "direction",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "round_id": {
+          "name": "round_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "player_id": {
+          "name": "player_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "claim_evidence_claim_idx": {
+          "name": "claim_evidence_claim_idx",
+          "columns": [
+            {
+              "expression": "claim_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "claim_evidence_duo_idx": {
+          "name": "claim_evidence_duo_idx",
+          "columns": [
+            {
+              "expression": "duo_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "claim_evidence_claim_round_uidx": {
+          "name": "claim_evidence_claim_round_uidx",
+          "columns": [
+            {
+              "expression": "claim_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "round_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "claim_evidence_claim_player_uidx": {
+          "name": "claim_evidence_claim_player_uidx",
+          "columns": [
+            {
+              "expression": "claim_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "player_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "claim_evidence_claim_id_claims_id_fk": {
+          "name": "claim_evidence_claim_id_claims_id_fk",
+          "tableFrom": "claim_evidence",
+          "tableTo": "claims",
+          "columnsFrom": [
+            "claim_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "claim_evidence_duo_id_duos_id_fk": {
+          "name": "claim_evidence_duo_id_duos_id_fk",
+          "tableFrom": "claim_evidence",
+          "tableTo": "duos",
+          "columnsFrom": [
+            "duo_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "claim_evidence_round_id_rounds_id_fk": {
+          "name": "claim_evidence_round_id_rounds_id_fk",
+          "tableFrom": "claim_evidence",
+          "tableTo": "rounds",
+          "columnsFrom": [
+            "round_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "claim_evidence_player_id_players_id_fk": {
+          "name": "claim_evidence_player_id_players_id_fk",
+          "tableFrom": "claim_evidence",
+          "tableTo": "players",
+          "columnsFrom": [
+            "player_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "claim_evidence_run_id_processing_runs_id_fk": {
+          "name": "claim_evidence_run_id_processing_runs_id_fk",
+          "tableFrom": "claim_evidence",
+          "tableTo": "processing_runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "claim_evidence_round_only_for": {
+          "name": "claim_evidence_round_only_for",
+          "value": "\"claim_evidence\".\"kind\" <> 'round' OR \"claim_evidence\".\"direction\" = 'for'"
+        },
+        "claim_evidence_kind_ref": {
+          "name": "claim_evidence_kind_ref",
+          "value": "(\"claim_evidence\".\"kind\" = 'round' AND \"claim_evidence\".\"round_id\" IS NOT NULL) OR (\"claim_evidence\".\"kind\" = 'player' AND \"claim_evidence\".\"player_id\" IS NOT NULL) OR \"claim_evidence\".\"kind\" = 'documentation'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.claims": {
+      "name": "claims",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "duo_id": {
+          "name": "duo_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by_player_id": {
+          "name": "created_by_player_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "countries": {
+          "name": "countries",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "regions": {
+          "name": "regions",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "topics": {
+          "name": "topics",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "claims_duo_idx": {
+          "name": "claims_duo_idx",
+          "columns": [
+            {
+              "expression": "duo_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "claims_duo_id_duos_id_fk": {
+          "name": "claims_duo_id_duos_id_fk",
+          "tableFrom": "claims",
+          "tableTo": "duos",
+          "columnsFrom": [
+            "duo_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "claims_run_id_processing_runs_id_fk": {
+          "name": "claims_run_id_processing_runs_id_fk",
+          "tableFrom": "claims",
+          "tableTo": "processing_runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "claims_created_by_player_id_players_id_fk": {
+          "name": "claims_created_by_player_id_players_id_fk",
+          "tableFrom": "claims",
+          "tableTo": "players",
+          "columnsFrom": [
+            "created_by_player_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -1094,6 +1449,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "claim_id": {
+          "name": "claim_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "source_span_start": {
           "name": "source_span_start",
           "type": "timestamp with time zone",
@@ -1150,6 +1511,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "learnings_claim_idx": {
+          "name": "learnings_claim_idx",
+          "columns": [
+            {
+              "expression": "claim_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -1185,6 +1561,19 @@
           "tableTo": "players",
           "columnsFrom": [
             "author_player_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "learnings_claim_id_claims_id_fk": {
+          "name": "learnings_claim_id_claims_id_fk",
+          "tableFrom": "learnings",
+          "tableTo": "claims",
+          "columnsFrom": [
+            "claim_id"
           ],
           "columnsTo": [
             "id"
@@ -2238,193 +2627,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.transcript_rules": {
-      "name": "transcript_rules",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "duo_id": {
-          "name": "duo_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "replacement": {
-          "name": "replacement",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "country_code": {
-          "name": "country_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "enabled": {
-          "name": "enabled",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "created_by_player_id": {
-          "name": "created_by_player_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "transcript_rules_duo_source_country_uidx": {
-          "name": "transcript_rules_duo_source_country_uidx",
-          "columns": [
-            {
-              "expression": "duo_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "source",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "country_code",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "transcript_rules_duo_id_duos_id_fk": {
-          "name": "transcript_rules_duo_id_duos_id_fk",
-          "tableFrom": "transcript_rules",
-          "tableTo": "duos",
-          "columnsFrom": [
-            "duo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "transcript_rules_created_by_player_id_players_id_fk": {
-          "name": "transcript_rules_created_by_player_id_players_id_fk",
-          "tableFrom": "transcript_rules",
-          "tableTo": "players",
-          "columnsFrom": [
-            "created_by_player_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.transcript_suggestion_dismissals": {
-      "name": "transcript_suggestion_dismissals",
-      "schema": "",
-      "columns": {
-        "duo_id": {
-          "name": "duo_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "replacement": {
-          "name": "replacement",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "transcript_suggestion_dismissals_duo_id_duos_id_fk": {
-          "name": "transcript_suggestion_dismissals_duo_id_duos_id_fk",
-          "tableFrom": "transcript_suggestion_dismissals",
-          "tableTo": "duos",
-          "columnsFrom": [
-            "duo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "transcript_suggestion_dismissals_duo_id_source_replacement_pk": {
-          "name": "transcript_suggestion_dismissals_duo_id_source_replacement_pk",
-          "columns": [
-            "duo_id",
-            "source",
-            "replacement"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.transcript_versions": {
       "name": "transcript_versions",
       "schema": "",
@@ -2542,163 +2744,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.utterance_edits": {
-      "name": "utterance_edits",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "duo_id": {
-          "name": "duo_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "utterance_id": {
-          "name": "utterance_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "char_start": {
-          "name": "char_start",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "char_end": {
-          "name": "char_end",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "original_text": {
-          "name": "original_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "replacement": {
-          "name": "replacement",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by_player_id": {
-          "name": "created_by_player_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "utterance_edits_span_uidx": {
-          "name": "utterance_edits_span_uidx",
-          "columns": [
-            {
-              "expression": "utterance_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "char_start",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "char_end",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "utterance_edits_duo_idx": {
-          "name": "utterance_edits_duo_idx",
-          "columns": [
-            {
-              "expression": "duo_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "utterance_edits_duo_id_duos_id_fk": {
-          "name": "utterance_edits_duo_id_duos_id_fk",
-          "tableFrom": "utterance_edits",
-          "tableTo": "duos",
-          "columnsFrom": [
-            "duo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "utterance_edits_utterance_id_utterances_id_fk": {
-          "name": "utterance_edits_utterance_id_utterances_id_fk",
-          "tableFrom": "utterance_edits",
-          "tableTo": "utterances",
-          "columnsFrom": [
-            "utterance_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "utterance_edits_created_by_player_id_players_id_fk": {
-          "name": "utterance_edits_created_by_player_id_players_id_fk",
-          "tableFrom": "utterance_edits",
-          "tableTo": "players",
-          "columnsFrom": [
-            "created_by_player_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },

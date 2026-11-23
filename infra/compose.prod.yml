@@ -42,6 +42,12 @@ services:
       LATEST_COMPANION_VERSION: ${LATEST_COMPANION_VERSION:-0.1.0}
       PUBLIC_MAPBOX_TOKEN: ${PUBLIC_MAPBOX_TOKEN:-}
       PUBLIC_GOOGLE_MAPS_API_KEY: ${PUBLIC_GOOGLE_MAPS_API_KEY:-}
+      SOURCE_IMAGES_DIR: /data/source-images
+      # Room for add_source_image (a 2 MiB image is ~2.8 MB as base64) and long Sources
+      BODY_SIZE_LIMIT: 4M
+    # Images of knowledge bank Sources. Not in the database, so back it up too.
+    volumes:
+      - source-images:/data/source-images
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -63,3 +69,4 @@ services:
 
 volumes:
   pgdata:
+  source-images:

@@ -4,7 +4,7 @@ geo-coach does not have a generator that makes realistic GeoGuessr Games in volu
 
 ## Why this is out of scope
 
-The generator was meant to let the statistics page (#18) be built without real history. That need went away once the dev database could hold a copy of production: real Games, run through the real derivation, with every quirk a generator would have to imitate. That includes the Rounds where Damage doesn't equal the score gap times the multiplier, which nobody can explain yet, so a generator would get them wrong.
+The generator was meant to let the statistics page (#18) be built without real history. That need went away once the dev database could hold a copy of production: real Games, run through the real derivation, with every quirk a generator would have to imitate. That includes quirks like each team carrying its own damage multiplier (#49), which went unnoticed for a while; a generator would have got them wrong.
 
 The two jobs it was meant to do are covered in other ways:
 

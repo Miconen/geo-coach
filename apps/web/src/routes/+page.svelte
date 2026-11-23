@@ -1,12 +1,27 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invalidateAll } from "$app/navigation";
-  import { getCountryName, type DuoSseEvent, type LearningKind, type ReactionType } from "@geo-coach/shared";
+  import {
+    getCountryName,
+    type ClaimStatus,
+    type DuoSseEvent,
+    type EvidenceDirection,
+    type LearningKind,
+    type ReactionType,
+  } from "@geo-coach/shared";
+  import ClaimCard from "$lib/components/ClaimCard.svelte";
   import GameCard from "$lib/components/GameCard.svelte";
   import RoundCoachingCard from "$lib/components/RoundCoachingCard.svelte";
   import ThemeSwitcher from "$lib/components/ThemeSwitcher.svelte";
   import UtteranceText from "$lib/components/UtteranceText.svelte";
   import { formatRelSec } from "$lib/workbench/format.js";
+  import {
+    CLAIM_STATUSES,
+    CLAIM_STATUS_META,
+    countByStatus,
+    filterWorkbenchClaims,
+    groupClaimsByCountry,
+  } from "$lib/workbench/knowledge.js";
   import { gameSlice, roundSlice } from "$lib/workbench/slices.js";
   import type {
     CountryDossier,
@@ -18,7 +33,7 @@
   const wb = $derived(data.workbench);
 
   // Navigation & filter state
-  let mode = $state<"learnings" | "session" | "game">("learnings");
+  let mode = $state<"learnings" | "knowledge" | "session" | "game">("learnings");
   let queueFilter = $state<"all" | "mistakes" | "starred" | "manual" | "stale" | "study">("all");
   let selectedCountry = $state<string | null>(null);
   let selectedPair = $state<[string, string] | null>(null);
@@ -36,6 +51,9 @@
   let selectedRoundId = $state<string | null>(null);
   let highlightedUtteranceId = $state<string | null>(null);
   let timelineSearch = $state("");
+  let claimStatusFilter = $state<ClaimStatus | "all">("all");
+  let claimTopicFilter = $state<string | "all">("all");
+  let claimSearch = $state("");
 
   // Live SSE heartbeat statuses
   let sseLiveStatuses = $state<typeof data.workbench extends null ? never : NonNullable<typeof data.workbench>["liveStatuses"] | null>(null);
@@ -152,8 +170,29 @@
     return wb && round ? gameSlice(wb, round.gameId) : null;
   });
 
+  const claimStatusCounts = $derived(countByStatus(wb?.claims ?? []));
+  const claimTopics = $derived([...new Set((wb?.claims ?? []).flatMap((c) => c.topics))].sort());
+  const claimGroups = $derived(
+    groupClaimsByCountry(
+      filterWorkbenchClaims(wb?.claims ?? [], {
+        status: claimStatusFilter,
+        topic: claimTopicFilter,
+        query: claimSearch,
+        country: selectedCountry,
+      }),
+      selectedCountry,
+    ),
+  );
+  const activeLearningClaim = $derived(
+    activeLearning?.claimId ? (wb?.claimsById[activeLearning.claimId] ?? null) : null,
+  );
+
   const activeCountryDossier = $derived(
     selectedCountry ? wb?.countryDossiers.find((c) => c.code === selectedCountry) ?? null : null,
+  );
+
+  const activeCountryClaims = $derived(
+    selectedCountry ? (wb?.claims ?? []).filter((c) => c.countries.includes(selectedCountry!)) : [],
   );
 
   const standaloneGame = $derived(
@@ -252,6 +291,20 @@
       body: JSON.stringify({ reaction }),
     });
     await invalidateAll();
+  }
+
+  async function setClaimEvidence(claimId: string, direction: EvidenceDirection | null) {
+    await fetch(`/api/claims/${claimId}/evidence`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ direction }),
+    });
+    await invalidateAll();
+  }
+
+  function openLearning(learningId: string) {
+    mode = "learnings";
+    selectedLearningId = learningId;
   }
 
   async function deleteUtterance(u: WorkbenchUtterance) {
@@ -531,6 +584,28 @@
 
         <div>
           <div class="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+            Knowledge Bank
+          </div>
+          <nav class="mt-1.5 grid gap-0.5 text-xs">
+            {#each [["all", `All Claims (${wb.claims.length})`], ...CLAIM_STATUSES.map((st) => [st, `${CLAIM_STATUS_META[st].label} (${claimStatusCounts[st]})`])] as [key, label]}
+              <button
+                onclick={() => {
+                  mode = "knowledge";
+                  claimStatusFilter = key as typeof claimStatusFilter;
+                  selectedPair = null;
+                }}
+                class="rounded-md px-2 py-1.5 text-left {mode === 'knowledge' && claimStatusFilter === key
+                  ? 'bg-[var(--accent-soft)] font-semibold text-[var(--accent-soft-ink)]'
+                  : 'hover:bg-[var(--surface-subtle)]'}"
+              >
+                {label}
+              </button>
+            {/each}
+          </nav>
+        </div>
+
+        <div>
+          <div class="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
             Atlas (Region → Country)
           </div>
           <div class="mt-1.5 space-y-2 text-xs">
@@ -541,7 +616,7 @@
                   {#each group.countries as c}
                     <button
                       onclick={() => {
-                        mode = "learnings";
+                        if (mode !== "knowledge") mode = "learnings";
                         selectedPair = null;
                         selectedCountry = selectedCountry === c.code ? null : c.code;
                       }}
@@ -557,7 +632,11 @@
                         {#if c.missCount > 0}
                           <span class="h-1.5 w-1.5 rounded-full bg-[var(--danger)]" title="{c.missCount} misses"></span>
                         {/if}
-                        {c.learningCount === 0 && c.roundsPlayed > 0 ? "0·NR" : c.learningCount}
+                        {mode === "knowledge"
+                          ? c.claimCount
+                          : c.learningCount === 0 && c.roundsPlayed > 0
+                            ? "0·NR"
+                            : c.learningCount}
                       </span>
                     </button>
                   {/each}
@@ -663,6 +742,20 @@
                 </button>
               </div>
 
+              {#if activeCountryClaims.length > 0}
+                <div class="mt-3 space-y-1.5 border-t border-[var(--border)] pt-3">
+                  <div class="flex items-center justify-between text-xs font-semibold text-[var(--muted)]">
+                    <span>Knowledge bank · {activeCountryClaims.length} Claim{activeCountryClaims.length === 1 ? "" : "s"}</span>
+                    <button onclick={() => (mode = "knowledge")} class="text-[var(--accent)] hover:underline">
+                      Evidence →
+                    </button>
+                  </div>
+                  {#each activeCountryClaims as claim (claim.id)}
+                    <ClaimCard {claim} {wb} compact onSetEvidence={setClaimEvidence} />
+                  {/each}
+                </div>
+              {/if}
+
               {#if activeCountryDossier.learningCount === 0 && activeCountryDossier.roundIds.length > 0}
                 <div class="mt-3 space-y-2 border-t border-[var(--border)] pt-3">
                   <div class="text-xs font-semibold text-[var(--muted)]">
@@ -744,6 +837,21 @@
                       {#if item.status === "superseded"}
                         <span class="rounded bg-[var(--badge-bg)] px-1.5 py-0.5 text-[var(--muted)]">Superseded</span>
                       {/if}
+                      {#if item.claimId && wb.claimsById[item.claimId]}
+                        {@const claimStatus = wb.claimsById[item.claimId]!.status}
+                        <span
+                          title="Claim: {CLAIM_STATUS_META[claimStatus].hint}"
+                          class="rounded px-1.5 py-0.5 {claimStatus === 'verified'
+                            ? 'bg-[var(--ok-bg)] text-[var(--ok)]'
+                            : claimStatus === 'disproved'
+                              ? 'bg-[var(--danger-bg)] text-[var(--danger)]'
+                              : claimStatus === 'disputed'
+                                ? 'bg-[var(--warn-bg)] text-[var(--warn)]'
+                                : 'border border-dashed border-[var(--border-strong)] text-[var(--muted)]'}"
+                        >
+                          {claimStatus === "speculated" ? "? " : ""}{CLAIM_STATUS_META[claimStatus].label}
+                        </span>
+                      {/if}
                     </div>
                     <div class="flex items-center gap-1.5 mono">
                       {#if item.worstHpDelta < 0}
@@ -819,6 +927,97 @@
               {/each}
             </section>
           {/if}
+        {:else if mode === "knowledge"}
+          <!-- Knowledge bank: Claims by country, with their Evidence, and the Duo's Sources -->
+          <div class="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 flex flex-wrap items-center gap-2 text-xs">
+            <input
+              bind:value={claimSearch}
+              placeholder="Search Claims"
+              class="min-w-[200px] flex-1 rounded-lg border border-[var(--border-strong)] px-2.5 py-1.5 text-sm"
+            />
+            <select bind:value={claimStatusFilter} class="rounded-lg border border-[var(--border-strong)] px-2 py-1.5">
+              <option value="all">All statuses</option>
+              {#each CLAIM_STATUSES as st}
+                <option value={st}>{CLAIM_STATUS_META[st].label}</option>
+              {/each}
+            </select>
+            <select bind:value={claimTopicFilter} class="rounded-lg border border-[var(--border-strong)] px-2 py-1.5">
+              <option value="all">All topics</option>
+              {#each claimTopics as topic}
+                <option value={topic}>#{topic}</option>
+              {/each}
+            </select>
+            {#if selectedCountry}
+              <button
+                onclick={() => (selectedCountry = null)}
+                class="rounded-lg border border-[var(--accent)] bg-[var(--accent-soft)] px-2.5 py-1.5 font-semibold text-[var(--accent-soft-ink)]"
+              >
+                {selectedCountry} ✕
+              </button>
+            {/if}
+            <button
+              onclick={() => (mode = "learnings")}
+              class="rounded-lg border border-[var(--border-strong)] px-3 py-1.5 font-medium"
+            >
+              ← Learnings
+            </button>
+          </div>
+
+          <p class="px-1 text-[11px] text-[var(--muted)]">
+            A Claim's status comes only from its Evidence: Rounds whose location confirms it, your ✓/✗, and Source sections.
+            Unconfirmed Claims are guesses, not facts.
+          </p>
+
+          {#if claimGroups.length === 0}
+            <div class="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 text-center text-sm text-[var(--muted)]">
+              {wb.claims.length === 0
+                ? "No Claims yet. Processing runs and ingested Sources add them."
+                : "No Claims match these filters."}
+            </div>
+          {:else}
+            <div class="space-y-4">
+              {#each claimGroups as group (group.code ?? "general")}
+                <div class="space-y-2">
+                  <div class="px-1 text-xs font-bold">
+                    {#if group.code}
+                      <span class="mono mr-1 text-[var(--accent)]">{group.code}</span>
+                    {/if}
+                    {group.name}
+                    <span class="mono ml-1 font-normal text-[var(--muted)]">{group.claims.length}</span>
+                  </div>
+                  {#each group.claims as claim (claim.id)}
+                    <ClaimCard {claim} {wb} onSetEvidence={setClaimEvidence} onSelectLearning={openLearning} />
+                  {/each}
+                </div>
+              {/each}
+            </div>
+          {/if}
+
+          <section class="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-2">
+            <div class="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+              Sources ({wb.sources.length})
+            </div>
+            {#if wb.sources.length === 0}
+              <p class="text-xs text-[var(--muted)]">
+                No Sources yet. Hand an agent a Plonkit page or guide and ask it to ingest it.
+              </p>
+            {/if}
+            {#each wb.sources as src (src.id)}
+              <div class="flex flex-wrap items-center justify-between gap-2 rounded bg-[var(--surface-subtle)] px-2.5 py-1.5 text-xs">
+                <span class="min-w-0 truncate">
+                  <span class="rounded bg-[var(--badge-bg)] px-1 text-[10px] uppercase text-[var(--badge-ink)]">{src.kind}</span>
+                  {#if src.url}
+                    <a href={src.url} target="_blank" rel="noopener noreferrer" class="ml-1 font-medium hover:underline">{src.title}</a>
+                  {:else}
+                    <span class="ml-1 font-medium">{src.title}</span>
+                  {/if}
+                </span>
+                <span class="mono text-[11px] text-[var(--muted)]">
+                  v{src.latestVersionNo} · {new Date(src.updatedAt).toLocaleDateString()} · {src.sectionCount} sections · {src.imageCount} images
+                </span>
+              </div>
+            {/each}
+          </section>
         {:else if standaloneGame}
           {@const g = standaloneGame}
           <!-- Game without a Session: its Rounds only, no speech -->
@@ -1087,6 +1286,15 @@
                   {activeLearning.dismissed ? "Dismissed" : "Dismiss"}
                 </button>
               </div>
+
+              {#if activeLearningClaim && activeLearningRevealed}
+                <div class="space-y-1">
+                  <div class="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                    Rests on Claim
+                  </div>
+                  <ClaimCard claim={activeLearningClaim} {wb} onSetEvidence={setClaimEvidence} />
+                </div>
+              {/if}
 
               <!-- Two-way supersession links -->
               {#if activeLearning.supersededByLearningIds.length > 0}

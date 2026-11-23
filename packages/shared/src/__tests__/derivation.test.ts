@@ -9,6 +9,7 @@ import {
   isValidIsoCountryCode,
   linkUtteranceToRounds,
   learningItemInputSchema,
+  roundDamage,
   uuidv7,
   type GeocodedPoint,
   type Geocoder,
@@ -260,6 +261,30 @@ describe("deriveGameFromRawDuel", () => {
     expect(r2.hpDelta).toBe(Math.round((4820 - 4600) * 1.5));
   });
 
+  it("takes Damage from the dealing team's own multiplier, not the Round's (#49)", () => {
+    // Ranked team duels leave rounds[].damageMultiplier at 1; each team has its own in roundResults
+    const duel = {
+      ...sampleDuel,
+      rounds: sampleDuel.rounds.map((r) => ({ ...r, damageMultiplier: 1 })),
+      teams: sampleDuel.teams.map((t) => ({
+        ...t,
+        roundResults:
+          t.id === "gg_team_duo"
+            ? [
+                { roundNumber: 1, multiplier: 1, damageDealt: 1120 },
+                { roundNumber: 2, multiplier: 2.5, damageDealt: 550 },
+              ]
+            : [
+                { roundNumber: 1, multiplier: 1.5, damageDealt: 0 },
+                { roundNumber: 2, multiplier: 1, damageDealt: 0 },
+              ],
+      })),
+    };
+    const [r1, r2] = deriveGameFromRawDuel(duel, "gg_team_duo", {}, stubGeocoder).rounds;
+    expect(r1).toMatchObject({ hpDelta: 1120, damageMultiplier: 1 });
+    expect(r2).toMatchObject({ hpDelta: 550, damageMultiplier: 2.5 });
+  });
+
   it("places guesses and the Round's Region with the Geocoder", () => {
     const derived = deriveGameFromRawDuel(
       sampleDuel,
@@ -421,6 +446,45 @@ describe("deriveGameFromRawDuel", () => {
       { roundNumber: 1, phase: "results" },
       { roundNumber: 2, phase: "play" },
     ]);
+  });
+});
+
+describe("roundDamage", () => {
+  // Real Rounds: each team's multiplier differs, and the team that wins the Round deals with its own
+  it("uses the Opponents' multiplier when they deal the Damage", () => {
+    expect(
+      roundDamage({
+        duoBestScore: 4875,
+        opponentBestScore: 4919,
+        duoResult: { multiplier: 1.5, damageDealt: 0 },
+        opponentResult: { multiplier: 1, damageDealt: 44 },
+      }),
+    ).toEqual({ hpDelta: -44, damageMultiplier: 1 });
+  });
+
+  it("counts overkill: GeoGuessr's damageDealt, not the HP the loser had left", () => {
+    expect(
+      roundDamage({
+        duoBestScore: 3099,
+        opponentBestScore: 4159,
+        duoResult: { multiplier: 1.5, damageDealt: 0, healthBefore: 1300, healthAfter: 0 },
+        opponentResult: { multiplier: 2.5, damageDealt: 2650 },
+      }),
+    ).toEqual({ hpDelta: -2650, damageMultiplier: 2.5 });
+  });
+
+  it("multiplies the gap itself when damageDealt is missing, and falls back to the Round's multiplier", () => {
+    expect(
+      roundDamage({ duoBestScore: 5000, opponentBestScore: 4000, duoResult: { multiplier: 2 } }),
+    ).toEqual({ hpDelta: 2000, damageMultiplier: 2 });
+    expect(roundDamage({ duoBestScore: 4000, opponentBestScore: 4100, roundMultiplier: 1.5 })).toEqual({
+      hpDelta: -150,
+      damageMultiplier: 1.5,
+    });
+    expect(roundDamage({ duoBestScore: 4000, opponentBestScore: 4000 })).toEqual({
+      hpDelta: 0,
+      damageMultiplier: 1,
+    });
   });
 });
 

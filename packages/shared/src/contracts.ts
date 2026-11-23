@@ -29,6 +29,9 @@ export const learningKindSchema = z.enum([
 ]);
 export type LearningKind = z.infer<typeof learningKindSchema>;
 
+/** Learning kinds that can rest on a Claim; strategies, mistakes and Study items can't. */
+export const CLAIM_LINKABLE_KINDS: ReadonlySet<LearningKind> = new Set(["clue", "distinguisher", "other"]);
+
 export const learningOriginSchema = z.enum(["speech", "agent", "manual"]);
 export type LearningOrigin = z.infer<typeof learningOriginSchema>;
 
@@ -39,6 +42,10 @@ export const processingRunPurposeSchema = z.enum(["extract", "tips", "calls"]);
 export type ProcessingRunPurpose = z.infer<typeof processingRunPurposeSchema>;
 /** The purposes whose runs produce Learnings; `calls` runs produce Call labels (ADR 0002). */
 export type LearningRunPurpose = Exclude<ProcessingRunPurpose, "calls">;
+
+/** What `get_instructions` serves: each Processing run purpose, plus Source ingestion (not a run). */
+export const instructionPurposeSchema = z.enum(["extract", "tips", "calls", "ingest"]);
+export type InstructionPurpose = z.infer<typeof instructionPurposeSchema>;
 
 export const processingRunStatusSchema = z.enum(["open", "finished", "abandoned"]);
 export type ProcessingRunStatus = z.infer<typeof processingRunStatusSchema>;
@@ -86,8 +93,19 @@ export const learningItemInputSchema = z
     agentNote: z.string().trim().max(1000).nullable().optional(),
     utteranceRefs: z.array(z.string().min(1)).min(1),
     roundIds: z.array(z.string().uuid()).default([]),
+    /** The Claim this clue or distinguisher rests on (GLOSSARY: Claim). */
+    claimId: z.string().uuid().nullable().optional(),
   })
-  .superRefine(validateRegionsInCountries);
+  .superRefine((val, ctx) => {
+    validateRegionsInCountries(val, ctx);
+    if (val.claimId && !CLAIM_LINKABLE_KINDS.has(val.kind)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["claimId"],
+        message: `A ${val.kind} Learning isn't a statement about the world, so it links to no Claim`,
+      });
+    }
+  });
 export type LearningItemInput = z.infer<typeof learningItemInputSchema>;
 
 /**
@@ -260,7 +278,17 @@ export const duoSseEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("changed"),
-    entity: z.enum(["session", "game", "run", "learning", "reaction", "hotwords", "corrections"]),
+    entity: z.enum([
+      "session",
+      "game",
+      "run",
+      "learning",
+      "reaction",
+      "hotwords",
+      "corrections",
+      "claim",
+      "source",
+    ]),
     id: z.string().optional(),
     at: z.string().datetime(),
   }),

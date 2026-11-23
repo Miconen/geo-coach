@@ -122,7 +122,9 @@
 <div class="mt-2 flex gap-5">
   <div>
     <div class="text-lg font-bold {round.hpDelta < 0 ? 'text-red-400' : 'text-green-400'}">{formatSigned(round.hpDelta)}</div>
-    <div class="stat-label">DAMAGE</div>
+    <div class="stat-label" title="Score gap × the multiplier of the team that dealt it">
+      DAMAGE{round.damageMultiplier !== 1 ? ` ×${round.damageMultiplier}` : ""}
+    </div>
   </div>
   <div>
     <div class="text-lg font-bold">{formatNumber(round.duoBestScore)}</div>
@@ -216,7 +218,8 @@
           <Flag code={x.countryCode} size="sm" />
           <span class="truncate">{x.countryCode ? getCountryName(x.countryCode) : "?"}</span>
           <span class="inline-block size-2 shrink-0 rounded-full" style="background: {classColor(xCls)}" title={xCls ? CLASS_LABEL[xCls] : "Unclassified"}></span>
-          <span class="ml-auto font-mono text-xs {x.hpDelta < 0 ? 'text-red-400' : 'text-green-400'}">{formatSigned(x.hpDelta)}</span>
+          {#if x.damageMultiplier !== 1}<span class="ml-auto font-mono text-[10px] text-white/50">×{x.damageMultiplier}</span>{/if}
+          <span class="{x.damageMultiplier !== 1 ? '' : 'ml-auto '}font-mono text-xs {x.hpDelta < 0 ? 'text-red-400' : 'text-green-400'}">{formatSigned(x.hpDelta)}</span>
         </button>
       </li>
     {/each}

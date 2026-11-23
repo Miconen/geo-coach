@@ -66,7 +66,7 @@ class DuoEventBus {
 
   emitChanged(
     duoId: string,
-    entity: "session" | "game" | "run" | "learning" | "reaction" | "hotwords" | "corrections",
+    entity: Extract<DuoSseEvent, { type: "changed" }>["entity"],
     id?: string,
   ): void {
     this.publish(duoId, {

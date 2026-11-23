@@ -1,16 +1,26 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { processingRunPurposeSchema } from "@geo-coach/shared";
+import {
+  claimStatusSchema,
+  instructionPurposeSchema,
+  isoCountryCodeSchema,
+  processingRunPurposeSchema,
+  sourceKindSchema,
+} from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
 import { extractBearerToken, verifyApiToken } from "../auth/index.js";
 import {
   mcpAddCallLabels,
+  mcpAddClaims,
   mcpAddLearnings,
+  mcpAddSource,
+  mcpAddSourceImage,
   mcpFinishRun,
   mcpGetInstructions,
   mcpListWork,
   mcpReadRange,
+  mcpSearchClaims,
   mcpStartRun,
 } from "./workflow.js";
 
@@ -22,9 +32,9 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
 
   server.tool(
     "get_instructions",
-    "Return the versioned processing instructions for extract, tips or calls runs.",
+    "Return the versioned instructions for extract, tips or calls Processing runs, or for ingesting a Source into the knowledge bank (ingest).",
     {
-      purpose: processingRunPurposeSchema,
+      purpose: instructionPurposeSchema,
     },
     async ({ purpose }) => {
       const res = await mcpGetInstructions(purpose);
@@ -71,7 +81,7 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
 
   server.tool(
     "read_range",
-    "Read an open Processing run's range. extract/tips: compact transcript, Round markers, ±2 min uncitable context, existing Learnings, and topic tags. calls: the Split and Spread Rounds with both teams' guessed countries and Regions and the Utterances spoken while guessing.",
+    "Read an open Processing run's range. extract/tips: compact transcript, Round markers, ±2 min uncitable context, existing Learnings, topic tags, and the Duo's Claims (with derived status) for every country in the range's Rounds. calls: the Split and Spread Rounds with both teams' guessed countries and Regions and the Utterances spoken while guessing.",
     {
       runId: z.string().uuid(),
     },
@@ -91,6 +101,13 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
         `Range: ${res.rangeStart} .. ${res.rangeEnd} (${res.citableUtteranceCount} citable utterances)`,
         `Existing topics: ${res.existingTopics.join(", ") || "(none)"}`,
         `Existing Learnings in range: ${JSON.stringify(res.existingLearnings)}`,
+        `Claims for this range's countries (${res.claimCountries.join(", ") || "none"}):`,
+        ...(res.claims.length > 0
+          ? res.claims.map(
+              (c) =>
+                `- [claimId=${c.id}] ${c.status.toUpperCase()} (${c.evidence}) ${c.countries.join("/") || "-"}: ${c.text}${c.topics.length > 0 ? ` #${c.topics.join(" #")}` : ""}`,
+            )
+          : ["(none yet)"]),
         "",
         res.transcript,
       ].join("\n");
@@ -102,13 +119,83 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
 
   server.tool(
     "add_learnings",
-    "Add a batch of Learnings to an open Processing run. Valid items are saved even if other items fail validation.",
+    "Add a batch of Learnings to an open Processing run. A clue or distinguisher may pass claimId to link the Claim it rests on. Valid items are saved even if other items fail validation.",
     {
       runId: z.string().uuid(),
       items: z.array(z.record(z.unknown())).min(1),
     },
     async ({ runId, items }) => {
       const res = await mcpAddLearnings(db, playerId, runId, items);
+      return {
+        content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    "search_claims",
+    "Search the Duo's knowledge bank Claims by text, countries, topics and derived status (speculated, verified, disproved, disputed). Always search before creating a Claim.",
+    {
+      query: z.string().max(200).optional(),
+      countries: z.array(isoCountryCodeSchema).optional(),
+      topics: z.array(z.string()).optional(),
+      status: claimStatusSchema.optional(),
+      duo: z.string().optional(),
+    },
+    async (args) => {
+      const res = await mcpSearchClaims(db, playerId, args);
+      return {
+        content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    "add_claims",
+    "Create Claims ({ text, countries, regions?, topics?, evidence? }) and/or add Evidence to existing ones ({ claimId, evidence }). Evidence: { kind: \"round\", roundId } (inside the run's range; Rounds only count for) or { kind: \"documentation\", sourceVersionId, section, direction, images? }. Pass runId inside a Processing run, or duo when ingesting a Source. Valid items are saved even if other items fail validation.",
+    {
+      runId: z.string().uuid().optional(),
+      duo: z.string().optional(),
+      items: z.array(z.record(z.unknown())).min(1),
+    },
+    async (args) => {
+      const res = await mcpAddClaims(db, playerId, args);
+      return {
+        content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    "add_source",
+    "Store a reference document (Plonkit page, PDF, guide) a Player gave you, converted to markdown, as a knowledge bank Source. Pass sourceId to add a new version of an existing Source. Returns the section anchors to cite, the image names to upload, and Claims to re-check. The server never fetches URLs.",
+    {
+      title: z.string().trim().min(1).max(300),
+      url: z.string().url().max(2000).optional(),
+      kind: sourceKindSchema,
+      sourceId: z.string().uuid().optional(),
+      markdown: z.string().min(1),
+      duo: z.string().optional(),
+    },
+    async (args) => {
+      const res = await mcpAddSource(db, playerId, args);
+      return {
+        content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    "add_source_image",
+    "Upload one image of a Source version (PNG, JPEG, GIF or WebP, base64, size-capped), named as the markdown references it. Uploading the same name again replaces it.",
+    {
+      sourceVersionId: z.string().uuid(),
+      name: z.string().trim().min(1).max(200),
+      mimeType: z.string().min(1).max(100),
+      base64: z.string().min(1),
+    },
+    async (args) => {
+      const res = await mcpAddSourceImage(db, playerId, args);
       return {
         content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
       };
@@ -161,6 +248,13 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
 
   server.prompt("calls", "Label Calls on Split and Spread Rounds in a geo-coach Session", async () => {
     const { instructions } = await mcpGetInstructions("calls");
+    return {
+      messages: [{ role: "user", content: { type: "text", text: instructions } }],
+    };
+  });
+
+  server.prompt("ingest", "Ingest a reference document into the geo-coach knowledge bank", async () => {
+    const { instructions } = await mcpGetInstructions("ingest");
     return {
       messages: [{ role: "user", content: { type: "text", text: instructions } }],
     };

@@ -171,7 +171,7 @@ describe("Seam 4: Remote MCP tools & Processing run workflow", () => {
 
   it("walks list_work -> start_run -> read_range -> add_learnings (partial validation) -> finish_run", async () => {
     const instr = await mcpGetInstructions("extract");
-    expect(instr.promptVersion).toBe("extract-v1");
+    expect(instr.promptVersion).toBe("extract-v3");
     expect(instr.instructions).toContain("Learning");
 
     const work = await mcpListWork(handle.db, mikoId, { purpose: "extract" });
@@ -187,7 +187,7 @@ describe("Seam 4: Remote MCP tools & Processing run workflow", () => {
       agent: "claude",
       model: "claude-sonnet",
     });
-    expect(started.promptVersion).toBe("extract-v1");
+    expect(started.promptVersion).toBe("extract-v3");
 
     // Overlapping open extract run is refused, while overlapping open tips run is allowed
     await expect(

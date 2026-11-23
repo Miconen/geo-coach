@@ -49,7 +49,7 @@ Point any MCP-compatible agent at `https://<your-domain>/mcp` (or `http://localh
 Authorization: Bearer <your gc_mcp_... token>
 ```
 
-Available tools: `get_instructions`, `list_work`, `start_run`, `read_range`, `add_learnings`, `finish_run` (plus `extract` and `tips` prompts).
+Available tools: `get_instructions`, `list_work`, `start_run`, `read_range`, `add_learnings`, `add_call_labels`, `search_claims`, `add_claims`, `add_source`, `add_source_image`, `finish_run` (plus `extract`, `tips`, `calls` and `ingest` prompts).
 
 ## Companion on a Player's PC
 

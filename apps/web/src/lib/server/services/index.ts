@@ -2,4 +2,6 @@ export * from "./recordings.js";
 export * from "./geoguessr.js";
 export * from "./processing.js";
 export * from "./calls.js";
+export * from "./claims.js";
+export * from "./sources.js";
 export * from "./transcript-corrections.js";

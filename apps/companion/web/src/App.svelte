@@ -156,6 +156,7 @@
 
   let ws: WebSocket | null = null;
   let audioCtx: AudioContext | null = null;
+  let streamReady = false;
   let mediaStream: MediaStream | null = null;
   let bufferedFrames: ArrayBuffer[] = [];
   let bufferStartedAtMs: number | null = null;
@@ -355,7 +356,9 @@
             type: "start",
             duoId: selectedDuoId,
             continuedFromRecordingId: isReconnect ? lastRecordingId : null,
-            clockAnchorMs: isReconnect ? (bufferStartedAtMs ?? Date.now()) : Date.now(),
+            clockAnchorMs: isReconnect
+              ? (bufferStartedAtMs ?? Date.now())
+              : (captureStartedAtMs ?? Date.now()),
           }),
         );
       }
@@ -377,17 +380,20 @@
         }
         bufferedFrames = [];
         bufferStartedAtMs = null;
+        streamReady = true;
         void loadState();
       } else if (msg.type === "autoStopped") {
         statusMessage = msg.notice ?? "Auto-stopped after silence.";
         void stopCapture(false);
       } else if (msg.type === "error") {
         statusMessage = msg.message ?? "Companion error";
+        if (!streamReady) void stopCapture(false);
       }
     };
 
     socket.onclose = () => {
       ws = null;
+      streamReady = false;
       if (isCapturing) {
         if (bufferStartedAtMs === null) bufferStartedAtMs = Date.now();
         reconnectTimer = window.setTimeout(() => connectWebSocket(true), 2000);
@@ -416,7 +422,7 @@
     startMeter(audioCtx, source);
     const worklet = new AudioWorkletNode(audioCtx, "pcm16-processor");
     worklet.port.onmessage = (ev: MessageEvent<ArrayBuffer>) => {
-      if (ws?.readyState === WebSocket.OPEN) {
+      if (streamReady && ws?.readyState === WebSocket.OPEN) {
         ws.send(ev.data);
       } else if (isCapturing) {
         bufferedFrames.push(ev.data);
@@ -431,6 +437,7 @@
 
   async function stopCapture(sendStop: boolean = true) {
     isCapturing = false;
+    streamReady = false;
     if (reconnectTimer) clearTimeout(reconnectTimer);
     if (sendStop && ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "stop" }));

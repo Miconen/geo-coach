@@ -20,6 +20,28 @@ export function computePcmRms(pcmBuffer: Buffer): number {
 }
 
 /**
+ * Finds the quietest 30 ms in the last 2 s of 16 kHz mono Int16 PCM, so a chunk cut lands
+ * in a gap between words. Returns a byte offset on a whole millisecond.
+ */
+export function findQuietCutByte(pcm: Buffer): number {
+  const bytesPerMs = 32;
+  const windowBytes = 30 * bytesPerMs;
+  const stepBytes = 10 * bytesPerMs;
+  const wholeMsBytes = pcm.byteLength - (pcm.byteLength % bytesPerMs);
+  let at = Math.max(0, wholeMsBytes - 2000 * bytesPerMs);
+  let cut = pcm.byteLength;
+  let quietest = Infinity;
+  for (; at + windowBytes <= wholeMsBytes; at += stepBytes) {
+    const rms = computePcmRms(pcm.subarray(at, at + windowBytes));
+    if (rms < quietest) {
+      quietest = rms;
+      cut = at + windowBytes / 2;
+    }
+  }
+  return cut;
+}
+
+/**
  * Converts a finished 16 kHz mono Int16 raw PCM Recording to lossless FLAC using ffmpeg.
  * Returns the FLAC path if conversion succeeded, or null if ffmpeg is unavailable.
  */

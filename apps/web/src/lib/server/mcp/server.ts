@@ -1,16 +1,18 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { processingRunPurposeSchema } from "@geo-coach/shared";
+import { claimStatusSchema, isoCountryCodeSchema, processingRunPurposeSchema } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
 import { extractBearerToken, verifyApiToken } from "../auth/index.js";
 import {
   mcpAddCallLabels,
+  mcpAddClaims,
   mcpAddLearnings,
   mcpFinishRun,
   mcpGetInstructions,
   mcpListWork,
   mcpReadRange,
+  mcpSearchClaims,
   mcpStartRun,
 } from "./workflow.js";
 
@@ -71,7 +73,7 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
 
   server.tool(
     "read_range",
-    "Read an open Processing run's range. extract/tips: compact transcript, Round markers, ±2 min uncitable context, existing Learnings, and topic tags. calls: the Split and Spread Rounds with both teams' guessed countries and Regions and the Utterances spoken while guessing.",
+    "Read an open Processing run's range. extract/tips: compact transcript, Round markers, ±2 min uncitable context, existing Learnings, topic tags, and the Duo's Claims (with derived status) for every country in the range's Rounds. calls: the Split and Spread Rounds with both teams' guessed countries and Regions and the Utterances spoken while guessing.",
     {
       runId: z.string().uuid(),
     },
@@ -91,6 +93,13 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
         `Range: ${res.rangeStart} .. ${res.rangeEnd} (${res.citableUtteranceCount} citable utterances)`,
         `Existing topics: ${res.existingTopics.join(", ") || "(none)"}`,
         `Existing Learnings in range: ${JSON.stringify(res.existingLearnings)}`,
+        `Claims for this range's countries (${res.claimCountries.join(", ") || "none"}):`,
+        ...(res.claims.length > 0
+          ? res.claims.map(
+              (c) =>
+                `- [claimId=${c.id}] ${c.status.toUpperCase()} (${c.evidence}) ${c.countries.join("/") || "-"}: ${c.text}${c.topics.length > 0 ? ` #${c.topics.join(" #")}` : ""}`,
+            )
+          : ["(none yet)"]),
         "",
         res.transcript,
       ].join("\n");
@@ -102,13 +111,47 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
 
   server.tool(
     "add_learnings",
-    "Add a batch of Learnings to an open Processing run. Valid items are saved even if other items fail validation.",
+    "Add a batch of Learnings to an open Processing run. A clue or distinguisher may pass claimId to link the Claim it rests on. Valid items are saved even if other items fail validation.",
     {
       runId: z.string().uuid(),
       items: z.array(z.record(z.unknown())).min(1),
     },
     async ({ runId, items }) => {
       const res = await mcpAddLearnings(db, playerId, runId, items);
+      return {
+        content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    "search_claims",
+    "Search the Duo's knowledge bank Claims by text, countries, topics and derived status (speculated, verified, disproved, disputed). Always search before creating a Claim.",
+    {
+      query: z.string().max(200).optional(),
+      countries: z.array(isoCountryCodeSchema).optional(),
+      topics: z.array(z.string()).optional(),
+      status: claimStatusSchema.optional(),
+      duo: z.string().optional(),
+    },
+    async (args) => {
+      const res = await mcpSearchClaims(db, playerId, args);
+      return {
+        content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    "add_claims",
+    "Create Claims ({ text, countries, regions?, topics?, evidence? }) and/or add Evidence to existing ones ({ claimId, evidence }). Evidence: { kind: \"round\", roundId } (inside the run's range; Rounds only count for) or { kind: \"documentation\", sourceVersionId, section, direction, images? }. Pass runId inside a Processing run, or duo when ingesting a Source. Valid items are saved even if other items fail validation.",
+    {
+      runId: z.string().uuid().optional(),
+      duo: z.string().optional(),
+      items: z.array(z.record(z.unknown())).min(1),
+    },
+    async (args) => {
+      const res = await mcpAddClaims(db, playerId, args);
       return {
         content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
       };

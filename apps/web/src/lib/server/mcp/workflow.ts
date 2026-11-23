@@ -1,6 +1,7 @@
 import { and, asc, eq, gt, inArray, lt } from "drizzle-orm";
 import {
   callLabelInputSchema,
+  claimItemInputSchema,
   hedgeKind,
   intervalsOverlap,
   learningItemInputSchema,
@@ -8,6 +9,7 @@ import {
   roundHedge,
   type DerivedGuess,
   type ProcessingRunPurpose,
+  type SearchClaimsInput,
 } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
 import {
@@ -24,8 +26,16 @@ import {
 } from "../db/schema.js";
 import {
   DomainError,
+  deriveClaims,
   deriveCurrentCallLabels,
   deriveLearningsWithStatus,
+  duoClaimIds,
+  filterClaims,
+  insertClaim,
+  insertEvidence,
+  summarizeEvidence,
+  type DerivedClaim,
+  type NewEvidence,
   deriveSessionWorkRanges,
   finishProcessingRun,
   getCurrentTranscriptVersionId,
@@ -305,7 +315,7 @@ export async function mcpReadRange(db: AppDb, playerId: string, runId: string) {
   const padStart = new Date(run.rangeStart.getTime() - CONTEXT_PADDING_MS);
   const padEnd = new Date(run.rangeEnd.getTime() + CONTEXT_PADDING_MS);
 
-  const [{ inRange, utteranceToRef }, paddedUtterances, allPlayers, duoGames, duoLearnings] =
+  const [{ inRange, utteranceToRef }, paddedUtterances, allPlayers, duoGames, duoLearnings, duoClaims] =
     await Promise.all([
       getRunInRangeUtterances(db, run),
       loadCurrentSessionUtterances(db, run.duoId, run.sessionId, padStart, padEnd),
@@ -319,6 +329,7 @@ export async function mcpReadRange(db: AppDb, playerId: string, runId: string) {
         orderBy: [asc(games.startedAt)],
       }),
       deriveLearningsWithStatus(db, run.duoId),
+      deriveClaims(db, run.duoId),
     ]);
 
   const playerNameById = new Map(allPlayers.map((p) => [p.id, p.displayName]));
@@ -424,8 +435,22 @@ export async function mcpReadRange(db: AppDb, playerId: string, runId: string) {
       text: l.text,
       countries: l.countries,
       topics: l.topics,
+      claimId: l.claimId,
       reactions: l.reactions.map((r) => `${r.reaction}(${playerNameById.get(r.playerId) ?? r.playerId})`),
     }));
+
+  // The Duo's Claims about every country the range's Rounds were in or guessed in
+  const rangeCountries = new Set<string>();
+  for (const r of gameRounds) {
+    if (!intervalsOverlap(roundFullInterval(r), { startedAt: run.rangeStart, endedAt: run.rangeEnd })) {
+      continue;
+    }
+    if (r.countryCode) rangeCountries.add(r.countryCode.toUpperCase());
+    for (const g of r.guesses) {
+      if (g.isDuo && g.countryCode) rangeCountries.add(g.countryCode.toUpperCase());
+    }
+  }
+  const rangeClaims = filterClaims(duoClaims, { countries: [...rangeCountries] }).map(describeClaim);
 
   // Active topic tags across the Duo
   const topicSet = new Set<string>();
@@ -444,7 +469,140 @@ export async function mcpReadRange(db: AppDb, playerId: string, runId: string) {
     transcript: timeline.map((t) => t.line).join("\n"),
     existingLearnings: existingInRange,
     existingTopics: [...topicSet].sort(),
+    claimCountries: [...rangeCountries].sort(),
+    claims: rangeClaims,
   };
+}
+
+/** A Round's whole span, from its start through its results screen. */
+function roundFullInterval(round: Pick<RoundRow, "startTime" | "resultsEndTime">) {
+  return { startedAt: round.startTime, endedAt: round.resultsEndTime };
+}
+
+/** A Claim as agents see it: derived status and an Evidence tally, never just the text. */
+function describeClaim(c: DerivedClaim) {
+  return {
+    id: c.id,
+    status: c.status,
+    text: c.text,
+    countries: c.countries,
+    regions: c.regions,
+    topics: c.topics,
+    evidence: summarizeEvidence(c.evidence),
+    learningCount: c.learningIds.length,
+  };
+}
+
+const MAX_SEARCH_RESULTS = 100;
+
+/** `search_claims`: the Duo's Claims matching text, countries, topics and status. */
+export async function mcpSearchClaims(
+  db: AppDb,
+  playerId: string,
+  input: SearchClaimsInput & { duo?: string },
+) {
+  const duo = await resolveDuoForPlayer(db, playerId, input.duo);
+  const matches = filterClaims(await deriveClaims(db, duo.id), input);
+  return {
+    duo,
+    total: matches.length,
+    claims: matches.slice(0, MAX_SEARCH_RESULTS).map(describeClaim),
+  };
+}
+
+/**
+ * `add_claims`: creates Claims and/or adds Evidence to existing ones. Inside a
+ * run (`runId`) new Claims are attributed to it and may cite Rounds in its
+ * range; without one (ingestion) only Documentation Evidence applies. Invalid
+ * items are reported and the rest saved.
+ */
+export async function mcpAddClaims(
+  db: AppDb,
+  playerId: string,
+  input: { runId?: string; duo?: string; items: unknown[] },
+) {
+  let run: RunRow | null = null;
+  let duoId: string;
+  if (input.runId) {
+    run =
+      (await db.query.processingRuns.findFirst({ where: eq(processingRuns.id, input.runId) })) ??
+      null;
+    if (!run) throw new DomainError("NOT_FOUND", "Processing run not found", 404);
+    await resolveDuoForPlayer(db, playerId, run.duoId);
+    if (run.status !== "open") {
+      throw new DomainError("CONFLICT", `Processing run is already ${run.status}`, 409);
+    }
+    if (run.purpose === "calls") {
+      throw new DomainError("WRONG_PURPOSE", "A calls Processing run doesn't make Claims", 400);
+    }
+    duoId = run.duoId;
+  } else {
+    duoId = (await resolveDuoForPlayer(db, playerId, input.duo)).id;
+  }
+
+  const rangeRoundIds = new Set(run ? (await loadRunRounds(db, run)).map((r) => r.id) : []);
+  const parsedItems = input.items.map((raw) => claimItemInputSchema.safeParse(raw));
+  const knownClaimIds = await duoClaimIds(
+    db,
+    duoId,
+    parsedItems.flatMap((p) => (p.success && p.data.claimId ? [p.data.claimId] : [])),
+  );
+
+  const saved: Array<{ index: number; claimId: string; created: boolean; evidenceAdded: number }> = [];
+  const errors: Array<{ index: number; message: string }> = [];
+
+  for (let i = 0; i < parsedItems.length; i++) {
+    const parsed = parsedItems[i]!;
+    if (!parsed.success) {
+      errors.push({
+        index: i,
+        message: parsed.error.issues.map((iss) => `${iss.path.join(".")}: ${iss.message}`).join("; "),
+      });
+      continue;
+    }
+    const item = parsed.data;
+    if (item.claimId && !knownClaimIds.has(item.claimId)) {
+      errors.push({ index: i, message: `Unknown or other Duo's claimId: ${item.claimId}` });
+      continue;
+    }
+
+    const evidence: NewEvidence[] = [];
+    const problems: string[] = [];
+    for (const e of item.evidence) {
+      if (e.kind === "round") {
+        if (!run) {
+          problems.push(`Round Evidence needs a runId: Round ${e.roundId} must be inside the run's range`);
+        } else if (!rangeRoundIds.has(e.roundId)) {
+          problems.push(`Round ${e.roundId} is not inside this run's range`);
+        } else {
+          evidence.push({ kind: "round", direction: "for", roundId: e.roundId, note: e.note });
+        }
+      } else {
+        problems.push("Documentation Evidence needs an ingested Source, which isn't supported yet");
+      }
+    }
+    if (problems.length > 0) {
+      errors.push({ index: i, message: problems.join("; ") });
+      continue;
+    }
+
+    const claimId =
+      item.claimId ??
+      (await insertClaim(db, {
+        duoId,
+        runId: run?.id ?? null,
+        createdByPlayerId: playerId,
+        text: item.text!,
+        countries: item.countries,
+        regions: item.regions,
+        topics: item.topics,
+      }));
+    const added = await insertEvidence(db, claimId, duoId, run?.id ?? null, evidence);
+    saved.push({ index: i, claimId, created: !item.claimId, evidenceAdded: added.length });
+  }
+
+  if (saved.length > 0) duoEventBus.emitChanged(duoId, "claim");
+  return { savedCount: saved.length, saved, errors };
 }
 
 export async function mcpAddLearnings(
@@ -477,12 +635,18 @@ export async function mcpAddLearnings(
     .from(rounds)
     .where(eq(rounds.duoId, run.duoId));
   const validDuoRoundIds = new Set(duoRounds.map((r) => r.id));
+  const parsedItems = rawItems.map((raw) => learningItemInputSchema.safeParse(raw));
+  const linkableClaimIds = await duoClaimIds(
+    db,
+    run.duoId,
+    parsedItems.flatMap((p) => (p.success && p.data.claimId ? [p.data.claimId] : [])),
+  );
 
   const validToInsert: Parameters<typeof insertRunLearnings>[4] = [];
   const errors: Array<{ index: number; message: string }> = [];
 
-  for (let i = 0; i < rawItems.length; i++) {
-    const parsed = learningItemInputSchema.safeParse(rawItems[i]);
+  for (let i = 0; i < parsedItems.length; i++) {
+    const parsed = parsedItems[i]!;
     if (!parsed.success) {
       errors.push({
         index: i,
@@ -498,6 +662,10 @@ export async function mcpAddLearnings(
         index: i,
         message: `Unknown or cross-Duo roundIds: ${invalidRounds.join(", ")}`,
       });
+      continue;
+    }
+    if (item.claimId && !linkableClaimIds.has(item.claimId)) {
+      errors.push({ index: i, message: `Unknown or other Duo's claimId: ${item.claimId}` });
       continue;
     }
     const resolvedUtterances = [];
@@ -537,6 +705,7 @@ export async function mcpAddLearnings(
       agentNote: item.agentNote ?? null,
       utteranceIds: resolvedUtterances.map((u) => u.id),
       roundIds: item.roundIds,
+      claimId: item.claimId ?? null,
       sourceSpanStart: spanStart,
       sourceSpanEnd: spanEnd,
     });
@@ -569,6 +738,18 @@ export async function mcpFinishRun(db: AppDb, playerId: string, runId: string) {
 
 type RunRow = typeof processingRuns.$inferSelect;
 type RoundRow = typeof rounds.$inferSelect;
+
+/** The Duo's Rounds any part of which (guessing or results) overlaps a run's range. */
+async function loadRunRounds(db: AppDb, run: RunRow): Promise<RoundRow[]> {
+  return db.query.rounds.findMany({
+    where: and(
+      eq(rounds.duoId, run.duoId),
+      lt(rounds.startTime, run.rangeEnd),
+      gt(rounds.resultsEndTime, run.rangeStart),
+    ),
+    orderBy: [asc(rounds.startTime)],
+  });
+}
 
 /** The Duo's Rounds whose guessing phase overlaps a run's range. */
 async function loadRunRangeRounds(db: AppDb, run: RunRow): Promise<RoundRow[]> {

@@ -1,6 +1,8 @@
+import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  check,
   doublePrecision,
   index,
   integer,
@@ -14,6 +16,8 @@ import {
 } from "drizzle-orm/pg-core";
 import type {
   DerivedGuess,
+  EvidenceDirection,
+  EvidenceKind,
   GameMode,
   LearningRegion,
   ProcessingRunPurpose,
@@ -390,6 +394,7 @@ export const learnings = pgTable(
     regions: jsonb("regions").$type<LearningRegion[]>().notNull().default([]),
     topics: jsonb("topics").$type<string[]>().notNull().default([]),
     agentNote: text("agent_note"),
+    claimId: uuid("claim_id").references(() => claims.id, { onDelete: "set null" }),
     sourceSpanStart: timestamp("source_span_start", { withTimezone: true }),
     sourceSpanEnd: timestamp("source_span_end", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -397,6 +402,7 @@ export const learnings = pgTable(
   (table) => [
     index("learnings_duo_created_idx").on(table.duoId, table.createdAt),
     index("learnings_run_idx").on(table.runId),
+    index("learnings_claim_idx").on(table.claimId),
   ],
 );
 
@@ -481,4 +487,64 @@ export const callLabelUtterances = pgTable(
       .references(() => utterances.id, { onDelete: "cascade" }),
   },
   (table) => [primaryKey({ columns: [table.callLabelId, table.utteranceId] })],
+);
+
+/**
+ * One statement about the world in a Duo's knowledge bank (GLOSSARY: Claim).
+ * Its status is derived from its Evidence, never stored (ADR 0005). A Claim made
+ * in a Processing run records that run, but outlives the run being superseded.
+ */
+export const claims = pgTable(
+  "claims",
+  {
+    id: uuid("id").primaryKey(),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").references(() => processingRuns.id, { onDelete: "set null" }),
+    createdByPlayerId: uuid("created_by_player_id").references(() => players.id, {
+      onDelete: "set null",
+    }),
+    text: text("text").notNull(),
+    countries: jsonb("countries").$type<string[]>().notNull().default([]),
+    regions: jsonb("regions").$type<LearningRegion[]>().notNull().default([]),
+    topics: jsonb("topics").$type<string[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("claims_duo_idx").on(table.duoId, table.createdAt)],
+);
+
+/**
+ * Something that counts for or against a Claim (GLOSSARY: Evidence): a Round,
+ * a Player's ✓/✗ (one per Player per Claim), or a section of a Source.
+ */
+export const claimEvidence = pgTable(
+  "claim_evidence",
+  {
+    id: uuid("id").primaryKey(),
+    claimId: uuid("claim_id")
+      .notNull()
+      .references(() => claims.id, { onDelete: "cascade" }),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<EvidenceKind>().notNull(),
+    direction: text("direction").$type<EvidenceDirection>().notNull(),
+    roundId: uuid("round_id").references(() => rounds.id, { onDelete: "cascade" }),
+    playerId: uuid("player_id").references(() => players.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").references(() => processingRuns.id, { onDelete: "set null" }),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("claim_evidence_claim_idx").on(table.claimId),
+    index("claim_evidence_duo_idx").on(table.duoId),
+    uniqueIndex("claim_evidence_claim_round_uidx").on(table.claimId, table.roundId),
+    uniqueIndex("claim_evidence_claim_player_uidx").on(table.claimId, table.playerId),
+    check("claim_evidence_round_only_for", sql`${table.kind} <> 'round' OR ${table.direction} = 'for'`),
+    check(
+      "claim_evidence_kind_ref",
+      sql`(${table.kind} = 'round' AND ${table.roundId} IS NOT NULL) OR (${table.kind} = 'player' AND ${table.playerId} IS NOT NULL) OR ${table.kind} = 'documentation'`,
+    ),
+  ],
 );

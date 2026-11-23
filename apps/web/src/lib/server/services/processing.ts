@@ -360,6 +360,7 @@ export async function insertRunLearnings(
     agentNote?: string | null;
     utteranceIds: string[];
     roundIds: string[];
+    claimId?: string | null;
     sourceSpanStart: Date;
     sourceSpanEnd: Date;
   }>,
@@ -380,6 +381,7 @@ export async function insertRunLearnings(
       regions: item.regions,
       topics: item.topics,
       agentNote: item.agentNote ?? null,
+      claimId: item.claimId ?? null,
       sourceSpanStart: item.sourceSpanStart,
       sourceSpanEnd: item.sourceSpanEnd,
     });
@@ -562,6 +564,7 @@ export interface DerivedLearningRecord {
   regions: LearningRegion[];
   topics: string[];
   agentNote: string | null;
+  claimId: string | null;
   sourceSpanStart: Date | null;
   sourceSpanEnd: Date | null;
   createdAt: Date;
@@ -671,6 +674,7 @@ export async function deriveLearningsWithStatus(
       regions: l.regions,
       topics: l.topics,
       agentNote: l.agentNote,
+      claimId: l.claimId,
       sourceSpanStart: l.sourceSpanStart,
       sourceSpanEnd: l.sourceSpanEnd,
       createdAt: l.createdAt,

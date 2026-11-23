@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
 import {
@@ -16,6 +16,8 @@ import {
   mcpAddLearnings,
   mcpAddSource,
   mcpAddSourceImage,
+  mcpDeleteClaims,
+  mcpEditClaims,
   mcpFinishRun,
   mcpGetInstructions,
   mcpListSources,
@@ -30,6 +32,30 @@ import {
   type ProcessingJobScope,
 } from "./processing-jobs.js";
 import { DomainError } from "../services/index.js";
+
+/** All a site-started job may use. New tools stay unavailable to jobs unless added here. */
+const JOB_TOOLS = new Set([
+  "get_instructions",
+  "read_range",
+  "search_claims",
+  "add_claims",
+  "add_learnings",
+  "finish_run",
+]);
+
+function trackRegisteredTools(server: McpServer): Map<string, RegisteredTool> {
+  const registered = new Map<string, RegisteredTool>();
+  const register = server.tool.bind(server) as unknown as (
+    name: string,
+    ...rest: unknown[]
+  ) => RegisteredTool;
+  server.tool = ((name: string, ...rest: unknown[]) => {
+    const tool = register(name, ...rest);
+    registered.set(name, tool);
+    return tool;
+  }) as typeof server.tool;
+  return registered;
+}
 
 function assertJobRun(job: ProcessingJobScope | null, runId: string | undefined) {
   if (job && runId !== job.runId) {
@@ -47,6 +73,7 @@ export function createGeoCoachMcpServer(
     name: "geo-coach",
     version: "0.1.0",
   });
+  const registeredTools = trackRegisteredTools(server);
 
   server.tool(
     "get_instructions",
@@ -62,7 +89,7 @@ export function createGeoCoachMcpServer(
     },
   );
 
-  const listWorkTool = server.tool(
+  server.tool(
     "list_work",
     "List unprocessed or stale Session ranges (~25k token Game-aligned chunks) for a Processing run purpose.",
     {
@@ -77,7 +104,7 @@ export function createGeoCoachMcpServer(
     },
   );
 
-  const startRunTool = server.tool(
+  server.tool(
     "start_run",
     "Start an open Processing run over one UTC interval inside a Session.",
     {
@@ -187,7 +214,38 @@ export function createGeoCoachMcpServer(
     },
   );
 
-  const listSourcesTool = server.tool(
+  server.tool(
+    "edit_claims",
+    "Change existing Claims: items of { claimId, text?, countries?, regions?, topics?, force? }. Evidence is never touched. Rewording a Claim a Player or a Round has confirmed needs force: true. Valid items are saved even if other items fail validation.",
+    {
+      duo: z.string().optional(),
+      items: z.array(z.record(z.unknown())).min(1),
+    },
+    async (args) => {
+      const res = await mcpEditClaims(db, playerId, args);
+      return {
+        content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    "delete_claims",
+    "Delete Claims by id, with their Evidence and image links. A Claim a Player or a Round has confirmed is kept unless force: true. Returns what was deleted and what was kept and why.",
+    {
+      claimIds: z.array(z.string().uuid()).min(1).max(200),
+      force: z.boolean().optional(),
+      duo: z.string().optional(),
+    },
+    async (args) => {
+      const res = await mcpDeleteClaims(db, playerId, args);
+      return {
+        content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
     "list_sources",
     "List the Duo's knowledge bank Sources with their versions. Check it before add_source: pass an existing Source's id as sourceId to add a new version instead of a duplicate. query matches title or URL.",
     {
@@ -202,7 +260,7 @@ export function createGeoCoachMcpServer(
     },
   );
 
-  const addSourceTool = server.tool(
+  server.tool(
     "add_source",
     "Store a reference document (Plonkit page, PDF, guide) a Player gave you, converted to markdown, as a knowledge bank Source. Pass sourceId to add a new version of an existing Source. Returns the section anchors to cite, the image names to upload, and Claims to re-check. The server never fetches URLs.",
     {
@@ -221,7 +279,7 @@ export function createGeoCoachMcpServer(
     },
   );
 
-  const addSourceImageTool = server.tool(
+  server.tool(
     "add_source_image",
     "Upload one image of a Source version (PNG, JPEG, GIF or WebP, base64, size-capped), named as the markdown references it. Uploading the same name again replaces it.",
     {
@@ -238,7 +296,7 @@ export function createGeoCoachMcpServer(
     },
   );
 
-  const addCallLabelsTool = server.tool(
+  server.tool(
     "add_call_labels",
     "Add a batch of Call labels to an open calls Processing run: { roundId, called, utteranceRefs, note? } per Split or Spread Round. Valid items are saved even if other items fail validation.",
     {
@@ -269,15 +327,8 @@ export function createGeoCoachMcpServer(
   );
 
   if (job) {
-    for (const tool of [
-      listWorkTool,
-      startRunTool,
-      addCallLabelsTool,
-      listSourcesTool,
-      addSourceTool,
-      addSourceImageTool,
-    ]) {
-      tool.remove();
+    for (const [name, tool] of registeredTools) {
+      if (!JOB_TOOLS.has(name)) tool.remove();
     }
     return server;
   }

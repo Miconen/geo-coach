@@ -1,6 +1,8 @@
 import { and, asc, eq, gt, inArray, lt } from "drizzle-orm";
 import {
   callLabelInputSchema,
+  claimDeleteInputSchema,
+  claimEditItemInputSchema,
   claimItemInputSchema,
   hedgeKind,
   intervalsOverlap,
@@ -43,6 +45,9 @@ import {
   summarizeEvidence,
   type DerivedClaim,
   type NewEvidence,
+  claimEvidenceFacts,
+  deleteClaimsById,
+  updateClaim,
   deriveSessionWorkRanges,
   finishProcessingRun,
   getCurrentTranscriptVersionId,
@@ -626,6 +631,125 @@ export async function mcpAddClaims(
 
   if (saved.length > 0) duoEventBus.emitChanged(duoId, "claim");
   return { savedCount: saved.length, saved, errors };
+}
+
+/**
+ * `edit_claims`: changes the wording, countries, regions or topics of existing
+ * Claims. Evidence is untouched. Changing `text` on a Claim a Player or a Round
+ * has confirmed needs `force`, since that Evidence vouched for the old wording.
+ * Invalid items are reported and the rest saved.
+ */
+export async function mcpEditClaims(
+  db: AppDb,
+  playerId: string,
+  input: { duo?: string; items: unknown[] },
+) {
+  const duoId = (await resolveDuoForPlayer(db, playerId, input.duo)).id;
+  const parsedItems = input.items.map((raw) => claimEditItemInputSchema.safeParse(raw));
+  const ids = parsedItems.flatMap((p) => (p.success ? [p.data.claimId] : []));
+  const existing = new Map(
+    (await deriveClaims(db, duoId)).filter((c) => ids.includes(c.id)).map((c) => [c.id, c]),
+  );
+  const facts = await claimEvidenceFacts(db, duoId, [...existing.keys()]);
+
+  const saved: Array<{ index: number; claimId: string; changed: string[] }> = [];
+  const errors: Array<{ index: number; message: string }> = [];
+
+  for (let i = 0; i < parsedItems.length; i++) {
+    const parsed = parsedItems[i]!;
+    if (!parsed.success) {
+      errors.push({
+        index: i,
+        message: parsed.error.issues.map((iss) => `${iss.path.join(".")}: ${iss.message}`).join("; "),
+      });
+      continue;
+    }
+    const item = parsed.data;
+    const claim = existing.get(item.claimId);
+    if (!claim) {
+      errors.push({ index: i, message: `Unknown or other Duo's claimId: ${item.claimId}` });
+      continue;
+    }
+    const f = facts.get(item.claimId)!;
+    if (item.text !== undefined && item.text !== claim.text && (f.hasPlayerEvidence || f.hasRoundEvidence) && !item.force) {
+      errors.push({
+        index: i,
+        message: `Claim ${item.claimId} has Player or Round Evidence that vouched for its current wording; pass force: true to reword it anyway`,
+      });
+      continue;
+    }
+    const countries = item.countries ?? claim.countries;
+    const regions = item.regions ?? claim.regions;
+    const badRegion = regions.find((r) => !countries.includes(r.country));
+    if (badRegion) {
+      errors.push({
+        index: i,
+        message: `Region "${badRegion.name}" references country ${badRegion.country} which is not in countries[]`,
+      });
+      continue;
+    }
+    await updateClaim(db, duoId, item.claimId, {
+      text: item.text,
+      countries: item.countries,
+      regions: item.regions,
+      topics: item.topics,
+    });
+    saved.push({
+      index: i,
+      claimId: item.claimId,
+      changed: (["text", "countries", "regions", "topics"] as const).filter((k) => item[k] !== undefined),
+    });
+  }
+
+  if (saved.length > 0) duoEventBus.emitChanged(duoId, "claim");
+  return { savedCount: saved.length, saved, errors };
+}
+
+/**
+ * `delete_claims`: removes Claims with their Evidence and image links. A Claim a
+ * Player or a Round has confirmed is kept unless `force` is set, because an agent
+ * can't recreate that Evidence. Learnings that cited a deleted Claim lose only the link.
+ */
+export async function mcpDeleteClaims(
+  db: AppDb,
+  playerId: string,
+  input: { duo?: string; claimIds: string[]; force?: boolean },
+) {
+  const parsed = claimDeleteInputSchema.parse({ claimIds: input.claimIds, force: input.force });
+  const duoId = (await resolveDuoForPlayer(db, playerId, input.duo)).id;
+  const claims = new Map((await deriveClaims(db, duoId)).filter((c) => parsed.claimIds.includes(c.id)).map((c) => [c.id, c]));
+  const facts = await claimEvidenceFacts(db, duoId, [...claims.keys()]);
+
+  const deleted: Array<{ claimId: string; text: string; evidenceRemoved: number; learningsUnlinked: number }> = [];
+  const kept: Array<{ claimId: string; reason: string }> = [];
+  const toDelete: string[] = [];
+
+  for (const id of parsed.claimIds) {
+    const claim = claims.get(id);
+    if (!claim) {
+      kept.push({ claimId: id, reason: "Unknown or other Duo's claimId" });
+      continue;
+    }
+    const f = facts.get(id)!;
+    if ((f.hasPlayerEvidence || f.hasRoundEvidence) && !parsed.force) {
+      kept.push({
+        claimId: id,
+        reason: "Has Player or Round Evidence that can't be recreated; pass force: true to delete it anyway",
+      });
+      continue;
+    }
+    toDelete.push(id);
+    deleted.push({
+      claimId: id,
+      text: claim.text,
+      evidenceRemoved: f.evidenceCount,
+      learningsUnlinked: claim.learningIds.length,
+    });
+  }
+
+  await deleteClaimsById(db, duoId, toDelete);
+  if (toDelete.length > 0) duoEventBus.emitChanged(duoId, "claim");
+  return { deletedCount: deleted.length, deleted, kept };
 }
 
 export async function mcpAddLearnings(

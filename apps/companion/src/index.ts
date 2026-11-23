@@ -17,6 +17,7 @@ import { GeoguessrPoller } from "./geoguessr.js";
 import { SilenceWatcher } from "./silence.js";
 import { TranscriberClient, type TranscriberHealth } from "./transcriber.js";
 import { TranscriptJobTracker } from "./jobs.js";
+import { recoverUnfinishedRecordings } from "./recovery.js";
 import {
   computeAudioDiskUsageBytes,
   computePcmRms,
@@ -786,6 +787,15 @@ async function main() {
       }
     });
   });
+
+  const recovered = await recoverUnfinishedRecordings(store, convertPcmToFlac).catch((err: unknown) => {
+    console.error("Recovering unfinished Recordings failed:", err);
+    return 0;
+  });
+  if (recovered > 0) {
+    console.log(`Recovered ${recovered} Recording(s) left unfinished by a crash`);
+    void uploader.drainOnce();
+  }
 
   httpServer.listen(PORT, HOST, () => {
     console.log(`geo-coach Companion listening on http://${HOST}:${PORT}`);

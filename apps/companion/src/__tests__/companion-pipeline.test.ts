@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -8,6 +8,7 @@ import { OutboxUploader, computeBackoffMs } from "../uploader.js";
 import { GeoguessrPoller } from "../geoguessr.js";
 import { SilenceWatcher } from "../silence.js";
 import { TranscriptJobTracker } from "../jobs.js";
+import { recoverUnfinishedRecordings } from "../recovery.js";
 
 describe("Seam 5: Companion SQLite outbox, priority queue, silence auto-stop, and GeoGuessr poller", () => {
   let tmpDir: string;
@@ -151,6 +152,47 @@ describe("Seam 5: Companion SQLite outbox, priority queue, silence auto-stop, an
       state: "transcribing",
       kind: "retranscribe",
     });
+    store.close();
+  });
+
+  it("finishes Recordings a crash left unstopped, using the audio on disk for their length", async () => {
+    const store = new CompanionStore(path.join(tmpDir, "companion.sqlite"));
+    const base = {
+      duoId: "duo1",
+      startedAt: new Date(1_000_000).toISOString(),
+      clockAnchorMs: 1_000_000,
+      audioFormat: "pcm" as const,
+      durationMs: 0,
+      bytes: 0,
+    };
+    const crashedPath = path.join(tmpDir, "crashed.pcm");
+    writeFileSync(crashedPath, Buffer.alloc(16000 * 2 * 5)); // 5 s of audio
+    store.saveLocalRecording({ ...base, id: "crashed", transcriptVersionId: "tv1", stoppedAt: null, stopReason: null, audioPath: crashedPath });
+    store.saveLocalRecording({ ...base, id: "live", transcriptVersionId: "tv2", stoppedAt: null, stopReason: null, audioPath: path.join(tmpDir, "live.pcm") });
+    store.saveLocalRecording({ ...base, id: "fine", transcriptVersionId: "tv3", stoppedAt: base.startedAt, stopReason: "stop", audioPath: path.join(tmpDir, "fine.flac"), audioFormat: "flac" });
+
+    const converted: string[] = [];
+    const recovered = await recoverUnfinishedRecordings(
+      store,
+      async (pcmPath) => {
+        converted.push(pcmPath);
+        return null; // ffmpeg unavailable: keep the PCM
+      },
+      "live",
+    );
+
+    expect(recovered).toBe(1);
+    expect(converted).toEqual([crashedPath]);
+    const crashed = store.listLocalRecordings().find((r) => r.id === "crashed")!;
+    expect(crashed).toMatchObject({
+      durationMs: 5_000,
+      bytes: 16000 * 2 * 5,
+      stopReason: "reconnect",
+      stoppedAt: new Date(1_005_000).toISOString(),
+      audioFormat: "pcm",
+    });
+    expect(store.listLocalRecordings().find((r) => r.id === "live")!.stoppedAt).toBeNull();
+    expect(store.listPendingOutbox(Date.now()).map((i) => i.dedupeKey)).toEqual(["stop:crashed"]);
     store.close();
   });
 

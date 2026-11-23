@@ -28,6 +28,7 @@ function utterance(id: string, playerId: string): WorkbenchUtterance {
     sessionId: "ses",
     playerId,
     text: `${playerId} says ${id}`,
+    rawText: `${playerId} says ${id}`,
     startedAt: "2026-01-01T00:00:10.000Z",
     endedAt: "2026-01-01T00:00:12.000Z",
     avgLogprob: null,

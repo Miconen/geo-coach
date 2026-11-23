@@ -102,7 +102,7 @@ describe("Seam 3: Scoped auth, Companion API compatibility, and per-Duo SSE", ()
       expect(bootRes.status).toBe(200);
       const bootJson = await bootRes.json();
       expect(bootJson.duos).toHaveLength(1);
-      expect(bootJson.duos[0].hotwords).toEqual(["Plovdiv", "Bollards"]);
+      expect(bootJson.duos[0].hotwords.slice(0, 3)).toEqual(["Plovdiv", "Bollards", "nymps"]);
 
       // Heartbeat broadcasts live status on per-Duo SSE bus
       const hbRes = await handleCompanionRequest(

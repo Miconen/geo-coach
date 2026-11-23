@@ -226,6 +226,71 @@ export const utterances = pgTable(
   ],
 );
 
+export const transcriptRules = pgTable(
+  "transcript_rules",
+  {
+    id: uuid("id").primaryKey(),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    source: text("source").notNull(),
+    replacement: text("replacement").notNull(),
+    /** ISO 3166-1 alpha-2, or "" for a rule that applies everywhere. */
+    countryCode: text("country_code").notNull().default(""),
+    enabled: boolean("enabled").notNull().default(true),
+    createdByPlayerId: uuid("created_by_player_id").references(() => players.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("transcript_rules_duo_source_country_uidx").on(
+      table.duoId,
+      table.source,
+      table.countryCode,
+    ),
+  ],
+);
+
+export const utteranceEdits = pgTable(
+  "utterance_edits",
+  {
+    id: uuid("id").primaryKey(),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    utteranceId: uuid("utterance_id")
+      .notNull()
+      .references(() => utterances.id, { onDelete: "cascade" }),
+    charStart: integer("char_start").notNull(),
+    charEnd: integer("char_end").notNull(),
+    originalText: text("original_text").notNull(),
+    replacement: text("replacement").notNull(),
+    createdByPlayerId: uuid("created_by_player_id").references(() => players.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("utterance_edits_span_uidx").on(table.utteranceId, table.charStart, table.charEnd),
+    index("utterance_edits_duo_idx").on(table.duoId, table.createdAt),
+  ],
+);
+
+export const transcriptSuggestionDismissals = pgTable(
+  "transcript_suggestion_dismissals",
+  {
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    source: text("source").notNull(),
+    replacement: text("replacement").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.duoId, table.source, table.replacement] })],
+);
+
 export const games = pgTable(
   "games",
   {

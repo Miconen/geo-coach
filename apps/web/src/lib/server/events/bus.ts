@@ -66,7 +66,7 @@ class DuoEventBus {
 
   emitChanged(
     duoId: string,
-    entity: "session" | "game" | "run" | "learning" | "reaction" | "hotwords",
+    entity: "session" | "game" | "run" | "learning" | "reaction" | "hotwords" | "corrections",
     id?: string,
   ): void {
     this.publish(duoId, {

@@ -5,6 +5,7 @@ import {
   completeTranscriptRequestSchema,
   geoguessrMissingRequestSchema,
   isSupportedApiVersion,
+  mergeHotwords,
   offsetMeasurementRequestSchema,
   startRecordingRequestSchema,
   startRetranscriptionRequestSchema,
@@ -23,6 +24,7 @@ import {
   assertPlayerInDuo,
   completeTranscriptVersion,
   findMissingGeoguessrData,
+  loadRuleHotwords,
   startRecording,
   startRetranscription,
   stopRecording,
@@ -109,6 +111,7 @@ export async function handleCompanionRequest(
           ? await db.query.duos.findMany({ where: inArray(duos.id, duoIds) })
           : [];
 
+      const ruleHotwords = await loadRuleHotwords(db, duoIds);
       return jsonResponse({
         serverTimeMs: Date.now(),
         latestCompanionVersion: LATEST_COMPANION_VERSION,
@@ -121,7 +124,7 @@ export async function handleCompanionRequest(
           id: d.id,
           name: d.name,
           geoguessrTeamId: d.geoguessrTeamId,
-          hotwords: d.hotwords,
+          hotwords: mergeHotwords(d.hotwords, ruleHotwords.get(d.id) ?? []),
         })),
       });
     }

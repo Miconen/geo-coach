@@ -1,5 +1,6 @@
 <script lang="ts">
   import RoundCoachingCard from "$lib/components/RoundCoachingCard.svelte";
+  import UtteranceText from "$lib/components/UtteranceText.svelte";
   import Inspect from "$lib/inspect/Inspect.svelte";
   import { formatRelSec } from "$lib/workbench/format.js";
   import type { RoundSlice } from "$lib/workbench/slices.js";
@@ -10,6 +11,8 @@
   } from "$lib/server/workbench/view-model.js";
 
   interface Props {
+    /** Enables fixing misheard words in the timeline. */
+    duoId?: string;
     game: WorkbenchGame;
     /** The Game's Rounds, in order, each with only its own Utterances and Players. */
     rounds: RoundSlice[];
@@ -27,6 +30,7 @@
   }
 
   let {
+    duoId = "",
     game,
     rounds,
     learnings = [],
@@ -112,7 +116,7 @@
                 >
                   {speaker?.displayName ?? "Player"}:
                 </strong>
-                <span class="ml-1">{u.text}</span>
+                <UtteranceText {duoId} utterance={u} countryCode={round.countryCode} editable={duoId !== ""} />
               </div>
               <div class="flex items-center gap-2 shrink-0">
                 <button

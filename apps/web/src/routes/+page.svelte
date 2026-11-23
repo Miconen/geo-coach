@@ -5,6 +5,7 @@
   import GameCard from "$lib/components/GameCard.svelte";
   import RoundCoachingCard from "$lib/components/RoundCoachingCard.svelte";
   import ThemeSwitcher from "$lib/components/ThemeSwitcher.svelte";
+  import UtteranceText from "$lib/components/UtteranceText.svelte";
   import { formatRelSec } from "$lib/workbench/format.js";
   import { gameSlice, roundSlice } from "$lib/workbench/slices.js";
   import type {
@@ -799,7 +800,8 @@
                     {#each hits as u}
                       <div class="flex items-center justify-between gap-2 rounded bg-[var(--surface-subtle)] px-2.5 py-1.5 text-xs">
                         <span>
-                          <strong>{wb.players[u.playerId]?.displayName ?? "Player"}:</strong> {u.text}
+                          <strong>{wb.players[u.playerId]?.displayName ?? "Player"}:</strong>
+                          <UtteranceText duoId={wb.duo.id} utterance={u} editable={false} />
                         </span>
                         <button
                           onclick={() => {
@@ -928,6 +930,7 @@
               {@const slice = gameSlice(wb, gId)}
               {#if slice}
                 <GameCard
+                  duoId={wb.duo.id}
                   game={slice.game}
                   rounds={slice.rounds}
                   learnings={slice.learnings}
@@ -969,7 +972,7 @@
                       >
                         {speaker?.displayName ?? "Player"}:
                       </strong>
-                      <span class="ml-1">{u.text}</span>
+                      <UtteranceText duoId={wb.duo.id} utterance={u} />
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
                       <button
@@ -1143,7 +1146,7 @@
                           {primaryRound ? formatRelSec(primaryRound.startTime, u.startedAt) : new Date(u.startedAt).toISOString().slice(11, 19)}
                         </span>
                         <strong class="ml-1.5">{wb.players[u.playerId]?.displayName ?? "Player"}:</strong>
-                        <span class="ml-1">{u.text}</span>
+                        <UtteranceText duoId={wb.duo.id} utterance={u} editable={false} />
                       </div>
                     {/if}
                   {/each}

@@ -260,7 +260,7 @@ export const duoSseEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("changed"),
-    entity: z.enum(["session", "game", "run", "learning", "reaction", "hotwords"]),
+    entity: z.enum(["session", "game", "run", "learning", "reaction", "hotwords", "corrections"]),
     id: z.string().optional(),
     at: z.string().datetime(),
   }),

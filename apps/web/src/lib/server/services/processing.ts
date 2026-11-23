@@ -29,12 +29,39 @@ import {
   getCurrentTranscriptVersionId,
 } from "./recordings.js";
 
+/** Clock estimates wobble by a few ms; only a shift that could move speech between Rounds counts. */
+const STALE_CLOCK_TOLERANCE_MS = 250;
+
+export type WorkRangeChange =
+  | "not-processed"
+  | "missing-from-run"
+  | "retranscribed"
+  | "chunks-changed"
+  | "clock"
+  | "speech-deleted";
+
+/** Which Recording put a range on the work list, and what changed since the last run read it. */
+export interface WorkRangeCause {
+  recordingId: string;
+  playerId: string;
+  changes: WorkRangeChange[];
+  newChunks: number;
+  clockShiftMs: number;
+  lastRun: {
+    startedByPlayerId: string;
+    agent: string;
+    model: string;
+    finishedAt: Date | null;
+  } | null;
+}
+
 export interface WorkRange {
   sessionId: string;
   purpose: ProcessingRunPurpose;
   startUtc: Date;
   endUtc: Date;
   reason: "unprocessed" | "stale";
+  causes: WorkRangeCause[];
 }
 
 interface Interval {
@@ -91,6 +118,7 @@ function intersectInterval(a: Interval, b: Interval): Interval | null {
 
 interface RecordingCurrentState {
   recordingId: string;
+  playerId: string;
   startMs: number;
   endMs: number;
   currentVersionId: string | null;
@@ -135,6 +163,7 @@ async function getSessionRecordingStates(
 
     states.push({
       recordingId: rec.id,
+      playerId: rec.playerId,
       startMs: rec.startedAt.getTime(),
       endMs,
       currentVersionId,
@@ -144,6 +173,39 @@ async function getSessionRecordingStates(
     });
   }
   return states;
+}
+
+function compareRunInput(
+  rec: RecordingCurrentState,
+  saved:
+    | { transcriptVersionId: string; chunkCount: number; effectiveOffsetMs: number; deletedRangeCount: number }
+    | undefined,
+): Pick<WorkRangeCause, "changes" | "newChunks" | "clockShiftMs"> {
+  if (!saved) return { changes: ["missing-from-run"], newChunks: 0, clockShiftMs: 0 };
+
+  const changes: WorkRangeChange[] = [];
+  let newChunks = 0;
+  if (saved.transcriptVersionId !== rec.currentVersionId) {
+    changes.push("retranscribed");
+  } else if (saved.chunkCount !== rec.chunkCount) {
+    changes.push("chunks-changed");
+    newChunks = rec.chunkCount - saved.chunkCount;
+  }
+  const clockShiftMs = rec.effectiveOffsetMs - saved.effectiveOffsetMs;
+  if (Math.abs(clockShiftMs) > STALE_CLOCK_TOLERANCE_MS) changes.push("clock");
+  if (saved.deletedRangeCount !== rec.deletedRangeCount) changes.push("speech-deleted");
+  return { changes, newChunks, clockShiftMs };
+}
+
+function causesOverlapping(
+  entries: Array<{ interval: Interval; cause: WorkRangeCause }>,
+  seg: Interval,
+): WorkRangeCause[] {
+  const byRecording = new Map<string, WorkRangeCause>();
+  for (const e of entries) {
+    if (intersectInterval(e.interval, seg)) byRecording.set(e.cause.recordingId, e.cause);
+  }
+  return [...byRecording.values()];
 }
 
 /**
@@ -162,6 +224,17 @@ export async function deriveSessionWorkRanges(
   const sessionIntervals = mergeIntervals(
     activeStates.map((r) => ({ startMs: r.startMs, endMs: r.endMs })),
   );
+  const unprocessedEntries = activeStates.map((r) => ({
+    interval: { startMs: r.startMs, endMs: r.endMs },
+    cause: {
+      recordingId: r.recordingId,
+      playerId: r.playerId,
+      changes: ["not-processed"] as WorkRangeChange[],
+      newChunks: 0,
+      clockShiftMs: 0,
+      lastRun: null,
+    },
+  }));
 
   const finishedRuns = await db.query.processingRuns.findMany({
     where: and(
@@ -180,6 +253,7 @@ export async function deriveSessionWorkRanges(
       startUtc: new Date(seg.startMs),
       endUtc: new Date(seg.endMs),
       reason: "unprocessed",
+      causes: causesOverlapping(unprocessedEntries, seg),
     }));
   }
 
@@ -205,6 +279,7 @@ export async function deriveSessionWorkRanges(
   const unprocessedIntervals = subtractIntervals(sessionIntervals, allCoveredIntervals);
 
   let staleIntervals: Interval[] = [];
+  let staleCauses: Array<{ interval: Interval; cause: WorkRangeCause }> = [];
   for (const run of finishedRuns) {
     const runInterval: Interval = {
       startMs: run.rangeStart.getTime(),
@@ -213,22 +288,35 @@ export async function deriveSessionWorkRanges(
     const savedMap = inputsByRun.get(run.id) ?? new Map();
 
     const changedInThisRun: Interval[] = [];
+    const runCauses: typeof staleCauses = [];
     for (const rec of activeStates) {
       const overlap = intersectInterval(runInterval, { startMs: rec.startMs, endMs: rec.endMs });
       if (!overlap) continue;
 
-      const saved = savedMap.get(rec.recordingId);
-      const changed =
-        !saved ||
-        saved.transcriptVersionId !== rec.currentVersionId ||
-        saved.chunkCount !== rec.chunkCount ||
-        saved.effectiveOffsetMs !== rec.effectiveOffsetMs ||
-        saved.deletedRangeCount !== rec.deletedRangeCount;
-
-      if (changed) {
+      const difference = compareRunInput(rec, savedMap.get(rec.recordingId));
+      if (difference.changes.length > 0) {
         changedInThisRun.push(overlap);
+        runCauses.push({
+          interval: overlap,
+          cause: {
+            recordingId: rec.recordingId,
+            playerId: rec.playerId,
+            ...difference,
+            lastRun: {
+              startedByPlayerId: run.startedByPlayerId,
+              agent: run.agent,
+              model: run.model,
+              finishedAt: run.finishedAt,
+            },
+          },
+        });
       }
     }
+    // This run re-judged its whole range, so it replaces earlier causes there.
+    staleCauses = staleCauses.flatMap((e) =>
+      subtractIntervals([e.interval], [runInterval]).map((interval) => ({ interval, cause: e.cause })),
+    );
+    staleCauses.push(...runCauses);
 
     if (changedInThisRun.length === 0) {
       // This run is completely fresh -> clears any earlier staleness it overlaps
@@ -248,6 +336,7 @@ export async function deriveSessionWorkRanges(
       startUtc: new Date(seg.startMs),
       endUtc: new Date(seg.endMs),
       reason: "unprocessed" as const,
+      causes: causesOverlapping(unprocessedEntries, seg),
     })),
     ...staleIntervals.map((seg) => ({
       sessionId,
@@ -255,6 +344,7 @@ export async function deriveSessionWorkRanges(
       startUtc: new Date(seg.startMs),
       endUtc: new Date(seg.endMs),
       reason: "stale" as const,
+      causes: causesOverlapping(staleCauses, seg),
     })),
   ];
 

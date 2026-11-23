@@ -24,8 +24,25 @@ import {
   mcpSearchClaims,
   mcpStartRun,
 } from "./workflow.js";
+import {
+  JOB_TOKEN_PREFIX,
+  verifyProcessingJobToken,
+  type ProcessingJobScope,
+} from "./processing-jobs.js";
+import { DomainError } from "../services/index.js";
 
-export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer {
+function assertJobRun(job: ProcessingJobScope | null, runId: string | undefined) {
+  if (job && runId !== job.runId) {
+    throw new DomainError("FORBIDDEN", "This job can only use its own Processing run", 403);
+  }
+}
+
+/** With a job scope, only the tools for that one run are exposed. */
+export function createGeoCoachMcpServer(
+  db: AppDb,
+  playerId: string,
+  job: ProcessingJobScope | null = null,
+): McpServer {
   const server = new McpServer({
     name: "geo-coach",
     version: "0.1.0",
@@ -45,7 +62,7 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
     },
   );
 
-  server.tool(
+  const listWorkTool = server.tool(
     "list_work",
     "List unprocessed or stale Session ranges (~25k token Game-aligned chunks) for a Processing run purpose.",
     {
@@ -60,7 +77,7 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
     },
   );
 
-  server.tool(
+  const startRunTool = server.tool(
     "start_run",
     "Start an open Processing run over one UTC interval inside a Session.",
     {
@@ -87,6 +104,7 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
       runId: z.string().uuid(),
     },
     async ({ runId }) => {
+      assertJobRun(job, runId);
       const res = await mcpReadRange(db, playerId, runId);
       if (res.purpose === "calls") {
         const text = [
@@ -126,6 +144,7 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
       items: z.array(z.record(z.unknown())).min(1),
     },
     async ({ runId, items }) => {
+      assertJobRun(job, runId);
       const res = await mcpAddLearnings(db, playerId, runId, items);
       return {
         content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
@@ -144,7 +163,7 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
       duo: z.string().optional(),
     },
     async (args) => {
-      const res = await mcpSearchClaims(db, playerId, args);
+      const res = await mcpSearchClaims(db, playerId, job ? { ...args, duo: job.duoId } : args);
       return {
         content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
       };
@@ -160,6 +179,7 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
       items: z.array(z.record(z.unknown())).min(1),
     },
     async (args) => {
+      assertJobRun(job, args.runId);
       const res = await mcpAddClaims(db, playerId, args);
       return {
         content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
@@ -167,7 +187,7 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
     },
   );
 
-  server.tool(
+  const listSourcesTool = server.tool(
     "list_sources",
     "List the Duo's knowledge bank Sources with their versions. Check it before add_source: pass an existing Source's id as sourceId to add a new version instead of a duplicate. query matches title or URL.",
     {
@@ -182,7 +202,7 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
     },
   );
 
-  server.tool(
+  const addSourceTool = server.tool(
     "add_source",
     "Store a reference document (Plonkit page, PDF, guide) a Player gave you, converted to markdown, as a knowledge bank Source. Pass sourceId to add a new version of an existing Source. Returns the section anchors to cite, the image names to upload, and Claims to re-check. The server never fetches URLs.",
     {
@@ -201,7 +221,7 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
     },
   );
 
-  server.tool(
+  const addSourceImageTool = server.tool(
     "add_source_image",
     "Upload one image of a Source version (PNG, JPEG, GIF or WebP, base64, size-capped), named as the markdown references it. Uploading the same name again replaces it.",
     {
@@ -218,7 +238,7 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
     },
   );
 
-  server.tool(
+  const addCallLabelsTool = server.tool(
     "add_call_labels",
     "Add a batch of Call labels to an open calls Processing run: { roundId, called, utteranceRefs, note? } per Split or Spread Round. Valid items are saved even if other items fail validation.",
     {
@@ -240,12 +260,27 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
       runId: z.string().uuid(),
     },
     async ({ runId }) => {
+      assertJobRun(job, runId);
       const res = await mcpFinishRun(db, playerId, runId);
       return {
         content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
       };
     },
   );
+
+  if (job) {
+    for (const tool of [
+      listWorkTool,
+      startRunTool,
+      addCallLabelsTool,
+      listSourcesTool,
+      addSourceTool,
+      addSourceImageTool,
+    ]) {
+      tool.remove();
+    }
+    return server;
+  }
 
   // Also register MCP prompts per purpose
   server.prompt("extract", "Extract Learnings from a geo-coach Session", async () => {
@@ -292,8 +327,12 @@ export async function handleMcpHttpRequest(db: AppDb, request: Request): Promise
     });
   }
 
-  const verified = await verifyApiToken(db, rawToken, "mcp");
-  if (!verified) {
+  const job = rawToken.startsWith(JOB_TOKEN_PREFIX)
+    ? await verifyProcessingJobToken(db, rawToken)
+    : null;
+  const verified = job ? null : await verifyApiToken(db, rawToken, "mcp");
+  const playerId = job?.playerId ?? verified?.player.id;
+  if (!playerId) {
     return new Response(
       JSON.stringify({ error: "Invalid, expired, or wrong-scope mcp bearer token" }),
       {
@@ -303,7 +342,7 @@ export async function handleMcpHttpRequest(db: AppDb, request: Request): Promise
     );
   }
 
-  const server = createGeoCoachMcpServer(db, verified.player.id);
+  const server = createGeoCoachMcpServer(db, playerId, job);
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,

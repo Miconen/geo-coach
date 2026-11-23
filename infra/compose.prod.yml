@@ -45,12 +45,36 @@ services:
       SOURCE_IMAGES_DIR: /data/source-images
       # Room for add_source_image (a 2 MiB image is ~2.8 MB as base64) and long Sources
       BODY_SIZE_LIMIT: 4M
+      PROCESSOR_SECRET: ${PROCESSOR_SECRET:-}
     # Images of knowledge bank Sources. Not in the database, so back it up too.
     volumes:
       - source-images:/data/source-images
     depends_on:
       migrate:
         condition: service_completed_successfully
+
+  # Runs Claude Code for the site's Fix button. It holds the Claude login, and only
+  # reaches the app through /api/processor and a per-job /mcp token.
+  processor:
+    image: ghcr.io/miconen/geo-coach-web:${IMAGE_TAG}
+    restart: unless-stopped
+    command: ["node", "apps/web/build-processor.mjs"]
+    init: true
+    user: node
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=700
+      - /home/node:uid=1000,gid=1000,mode=700
+    environment:
+      HOME: /home/node
+      WEB_URL: http://web:3000
+      PROCESSOR_SECRET: ${PROCESSOR_SECRET:-}
+      PROCESSOR_MODEL: ${PROCESSOR_MODEL:-claude-haiku-5-5}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+    depends_on:
+      - web
 
   caddy:
     image: caddy:2-alpine

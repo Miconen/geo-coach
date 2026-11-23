@@ -377,6 +377,68 @@
     }
   }
 
+  type SessionWorkRange = NonNullable<typeof wb>["sessions"][number]["workRanges"][number];
+
+  let fixingRangeKey = $state<string | null>(null);
+  let fixErrors = $state<Record<string, string>>({});
+
+  function workRangeKey(sessionId: string, wr: SessionWorkRange) {
+    return `${sessionId}:${wr.purpose}:${wr.startUtc}`;
+  }
+
+  function workRangeJobs(sessionId: string, wr: SessionWorkRange) {
+    const start = Date.parse(wr.startUtc);
+    const end = Date.parse(wr.endUtc);
+    const latestPerChunk = new Map<string, NonNullable<typeof wb>["processing"]["jobs"][number]>();
+    for (const job of wb?.processing.jobs ?? []) {
+      if (job.sessionId !== sessionId || job.purpose !== wr.purpose) continue;
+      if (Date.parse(job.startUtc) >= end || Date.parse(job.endUtc) <= start) continue;
+      if (!latestPerChunk.has(job.startUtc)) latestPerChunk.set(job.startUtc, job);
+    }
+    const jobs = [...latestPerChunk.values()];
+    return {
+      running: jobs.filter((j) => j.status === "running").length,
+      queued: jobs.filter((j) => j.status === "queued").length,
+      failed: jobs.find((j) => j.status === "failed") ?? null,
+    };
+  }
+
+  function isSessionRecording(session: { recordingIds: string[] }) {
+    return liveStatuses.some(
+      (s) => s.recording && s.recordingId !== null && session.recordingIds.includes(s.recordingId),
+    );
+  }
+
+  async function fixWorkRange(sessionId: string, wr: SessionWorkRange) {
+    if (!wb) return;
+    const key = workRangeKey(sessionId, wr);
+    fixingRangeKey = key;
+    const { [key]: _cleared, ...otherErrors } = fixErrors;
+    fixErrors = otherErrors;
+    try {
+      const res = await fetch(`/api/duos/${wb.duo.id}/processing-jobs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          purpose: wr.purpose,
+          startUtc: wr.startUtc,
+          endUtc: wr.endUtc,
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        fixErrors = { ...fixErrors, [key]: body?.error ?? "Could not queue this range." };
+        return;
+      }
+      await refreshWorkbench();
+    } catch {
+      fixErrors = { ...fixErrors, [key]: "Could not reach the server." };
+    } finally {
+      fixingRangeKey = null;
+    }
+  }
+
   onMount(() => {
     let es: EventSource | null = null;
     if (wb) {
@@ -1147,8 +1209,52 @@
 
             <!-- Pending work range banners -->
             {#each activeSession.workRanges as wr}
-              <div class="rounded-lg bg-[var(--warn-bg)] px-3 py-1.5 text-xs text-[var(--warn)]">
-                <strong>{wr.purpose}</strong> {wr.reason}: {new Date(wr.startUtc).toLocaleTimeString()} – {new Date(wr.endUtc).toLocaleTimeString()}
+              {@const key = workRangeKey(activeSession.id, wr)}
+              {@const jobs = workRangeJobs(activeSession.id, wr)}
+              {@const active = jobs.running + jobs.queued > 0}
+              {@const recording = isSessionRecording(activeSession)}
+              <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[var(--warn-bg)] px-3 py-1.5 text-xs text-[var(--warn)]">
+                <div class="min-w-0">
+                  <div>
+                    <strong>{wr.purpose}</strong> {wr.reason}: {new Date(wr.startUtc).toLocaleTimeString()} – {new Date(wr.endUtc).toLocaleTimeString()}
+                  </div>
+                  {#each wr.causes as cause}
+                    <div class="opacity-80">{cause.playerName}'s Recording: {cause.summary}</div>
+                  {/each}
+                  {#if wr.lastRun}
+                    <div class="opacity-80">
+                      Last processed by {wr.lastRun.playerName} with {wr.lastRun.model}{wr.lastRun.finishedAt ? ` at ${new Date(wr.lastRun.finishedAt).toLocaleTimeString()}` : ""}
+                    </div>
+                  {/if}
+                  {#if fixErrors[key] || (jobs.failed && !active)}
+                    <div class="font-semibold" role="alert">{fixErrors[key] ?? jobs.failed?.error}</div>
+                  {/if}
+                </div>
+                <button
+                  type="button"
+                  class="shrink-0 rounded-md bg-[var(--warn)] px-2.5 py-1 font-semibold text-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={active || recording || fixingRangeKey === key || !wb.processing.workerOnline}
+                  title={!wb.processing.workerOnline
+                    ? "The processing worker is offline"
+                    : recording
+                      ? "Stop recording before processing this Session"
+                      : undefined}
+                  onclick={() => fixWorkRange(activeSession.id, wr)}
+                >
+                  {#if jobs.running > 0}
+                    Processing…
+                  {:else if jobs.queued > 0}
+                    Queued
+                  {:else if !wb.processing.workerOnline}
+                    Worker offline
+                  {:else if jobs.failed}
+                    Retry
+                  {:else if wr.reason === "stale"}
+                    Fix
+                  {:else}
+                    Process
+                  {/if}
+                </button>
               </div>
             {/each}
 

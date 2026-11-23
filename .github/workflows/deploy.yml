@@ -150,6 +150,8 @@ jobs:
           CF_ORIGIN_KEY: ${{ secrets.CF_ORIGIN_KEY }}
           PUBLIC_MAPBOX_TOKEN: ${{ secrets.PUBLIC_MAPBOX_TOKEN }}
           PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.PUBLIC_GOOGLE_MAPS_API_KEY }}
+          PROCESSOR_SECRET: ${{ secrets.PROCESSOR_SECRET }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
           ssh deploy@${{ secrets.VPS_HOST }} bash -s <<EOF
           set -euo pipefail
@@ -164,6 +166,8 @@ jobs:
           DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET}
           PUBLIC_MAPBOX_TOKEN=${PUBLIC_MAPBOX_TOKEN}
           PUBLIC_GOOGLE_MAPS_API_KEY=${PUBLIC_GOOGLE_MAPS_API_KEY}
+          PROCESSOR_SECRET=${PROCESSOR_SECRET}
+          CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
           ENVEOF
           chmod 600 .env
 
@@ -182,11 +186,11 @@ jobs:
             ls -1t dumps/pre-*.sql.gz | tail -n +6 | xargs -r rm -f
           fi
 
-          docker compose pull web migrate postgres caddy
+          docker compose pull web migrate processor postgres caddy
           docker compose up -d postgres
           # </dev/null: the rest of this script arrives on stdin, so compose must not read it
           docker compose run --rm -T migrate </dev/null
-          docker compose up -d web caddy
+          docker compose up -d web processor caddy
 
           for i in \$(seq 1 30); do
             if curl -fsS "https://${DOMAIN}/healthz" >/dev/null 2>&1; then

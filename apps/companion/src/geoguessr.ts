@@ -145,10 +145,26 @@ export class GeoguessrPoller {
     ncfaCookie: string;
     includeOlderReplays?: boolean;
   }): Promise<SyncSummary> {
-    this.running ??= this.runSync(opts).finally(() => {
-      this.running = null;
-      this.progress = null;
-    });
+    this.running ??= this.runSync(opts)
+      // Offline or server down: report it and let the next sync resume, never reject
+      .catch((err: unknown): SyncSummary => ({
+        authPaused: false,
+        gamesUploaded: 0,
+        replaysUploaded: 0,
+        scan: {
+          feedPages: 0,
+          teamDuelsSeen: 0,
+          alreadyStored: 0,
+          notThisDuo: 0,
+          unfinished: 0,
+          stoppedEarly: false,
+        },
+        warning: `Sync interrupted: ${err instanceof Error ? err.message : String(err)}`,
+      }))
+      .finally(() => {
+        this.running = null;
+        this.progress = null;
+      });
     return this.running;
   }
 

@@ -21,7 +21,7 @@ services:
     environment:
       WHISPER_MODEL: large-v3
       WHISPER_COMPUTE_TYPE: int8_float16
-      IDLE_UNLOAD_SECONDS: 900
+      IDLE_UNLOAD_SECONDS: 7200
     volumes:
       - whisper-cache:/root/.cache/huggingface
     deploy:

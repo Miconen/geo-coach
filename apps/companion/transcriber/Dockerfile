@@ -5,7 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HF_HUB_ENABLE_HF_TRANSFER=0 \
     WHISPER_MODEL=large-v3 \
     WHISPER_COMPUTE_TYPE=int8_float16 \
-    IDLE_UNLOAD_SECONDS=900
+    IDLE_UNLOAD_SECONDS=7200
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \

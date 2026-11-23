@@ -124,16 +124,46 @@ code {
   border: 1px solid transparent;
 }
 
-.status-pill.recording {
+.status-pill.tone-ok {
   background: var(--ok-bg);
   color: var(--ok);
   border-color: var(--ok-border);
 }
 
-.status-pill.idle {
+.status-pill.tone-idle {
   background: var(--surface-subtle);
   color: var(--muted);
   border-color: var(--border);
+}
+
+.status-pill.tone-busy {
+  background: var(--info-bg);
+  color: var(--info);
+  border-color: var(--info-border);
+}
+
+.status-pill.tone-warn {
+  background: var(--warn-bg);
+  color: var(--warn);
+  border-color: var(--warn-border);
+}
+
+.status-pill.tone-danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: var(--danger-border);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.tone-text-warn {
+  color: var(--warn);
+}
+
+.tone-text-danger {
+  color: var(--danger);
 }
 
 .banner {
@@ -338,4 +368,103 @@ select:focus-visible {
   border-radius: 6px;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+}
+
+.recording-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.mic-select {
+  max-width: 240px;
+}
+
+.sync-row {
+  margin-top: 12px;
+}
+
+.live-panel {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-inset);
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.live-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.rec-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger-solid);
+  align-self: center;
+  animation: rec-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes rec-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rec-dot {
+    animation: none;
+  }
+}
+
+.elapsed {
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.meter {
+  position: relative;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  background: var(--ok);
+  transition: width 60ms linear;
+}
+
+.meter-fill.clipping {
+  background: var(--danger-solid);
+}
+
+.meter-mark {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  background: var(--ink);
+  opacity: 0.55;
+}
+
+.meter-legend,
+.live-stats {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.clip-row audio {
+  height: 32px;
 }

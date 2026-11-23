@@ -179,6 +179,21 @@ export class CompanionStore {
     return Number(row.cnt);
   }
 
+  /** Pending uploads of one Transcript Version: its start, chunks and completion */
+  countPendingOutboxForTranscript(transcriptVersionId: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) as cnt FROM outbox WHERE status = 'pending'
+         AND (dedupe_key IN (?, ?) OR dedupe_key LIKE ? ESCAPE '\\')`,
+      )
+      .get(
+        `retrans:${transcriptVersionId}`,
+        `complete:${transcriptVersionId}`,
+        `${transcriptVersionId.replace(/[\\%_]/g, "\\$&")}:%`,
+      ) as { cnt: number };
+    return Number(row.cnt);
+  }
+
   markOutboxSent(id: number): void {
     this.db.prepare("UPDATE outbox SET status = 'sent' WHERE id = ?").run(id);
   }

@@ -19,20 +19,25 @@ model_lock = threading.Lock()
 loaded_model = None
 loaded_model_name = None
 last_used_at = 0.0
+# Set while a cold load runs (reading ~3 GB onto the GPU can take minutes); /healthz reads it without the lock
+model_loading = False
 
 
 def ensure_model():
-    global loaded_model, loaded_model_name, last_used_at
+    global loaded_model, loaded_model_name, last_used_at, model_loading
     with model_lock:
         last_used_at = time.monotonic()
         if loaded_model is not None:
             return loaded_model, loaded_model_name
+        model_loading = True
         try:
             loaded_model = WhisperModel(MODEL_NAME, device=DEVICE, compute_type=COMPUTE_TYPE)
             loaded_model_name = MODEL_NAME
         except Exception:
             loaded_model = WhisperModel(FALLBACK_MODEL, device=DEVICE, compute_type=COMPUTE_TYPE)
             loaded_model_name = FALLBACK_MODEL
+        finally:
+            model_loading = False
         return loaded_model, loaded_model_name
 
 
@@ -58,7 +63,9 @@ class TranscriberHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/healthz":
-            self._send_json(200, {"ok": True, "loadedModel": loaded_model_name})
+            self._send_json(
+                200, {"ok": True, "loadedModel": loaded_model_name, "loading": model_loading}
+            )
             return
         self._send_json(404, {"error": "not found"})
 

@@ -68,7 +68,14 @@ export class PriorityTranscriptionQueue {
       while (true) {
         const job = this.nextJob();
         if (!job) break;
-        await this.worker(job);
+        try {
+          await this.worker(job);
+        } catch (err) {
+          // Transcriber down or erroring: keep the job at the front and retry on the next drain
+          console.error(`Transcription of ${job.id} failed, will retry:`, err);
+          (job.priority === "live" ? this.liveQueue : this.retransQueue).unshift(job);
+          break;
+        }
         processed += 1;
       }
       return processed;

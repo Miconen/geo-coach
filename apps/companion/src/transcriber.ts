@@ -6,6 +6,8 @@ export interface TranscriberResponse {
   utterances: ChunkUtterance[];
 }
 
+export type TranscriberHealth = "ready" | "loading" | "idle" | "offline";
+
 export class TranscriberClient {
   private readonly mode: "fake" | "http";
   private readonly baseUrl: string;
@@ -16,6 +18,20 @@ export class TranscriberClient {
       /\/$/,
       "",
     );
+  }
+
+  /** ready: model on the GPU · loading: cold load running · idle: up, model unloaded · offline: unreachable */
+  async health(): Promise<TranscriberHealth> {
+    if (this.mode === "fake") return "ready";
+    try {
+      const res = await fetch(`${this.baseUrl}/healthz`, { signal: AbortSignal.timeout(3_000) });
+      if (!res.ok) return "offline";
+      const data = (await res.json()) as { loadedModel?: string | null; loading?: boolean };
+      if (data.loading) return "loading";
+      return data.loadedModel ? "ready" : "idle";
+    } catch {
+      return "offline";
+    }
   }
 
   async warmLoad(): Promise<void> {

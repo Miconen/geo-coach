@@ -15,7 +15,8 @@ import { PriorityTranscriptionQueue } from "./queue.js";
 import { OutboxUploader, type SendOutboxResult } from "./uploader.js";
 import { GeoguessrPoller } from "./geoguessr.js";
 import { SilenceWatcher } from "./silence.js";
-import { TranscriberClient } from "./transcriber.js";
+import { TranscriberClient, type TranscriberHealth } from "./transcriber.js";
+import { TranscriptJobTracker } from "./jobs.js";
 import {
   computeAudioDiskUsageBytes,
   computePcmRms,
@@ -66,10 +67,17 @@ async function main() {
 
   const store = new CompanionStore(path.join(DATA_DIR, "companion.sqlite"));
   const transcriber = new TranscriberClient();
+  const jobs = new TranscriptJobTracker();
+  let transcriberHealth: TranscriberHealth = "offline";
+
+  async function refreshTranscriberHealth(): Promise<void> {
+    transcriberHealth = await transcriber.health();
+  }
 
   let activeRec: ActiveRecording | null = null;
   let latestServerCompanionVersion: string | null = null;
   let lastNotice: string | null = null;
+  let lastBootstrapAtMs = 0;
 
   function getServerUrl(): string {
     return (
@@ -206,11 +214,18 @@ async function main() {
   const uploader = new OutboxUploader(store, sendOutboxItem);
 
   const queue = new PriorityTranscriptionQueue(async (job) => {
-    const result = await transcriber.transcribePcmChunk({
-      pcmPath: job.pcmPath,
-      chunkOffsetMs: job.offsetMs,
-      hotwords: job.hotwords,
-    });
+    let result: Awaited<ReturnType<typeof transcriber.transcribePcmChunk>>;
+    try {
+      result = await transcriber.transcribePcmChunk({
+        pcmPath: job.pcmPath,
+        chunkOffsetMs: job.offsetMs,
+        hotwords: job.hotwords,
+      });
+    } catch (err) {
+      jobs.chunkFailed(job.transcriptVersionId, err);
+      throw err;
+    }
+    jobs.chunkDone(job.transcriptVersionId);
     store.enqueueOutbox("chunk", `${job.transcriptVersionId}:${job.chunkNo}`, {
       transcriptVersionId: job.transcriptVersionId,
       recordingId: job.recordingId,
@@ -348,6 +363,7 @@ async function main() {
     const chunkPath = path.join(CHUNKS_DIR, `${rec.transcriptVersionId}-${chunkNo}.pcm`);
     await writeFile(chunkPath, pcm);
 
+    jobs.chunkQueued(rec.transcriptVersionId, rec.recordingId, "live");
     queue.enqueue({
       id: `${rec.transcriptVersionId}:${chunkNo}`,
       priority: "live",
@@ -415,10 +431,13 @@ async function main() {
     }
   }
 
-  // Periodic background timers: outbox drain (5 s), heartbeat (30 s), clock offset & silence check (15 s), GeoGuessr poll during Session (2.5 min)
+  // Periodic background timers: outbox & transcription retry drain + Transcriber health (5 s), heartbeat (30 s), clock offset & silence check (15 s), GeoGuessr poll during Session (2.5 min)
   setInterval(() => {
+    void queue.drainAvailable();
     void uploader.drainOnce();
+    void refreshTranscriberHealth();
   }, 5_000);
+  void refreshTranscriberHealth();
 
   setInterval(async () => {
     const duoId = activeRec?.duoId ?? store.getSetting("selectedDuoId") ?? getCachedDuos()[0]?.id;
@@ -479,8 +498,14 @@ async function main() {
     const url = new URL(req.url ?? "/", `http://${HOST}:${PORT}`);
 
     if (url.pathname === "/local/state" && req.method === "GET") {
-      const duos = await refreshBootstrap();
+      // The page polls every 2 s while busy; refresh Duos from the server at most once a minute
+      let duos = getCachedDuos();
+      if (Date.now() - lastBootstrapAtMs > 60_000) {
+        lastBootstrapAtMs = Date.now();
+        duos = await refreshBootstrap();
+      }
       const diskBytes = await computeAudioDiskUsageBytes(AUDIO_DIR);
+      const pendingUploads = (tv: string) => store.countPendingOutboxForTranscript(tv);
       return sendJson(res, 200, {
         companionVersion: COMPANION_VERSION,
         latestCompanionVersion: latestServerCompanionVersion,
@@ -498,8 +523,11 @@ async function main() {
               recordingId: activeRec.recordingId,
               duoId: activeRec.duoId,
               startedAt: new Date(activeRec.clockAnchorMs).toISOString(),
+              audioMs: Math.round((activeRec.totalBytes / 2 / 16000) * 1000),
             }
           : null,
+        transcriber: transcriberHealth,
+        transcribing: jobs.isBusy(),
         uploadOk: uploader.lastUploadOk,
         pendingOutbox: store.countPendingOutbox(),
         transcriptionLagSec: queue.getLagSeconds(),
@@ -508,8 +536,20 @@ async function main() {
         syncProgress: poller.progress,
         notice: lastNotice,
         diskBytes,
-        recordings: store.listLocalRecordings(),
+        recordings: store.listLocalRecordings().map((r) => ({
+          ...r,
+          status: jobs.statusOf(r.id, { isActive: activeRec?.recordingId === r.id, pendingUploads }),
+        })),
       });
+    }
+
+    if (url.pathname === "/local/warm" && req.method === "POST") {
+      // Page opened: start the cold model load now rather than at the first chunk
+      if (transcriberHealth === "idle") {
+        transcriberHealth = "loading";
+        void transcriber.warmLoad();
+      }
+      return sendJson(res, 200, { transcriber: transcriberHealth });
     }
 
     if (url.pathname === "/local/settings" && req.method === "POST") {
@@ -570,6 +610,7 @@ async function main() {
           transcriberSettings: { computeType: "int8_float16", vadFilter: true },
           hotwordsUsed: duo?.hotwords ?? [],
         });
+        jobs.chunkQueued(newVersionId, r.id, "retranscribe");
         queue.enqueue({
           id: `${newVersionId}:0`,
           priority: "retranscribe",

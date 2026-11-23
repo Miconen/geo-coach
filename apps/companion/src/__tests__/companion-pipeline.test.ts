@@ -7,6 +7,7 @@ import { PriorityTranscriptionQueue } from "../queue.js";
 import { OutboxUploader, computeBackoffMs } from "../uploader.js";
 import { GeoguessrPoller } from "../geoguessr.js";
 import { SilenceWatcher } from "../silence.js";
+import { TranscriptJobTracker } from "../jobs.js";
 
 describe("Seam 5: Companion SQLite outbox, priority queue, silence auto-stop, and GeoGuessr poller", () => {
   let tmpDir: string;
@@ -84,6 +85,73 @@ describe("Seam 5: Companion SQLite outbox, priority queue, silence auto-stop, an
     queue.setLiveRecordingActive(false);
     await queue.drainAvailable();
     expect(order).toEqual(["live:live-1", "live:live-2", "retranscribe:retrans-1"]);
+  });
+
+  it("keeps a failed transcription job at the front of the queue and retries it on the next drain", async () => {
+    const order: string[] = [];
+    let transcriberUp = false;
+    const queue = new PriorityTranscriptionQueue(async (job) => {
+      if (!transcriberUp) throw new TypeError("fetch failed");
+      order.push(job.id);
+    });
+    queue.enqueue({ id: "live-1", priority: "live", pcmPath: "a", chunkNo: 0, recordingId: "r1", transcriptVersionId: "tv1", hotwords: [], offsetMs: 0 });
+    queue.enqueue({ id: "live-2", priority: "live", pcmPath: "b", chunkNo: 1, recordingId: "r1", transcriptVersionId: "tv1", hotwords: [], offsetMs: 0 });
+
+    await expect(queue.drainAvailable()).resolves.toBe(0);
+    expect(queue.getDepth().live).toBe(2);
+
+    transcriberUp = true;
+    await queue.drainAvailable();
+    expect(order).toEqual(["live-1", "live-2"]);
+  });
+
+  it("reports each Recording as recording, transcribing, uploading, then done", () => {
+    const store = new CompanionStore(path.join(tmpDir, "companion.sqlite"));
+    const jobs = new TranscriptJobTracker();
+    const pendingUploads = (tv: string) => store.countPendingOutboxForTranscript(tv);
+
+    expect(jobs.statusOf("rec1", { isActive: false, pendingUploads })).toBeNull();
+
+    jobs.chunkQueued("tv1", "rec1", "live");
+    jobs.chunkQueued("tv1", "rec1", "live");
+    jobs.chunkDone("tv1");
+    expect(jobs.statusOf("rec1", { isActive: true, pendingUploads })).toEqual({
+      state: "recording",
+      chunksQueued: 2,
+      chunksDone: 1,
+      error: null,
+    });
+
+    jobs.chunkFailed("tv1", new TypeError("fetch failed"));
+    expect(jobs.statusOf("rec1", { isActive: false, pendingUploads })).toMatchObject({
+      state: "transcribing",
+      chunksDone: 1,
+      error: "fetch failed",
+    });
+    expect(jobs.isBusy()).toBe(true);
+
+    jobs.chunkDone("tv1");
+    store.enqueueOutbox("chunk", "tv1:1", { chunkNo: 1 });
+    store.enqueueOutbox("completeTranscript", "complete:tv1", {});
+    store.enqueueOutbox("chunk", "tv10:0", { chunkNo: 0 }); // another version, not counted
+    expect(jobs.statusOf("rec1", { isActive: false, pendingUploads })).toEqual({
+      state: "uploading",
+      kind: "live",
+      pendingUploads: 2,
+    });
+
+    for (const item of store.listPendingOutbox(Date.now())) {
+      if (item.dedupeKey !== "tv10:0") store.markOutboxSent(item.id);
+    }
+    expect(jobs.statusOf("rec1", { isActive: false, pendingUploads })).toEqual({ state: "done", kind: "live" });
+
+    // A later re-transcription becomes the Recording's status
+    jobs.chunkQueued("tv2", "rec1", "retranscribe");
+    expect(jobs.statusOf("rec1", { isActive: false, pendingUploads })).toMatchObject({
+      state: "transcribing",
+      kind: "retranscribe",
+    });
+    store.close();
   });
 
   it("auto-stops after sustained silence and cuts the stop timestamp back to last speech", () => {
@@ -219,6 +287,21 @@ describe("Seam 5: Companion SQLite outbox, priority queue, silence auto-stop, an
     });
     const paused = await authFailPoller.syncOnce({ duoTeamId: "team_duo", ncfaCookie: "bad" });
     expect(paused.authPaused).toBe(true);
+
+    // On a network failure -> resolves with a warning instead of rejecting (callers fire and forget)
+    const offlinePoller = new GeoguessrPoller({
+      delayBetweenRequestsMs: 0,
+      fetchGeoguessr: async () => new Response(JSON.stringify({ entries: [{ gameMode: "TeamDuels", gameId: "g1" }] })),
+      checkMissing: async () => {
+        throw new TypeError("fetch failed");
+      },
+      uploadGame: async () => {},
+      uploadReplay: async () => {},
+    });
+    const offline = await offlinePoller.syncOnce({ duoTeamId: "team_duo", ncfaCookie: "cookie" });
+    expect(offline.authPaused).toBe(false);
+    expect(offline.warning).toMatch(/fetch failed/);
+    expect(offlinePoller.progress).toBeNull();
   });
 
   it("stops paging at a page with nothing new, fetches oldest first, and never refetches other teams' Games", async () => {

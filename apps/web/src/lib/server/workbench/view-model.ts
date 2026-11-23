@@ -147,6 +147,9 @@ export interface WorkbenchSession {
   }>;
 }
 
+/** How long after a Round's results unlinked speech still counts as a debrief of that Round. */
+const DEBRIEF_LINK_WINDOW_MS = 2 * 60_000;
+
 export interface WorkbenchLearning {
   id: string;
   runId: string | null;
@@ -687,8 +690,30 @@ export async function buildWorkbenchData(
       }
 
       const explicitRoundIds = l.explicitRoundIds;
-      const allRoundIds = [...new Set([...derivedRoundSet, ...explicitRoundIds])];
-      const isDebrief = explicitRoundIds.some((rId) => !derivedRoundSet.has(rId));
+      const debriefRoundIds = explicitRoundIds.filter((rId) => !derivedRoundSet.has(rId));
+      if (derivedRoundSet.size === 0 && explicitRoundIds.length === 0) {
+        // Speech outside every Round is a debrief of the Round that just ended
+        const spokenAt = Math.min(
+          ...l.utteranceIds.flatMap((uId) => {
+            const u = utterancesById[uId];
+            return u ? [Date.parse(u.startedAt)] : [];
+          }),
+        );
+        let nearest: { id: string; endedAt: number } | null = null;
+        for (const [rId, b] of roundDateBounds.entries()) {
+          const endedAt = b.end.getTime();
+          if (
+            endedAt <= spokenAt &&
+            spokenAt - endedAt <= DEBRIEF_LINK_WINDOW_MS &&
+            (!nearest || endedAt > nearest.endedAt)
+          ) {
+            nearest = { id: rId, endedAt };
+          }
+        }
+        if (nearest) debriefRoundIds.push(nearest.id);
+      }
+      const allRoundIds = [...new Set([...derivedRoundSet, ...explicitRoundIds, ...debriefRoundIds])];
+      const isDebrief = debriefRoundIds.length > 0;
 
       // Derive Session for Manual Learnings via Utterance -> Recording -> Session OR Round -> Game -> Session
       let sessionId = l.sessionId;
@@ -725,7 +750,7 @@ export async function buildWorkbenchData(
           const r = roundsById[rId];
           if (!r) continue;
           if (!r.learningIds.includes(l.id)) r.learningIds.push(l.id);
-          if (isDebrief && explicitRoundIds.includes(rId) && !r.debriefLearningIds.includes(l.id)) {
+          if (debriefRoundIds.includes(rId) && !r.debriefLearningIds.includes(l.id)) {
             r.debriefLearningIds.push(l.id);
           }
         }

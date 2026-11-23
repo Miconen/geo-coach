@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { invalidateAll } from "$app/navigation";
   import {
     getCountryName,
@@ -22,7 +22,7 @@
     filterWorkbenchClaims,
     groupClaimsByCountry,
   } from "$lib/workbench/knowledge.js";
-  import { gameSlice, roundSlice } from "$lib/workbench/slices.js";
+  import { gameSlice, learningGameLinks, roundSlice } from "$lib/workbench/slices.js";
   import type {
     CountryDossier,
     WorkbenchLearning,
@@ -175,6 +175,10 @@
     const round = roundId ? wb?.roundsById[roundId] : null;
     return wb && round ? gameSlice(wb, round.gameId) : null;
   });
+
+  const activeLearningGames = $derived(
+    wb && activeLearning ? learningGameLinks(wb, activeLearning.roundIds) : [],
+  );
 
   const claimStatusCounts = $derived(countByStatus(wb?.claims ?? []));
   const claimTopics = $derived([...new Set((wb?.claims ?? []).flatMap((c) => c.topics))].sort());
@@ -340,6 +344,38 @@
     }
     mode = "session";
     selectedSessionId = game.sessionIds[0] ?? null;
+  }
+
+  async function openRound(roundId: string) {
+    const round = wb?.roundsById[roundId];
+    if (!round) return;
+    selectedRoundId = round.id;
+    jumpToGame(round.gameId);
+    await scrollToAnchor(`[data-round-anchor="${round.id}"]`);
+  }
+
+  async function scrollToAnchor(selector: string) {
+    await tick();
+    document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function focusUtterance(utteranceId: string, roundId?: string) {
+    highlightedUtteranceId = utteranceId;
+    const inRound = roundId ? `[data-round-anchor="${roundId}"] ` : "";
+    return scrollToAnchor(`${inRound}[data-utterance-anchor="${utteranceId}"]`);
+  }
+
+  function openUtterance(utteranceId: string, roundId?: string) {
+    const utterance = wb?.utterancesById[utteranceId];
+    if (!wb || !utterance) return;
+    const round = roundId
+      ? wb.roundsById[roundId]
+      : Object.values(wb.roundsById).find((r) => r.utteranceIds.includes(utteranceId));
+    mode = "session";
+    selectedSessionId = utterance.sessionId;
+    selectedGameId = round?.gameId ?? null;
+    selectedRoundId = round?.id ?? null;
+    return focusUtterance(utteranceId, round?.id);
   }
 
   function jumpToSession(sessionId: string) {
@@ -840,6 +876,7 @@
                   {#each group.items as item}
                 {@const isSelected = activeLearning?.id === item.id}
                 {@const isRevealed = !recallMode || Boolean(revealedIds[item.id])}
+                {@const gameLinks = learningGameLinks(wb, item.roundIds)}
                 <button
                   type="button"
                   onclick={() => {
@@ -914,6 +951,16 @@
                           #{topic}
                         </span>
                       {/each}
+                    </div>
+                  {/if}
+
+                  {#if gameLinks.length > 0 && isRevealed}
+                    <div class="mt-1.5 text-[11px] text-[var(--muted)]">
+                      {#if gameLinks.length === 1}
+                        vs {gameLinks[0]!.game.opponentTeamName ?? "Opponents"} · {gameLinks[0]!.rounds.map((r) => `R${r.roundNumber}`).join(", ")}
+                      {:else}
+                        {gameLinks.length} Games · {gameLinks.reduce((n, g) => n + g.rounds.length, 0)} Rounds
+                      {/if}
                     </div>
                   {/if}
                 </button>
@@ -1172,7 +1219,7 @@
                   highlightedRoundIds={selectedRoundId ? [selectedRoundId] : []}
                   {highlightedUtteranceId}
                   {timelineSearch}
-                  onSelectUtterance={(id) => (highlightedUtteranceId = id)}
+                  onSelectUtterance={focusUtterance}
                   onSelectLearning={(id) => (selectedLearningId = id)}
                   onAddLearning={openManualModal}
                   onDeleteUtterance={deleteUtterance}
@@ -1192,6 +1239,7 @@
                     timelineSearch.trim() !== "" &&
                     u.text.toLowerCase().includes(timelineSearch.trim().toLowerCase())}
                   <div
+                    data-utterance-anchor={u.id}
                     class="flex items-start justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs {highlightedUtteranceId === u.id || matchHighlight
                       ? 'bg-[var(--warn-bg)]'
                       : 'bg-[var(--surface-subtle)]'}"
@@ -1268,6 +1316,7 @@
                   game={primaryGameSlice.game}
                   rounds={primaryGameSlice.rounds}
                   highlightedRoundIds={activeLearning.roundIds}
+                  onSelectUtterance={openUtterance}
                 />
               {/if}
             </div>
@@ -1362,6 +1411,36 @@
                 </div>
               {/if}
 
+              <!-- Links back to the Games and Rounds -->
+              {#if activeLearningGames.length > 0 && activeLearningRevealed}
+                <div class="space-y-1">
+                  <div class="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                    From {activeLearningGames.length === 1 ? "Game" : "Games"}
+                  </div>
+                  {#each activeLearningGames as { game, rounds } (game.id)}
+                    <div class="flex flex-wrap items-center gap-1.5 rounded-lg bg-[var(--surface-subtle)] p-2 text-xs">
+                      <button
+                        onclick={() => {
+                          selectedRoundId = null;
+                          jumpToGame(game.id);
+                        }}
+                        class="font-medium text-[var(--accent)] hover:underline"
+                      >
+                        vs {game.opponentTeamName ?? "Opponents"} · {new Date(game.startedAt).toLocaleDateString()}
+                      </button>
+                      {#each rounds as round (round.id)}
+                        <button
+                          onclick={() => openRound(round.id)}
+                          class="mono rounded border border-[var(--border-strong)] px-1.5 py-0.5 hover:bg-[var(--surface-hover)]"
+                        >
+                          R{round.roundNumber}{round.countryCode ? ` ${round.countryCode}` : ""}
+                        </button>
+                      {/each}
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+
               <!-- Linked Round Coaching Cards -->
               {#each activeLearning.roundIds as rId}
                 {@const slice = roundSlice(wb, rId)}
@@ -1371,6 +1450,7 @@
                     utterances={slice.utterances}
                     players={slice.players}
                     recallHidden={!activeLearningRevealed}
+                    onSelectUtterance={activeLearningRevealed ? openUtterance : undefined}
                   />
                 {/if}
               {/each}
@@ -1385,9 +1465,14 @@
                     {@const u = wb.utterancesById[uId]}
                     {#if u}
                       <div class="rounded-lg bg-[var(--surface-subtle)] p-2 text-xs">
-                        <span class="mono text-[var(--muted)]">
+                        <button
+                          type="button"
+                          onclick={() => openUtterance(u.id)}
+                          title="Open in Session timeline"
+                          class="mono cursor-pointer text-[var(--accent)] hover:underline"
+                        >
                           {primaryRound ? formatRelSec(primaryRound.startTime, u.startedAt) : new Date(u.startedAt).toISOString().slice(11, 19)}
-                        </span>
+                        </button>
                         <strong class="ml-1.5">{wb.players[u.playerId]?.displayName ?? "Player"}:</strong>
                         <UtteranceText duoId={wb.duo.id} utterance={u} editable={false} />
                       </div>
@@ -1477,6 +1562,30 @@
             />
           </label>
         </div>
+
+        <label class="block text-xs">
+          Game / Round (optional)
+          <select
+            value={manualRoundIds[0] ?? ""}
+            onchange={(e) => {
+              const roundId = e.currentTarget.value;
+              manualRoundIds = roundId ? [roundId] : [];
+            }}
+            class="mt-1 w-full rounded border border-[var(--border-strong)] p-2 text-sm"
+          >
+            <option value="">Not linked</option>
+            {#each wb.recentGames as g (g.id)}
+              <optgroup label="{new Date(g.startedAt).toLocaleDateString()} vs {g.opponentTeamName ?? 'Opponents'}">
+                {#each g.roundIds as rId (rId)}
+                  {@const r = wb.roundsById[rId]}
+                  {#if r}
+                    <option value={r.id}>R{r.roundNumber}{r.countryCode ? ` · ${r.countryCode}` : ""}</option>
+                  {/if}
+                {/each}
+              </optgroup>
+            {/each}
+          </select>
+        </label>
 
         <div class="flex justify-end gap-2 pt-2">
           <button

@@ -25,8 +25,32 @@ export interface GameSlice {
   learnings: WorkbenchLearning[];
 }
 
+/** A Game a Learning came from, with the linked Rounds in play order. */
+export interface LearningGameLink {
+  game: WorkbenchGame;
+  rounds: WorkbenchRound[];
+}
+
 type RoundSource = Pick<WorkbenchData, "roundsById" | "utterancesById" | "players">;
 type GameSource = RoundSource & Pick<WorkbenchData, "gamesById" | "learnings">;
+
+export function learningGameLinks(
+  wb: Pick<WorkbenchData, "roundsById" | "gamesById">,
+  roundIds: string[],
+): LearningGameLink[] {
+  const byGame = new Map<string, LearningGameLink>();
+  for (const id of roundIds) {
+    const round = wb.roundsById[id];
+    const game = round ? wb.gamesById[round.gameId] : undefined;
+    if (!round || !game) continue;
+    const link = byGame.get(game.id) ?? { game, rounds: [] };
+    link.rounds.push(round);
+    byGame.set(game.id, link);
+  }
+  const links = [...byGame.values()];
+  for (const link of links) link.rounds.sort((a, b) => a.roundNumber - b.roundNumber);
+  return links.sort((a, b) => Date.parse(a.game.startedAt) - Date.parse(b.game.startedAt));
+}
 
 export function roundSlice(wb: RoundSource, roundId: string): RoundSlice | null {
   const round = wb.roundsById[roundId];

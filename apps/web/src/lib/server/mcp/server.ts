@@ -18,6 +18,7 @@ import {
   mcpAddSourceImage,
   mcpFinishRun,
   mcpGetInstructions,
+  mcpListSources,
   mcpListWork,
   mcpReadRange,
   mcpSearchClaims,
@@ -160,6 +161,21 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
     },
     async (args) => {
       const res = await mcpAddClaims(db, playerId, args);
+      return {
+        content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    "list_sources",
+    "List the Duo's knowledge bank Sources with their versions. Check it before add_source: pass an existing Source's id as sourceId to add a new version instead of a duplicate. query matches title or URL.",
+    {
+      query: z.string().max(200).optional(),
+      duo: z.string().optional(),
+    },
+    async (args) => {
+      const res = await mcpListSources(db, playerId, args);
       return {
         content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
       };

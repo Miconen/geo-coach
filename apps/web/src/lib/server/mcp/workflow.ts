@@ -39,6 +39,7 @@ import {
   filterClaims,
   insertClaim,
   insertEvidence,
+  listSources,
   summarizeEvidence,
   type DerivedClaim,
   type NewEvidence,
@@ -1006,4 +1007,38 @@ export async function mcpAddSourceImage(
   const res = await addSourceImage(db, playerId, input);
   duoEventBus.emitChanged(version.duoId, "source", version.sourceId);
   return res;
+}
+
+/**
+ * `list_sources`: the Duo's Sources with their versions, so an agent can pass
+ * the right `sourceId` when re-ingesting. `query` matches title or URL.
+ */
+export async function mcpListSources(
+  db: AppDb,
+  playerId: string,
+  input: { duo?: string; query?: string },
+) {
+  const duo = await resolveDuoForPlayer(db, playerId, input.duo);
+  const q = input.query?.trim().toLowerCase() ?? "";
+  const all = await listSources(db, duo.id);
+  const matches = q
+    ? all.filter((s) => `${s.title} ${s.url ?? ""}`.toLowerCase().includes(q))
+    : all;
+  return {
+    duo,
+    total: matches.length,
+    sources: matches.map((s) => ({
+      id: s.id,
+      title: s.title,
+      url: s.url,
+      kind: s.kind,
+      versions: s.versions.map((v) => ({
+        sourceVersionId: v.id,
+        versionNo: v.versionNo,
+        createdAt: v.createdAt.toISOString(),
+        sectionCount: v.sectionCount,
+        imageCount: v.imageCount,
+      })),
+    })),
+  };
 }

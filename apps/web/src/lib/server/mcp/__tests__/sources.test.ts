@@ -17,6 +17,7 @@ import {
   mcpAddSource,
   mcpAddSourceImage,
   mcpGetInstructions,
+  mcpListSources,
 } from "../workflow.js";
 
 const PNG_1PX =
@@ -81,9 +82,10 @@ describe("knowledge bank: Sources and ingestion (#47)", () => {
     delete process.env.SOURCE_IMAGES_DIR;
   });
 
-  it("serves the ingest-v1 instructions", async () => {
+  it("serves the ingest-v2 instructions", async () => {
     const res = await mcpGetInstructions("ingest");
-    expect(res.promptVersion).toBe("ingest-v1");
+    expect(res.promptVersion).toBe("ingest-v2");
+    expect(res.instructions).toContain("list_sources");
     expect(res.instructions).toContain("add_source_image");
   });
 
@@ -213,6 +215,17 @@ describe("knowledge bank: Sources and ingestion (#47)", () => {
     });
     const v3 = await mcpAddSource(handle.db, mikoId, { sourceId: v1.sourceId, title: "Plonkit: Bulgaria", kind: "web", markdown: v2Markdown });
     expect(v3.claimsToRecheck).toEqual([]);
+
+    // list_sources finds it by title or URL so an agent can pass its id as sourceId
+    const listed = await mcpListSources(handle.db, mikoId, { query: "plonkit: bulgaria" });
+    expect(listed.sources.map((x) => x.id)).toEqual([v1.sourceId]);
+    expect(listed.sources[0]!.versions.map((x) => [x.versionNo, x.sourceVersionId])).toEqual([
+      [1, v1.sourceVersionId],
+      [2, v2.sourceVersionId],
+      [3, v3.sourceVersionId],
+    ]);
+    expect((await mcpListSources(handle.db, mikoId, { query: "nope" })).total).toBe(0);
+    expect((await mcpListSources(handle.db, outsiderId, {})).total).toBe(0);
 
     const [source] = await listSources(handle.db, duoId);
     expect(source!.title).toBe("Plonkit: Bulgaria");

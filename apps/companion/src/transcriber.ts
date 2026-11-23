@@ -8,6 +8,72 @@ export interface TranscriberResponse {
 
 export type TranscriberHealth = "ready" | "loading" | "idle" | "offline";
 
+interface TranscriberSegment {
+  text: string;
+  start_ms: number;
+  end_ms: number;
+  avg_logprob?: number;
+  no_speech_prob?: number;
+  words?: Array<{ word: string; start_ms: number; end_ms: number; probability: number }>;
+}
+
+const STOCK_HALLUCINATION =
+  /\b(?:thanks|thank you) for watching\b|\blike,? comment,? and subscribe\b|\bsubscribe to (?:the|my|our) channel\b|\bsubtitles by\b|\bamara\.org\b/i;
+const MIN_RECOVERED_CONFIDENCE = 0.5;
+
+function hotwordTokens(text: string): string[] {
+  return (
+    text
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "")
+      .toLowerCase()
+      .match(/[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*/gu) ?? []
+  );
+}
+
+function meanWordProbability(segment: { words?: Array<{ probability: number }> }): number | null {
+  const words = segment.words ?? [];
+  if (words.length === 0) return null;
+  return words.reduce((sum, w) => sum + w.probability, 0) / words.length;
+}
+
+/** Whisper can recite its hotword prompt, or stock video outros, instead of what was said. */
+export function isHallucinatedSegment(
+  segment: { text: string; words?: Array<{ probability: number }> },
+  hotwords: readonly string[],
+): boolean {
+  if (STOCK_HALLUCINATION.test(segment.text)) return true;
+  const confidence = meanWordProbability(segment);
+  if (confidence === null) return false;
+
+  const phrases = hotwords
+    .map(hotwordTokens)
+    .filter((p) => p.length > 0)
+    .sort((a, b) => b.length - a.length);
+  const tokens = hotwordTokens(segment.text);
+  if (tokens.length === 0) return false;
+
+  let covered = 0;
+  let matches = 0;
+  for (let i = 0; i < tokens.length; ) {
+    const at = i;
+    const phrase = phrases.find((p) => p.every((w, j) => tokens[at + j] === w));
+    if (phrase) {
+      covered += phrase.length;
+      matches += 1;
+      i += phrase.length;
+    } else {
+      i += 1;
+    }
+  }
+  if (covered / tokens.length < 0.8) return false;
+  return matches >= 3 ? confidence < 0.7 : matches === 2 && confidence < 0.4;
+}
+
+function segmentsOverlap(a: TranscriberSegment, b: TranscriberSegment): boolean {
+  return a.start_ms < b.end_ms && b.start_ms < a.end_ms;
+}
+
 export class TranscriberClient {
   private readonly mode: "fake" | "http";
   private readonly baseUrl: string;
@@ -68,36 +134,26 @@ export class TranscriberClient {
     }
 
     const pcmBytes = await readFile(opts.pcmPath);
-    const res = await fetch(`${this.baseUrl}/transcribe`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/octet-stream",
-        "X-Hotwords": encodeURIComponent(opts.hotwords.join(" ")),
-        "X-Hotwords-Encoding": "uri",
-        "X-Offset-Ms": String(opts.chunkOffsetMs),
-      },
-      body: pcmBytes,
-    });
-
-    if (!res.ok) {
-      throw new Error(`Transcriber failed (${res.status}): ${await res.text()}`);
+    const data = await this.requestSegments(pcmBytes, opts.hotwords, opts.chunkOffsetMs);
+    let segments = data.segments;
+    const echoes = segments.filter((s) => isHallucinatedSegment(s, opts.hotwords));
+    if (echoes.length > 0) {
+      // An echo can overwrite short real speech, so recover those spans from a plain pass.
+      const plain = await this.requestSegments(pcmBytes, [], opts.chunkOffsetMs);
+      const kept = segments.filter((s) => !echoes.includes(s));
+      const recovered = plain.segments.filter(
+        (s) =>
+          !isHallucinatedSegment(s, []) &&
+          (meanWordProbability(s) ?? 0) >= MIN_RECOVERED_CONFIDENCE &&
+          echoes.some((e) => segmentsOverlap(e, s)) &&
+          !kept.some((k) => segmentsOverlap(k, s)),
+      );
+      segments = [...kept, ...recovered].sort((a, b) => a.start_ms - b.start_ms);
     }
-
-    const data = (await res.json()) as {
-      model: string;
-      segments: Array<{
-        text: string;
-        start_ms: number;
-        end_ms: number;
-        avg_logprob?: number;
-        no_speech_prob?: number;
-        words?: Array<{ word: string; start_ms: number; end_ms: number; probability: number }>;
-      }>;
-    };
 
     return {
       model: data.model,
-      utterances: data.segments
+      utterances: segments
         .filter((s) => s.text.trim().length > 0)
         .map((s) => ({
           text: s.text.trim(),
@@ -113,5 +169,28 @@ export class TranscriberClient {
           })),
         })),
     };
+  }
+
+  private async requestSegments(
+    pcmBytes: Buffer,
+    hotwords: readonly string[],
+    chunkOffsetMs: number,
+  ): Promise<{ model: string; segments: TranscriberSegment[] }> {
+    const res = await fetch(`${this.baseUrl}/transcribe`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "X-Hotwords": encodeURIComponent(hotwords.join(" ")),
+        "X-Hotwords-Encoding": "uri",
+        "X-Offset-Ms": String(chunkOffsetMs),
+      },
+      body: pcmBytes,
+    });
+
+    if (!res.ok) {
+      throw new Error(`Transcriber failed (${res.status}): ${await res.text()}`);
+    }
+
+    return (await res.json()) as { model: string; segments: TranscriberSegment[] };
   }
 }

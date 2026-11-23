@@ -21,6 +21,7 @@ import { recoverUnfinishedRecordings } from "./recovery.js";
 import {
   computeAudioDiskUsageBytes,
   computePcmRms,
+  findQuietCutByte,
   convertPcmToFlac,
   deleteAudioOlderThan,
 } from "./audio.js";
@@ -353,13 +354,16 @@ async function main() {
     completeOnFinish: boolean = false,
   ): Promise<boolean> {
     if (rec.chunkBytes === 0) return false;
-    const pcm = Buffer.concat(rec.chunkBuffers);
+    const buffered = Buffer.concat(rec.chunkBuffers);
+    const cutByte = completeOnFinish ? buffered.byteLength : findQuietCutByte(buffered);
+    const pcm = buffered.subarray(0, cutByte);
+    const remainder = buffered.subarray(cutByte);
     const chunkNo = rec.chunkNo;
     const chunkOffsetMs = rec.chunkOffsetMs;
     rec.chunkNo += 1;
     rec.chunkOffsetMs += Math.round((pcm.byteLength / 2 / 16000) * 1000);
-    rec.chunkBuffers = [];
-    rec.chunkBytes = 0;
+    rec.chunkBuffers = remainder.byteLength > 0 ? [remainder] : [];
+    rec.chunkBytes = remainder.byteLength;
 
     const chunkPath = path.join(CHUNKS_DIR, `${rec.transcriptVersionId}-${chunkNo}.pcm`);
     await writeFile(chunkPath, pcm);

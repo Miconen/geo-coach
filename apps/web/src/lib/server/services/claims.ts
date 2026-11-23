@@ -10,7 +10,7 @@ import {
   type SearchClaimsInput,
 } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
-import { claimEvidence, claims, learnings } from "../db/schema.js";
+import { claimEvidence, claimImages, claims, learnings, sourceImages } from "../db/schema.js";
 import { DomainError, assertPlayerInDuo } from "./recordings.js";
 
 export interface DerivedEvidence {
@@ -19,6 +19,8 @@ export interface DerivedEvidence {
   direction: EvidenceDirection;
   roundId: string | null;
   playerId: string | null;
+  sourceVersionId: string | null;
+  sectionAnchor: string | null;
   runId: string | null;
   note: string | null;
   createdAt: Date;
@@ -38,11 +40,13 @@ export interface DerivedClaim {
   evidence: DerivedEvidence[];
   /** Every Learning linked to the Claim, current or not; callers filter by status. */
   learningIds: string[];
+  /** Source images shown with the Claim. */
+  imageIds: string[];
 }
 
 /** A Duo's Claims, each with its Evidence and derived status (ADR 0005), oldest first. */
 export async function deriveClaims(db: AppDb, duoId: string): Promise<DerivedClaim[]> {
-  const [rows, evidenceRows, linkedLearnings] = await Promise.all([
+  const [rows, evidenceRows, linkedLearnings, imageLinks] = await Promise.all([
     db.query.claims.findMany({
       where: eq(claims.duoId, duoId),
       orderBy: [asc(claims.createdAt), asc(claims.id)],
@@ -55,6 +59,11 @@ export async function deriveClaims(db: AppDb, duoId: string): Promise<DerivedCla
       .select({ id: learnings.id, claimId: learnings.claimId })
       .from(learnings)
       .where(eq(learnings.duoId, duoId)),
+    db
+      .select({ claimId: claimImages.claimId, imageId: claimImages.sourceImageId })
+      .from(claimImages)
+      .innerJoin(sourceImages, eq(sourceImages.id, claimImages.sourceImageId))
+      .where(eq(sourceImages.duoId, duoId)),
   ]);
 
   const evidenceByClaim = new Map<string, DerivedEvidence[]>();
@@ -66,6 +75,8 @@ export async function deriveClaims(db: AppDb, duoId: string): Promise<DerivedCla
       direction: e.direction,
       roundId: e.roundId,
       playerId: e.playerId,
+      sourceVersionId: e.sourceVersionId,
+      sectionAnchor: e.sectionAnchor,
       runId: e.runId,
       note: e.note,
       createdAt: e.createdAt,
@@ -78,6 +89,13 @@ export async function deriveClaims(db: AppDb, duoId: string): Promise<DerivedCla
     const list = learningsByClaim.get(l.claimId) ?? [];
     list.push(l.id);
     learningsByClaim.set(l.claimId, list);
+  }
+
+  const imagesByClaim = new Map<string, string[]>();
+  for (const link of imageLinks) {
+    const list = imagesByClaim.get(link.claimId) ?? [];
+    list.push(link.imageId);
+    imagesByClaim.set(link.claimId, list);
   }
 
   return rows.map((c) => {
@@ -95,6 +113,7 @@ export async function deriveClaims(db: AppDb, duoId: string): Promise<DerivedCla
       status: deriveClaimStatus(evidence),
       evidence,
       learningIds: learningsByClaim.get(c.id) ?? [],
+      imageIds: imagesByClaim.get(c.id) ?? [],
     };
   });
 }
@@ -155,6 +174,10 @@ export interface NewEvidence {
   direction: EvidenceDirection;
   roundId?: string | null;
   playerId?: string | null;
+  sourceVersionId?: string | null;
+  sectionAnchor?: string | null;
+  /** Source images to show with the Claim, for Documentation Evidence. */
+  imageIds?: string[];
   note?: string | null;
 }
 
@@ -178,8 +201,8 @@ export async function insertClaim(
 }
 
 /**
- * Adds Evidence to a Claim. The same Round counts once per Claim, so repeating
- * it is a no-op; returns the ids of rows actually inserted.
+ * Adds Evidence to a Claim. The same Round or Source section counts once per
+ * Claim, so repeating it is a no-op; returns the ids of rows actually inserted.
  */
 export async function insertEvidence(
   db: AppDb,
@@ -204,12 +227,20 @@ export async function insertEvidence(
         direction: item.direction,
         roundId: item.roundId ?? null,
         playerId: item.playerId ?? null,
+        sourceVersionId: item.sourceVersionId ?? null,
+        sectionAnchor: item.sectionAnchor ?? null,
         runId,
         note: item.note ?? null,
       })
       .onConflictDoNothing()
       .returning({ id: claimEvidence.id });
     if (inserted.length > 0) ids.push(id);
+    if (item.imageIds && item.imageIds.length > 0) {
+      await db
+        .insert(claimImages)
+        .values(item.imageIds.map((sourceImageId) => ({ claimId, sourceImageId })))
+        .onConflictDoNothing();
+    }
   }
   return ids;
 }

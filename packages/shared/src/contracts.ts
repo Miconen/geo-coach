@@ -43,6 +43,10 @@ export type ProcessingRunPurpose = z.infer<typeof processingRunPurposeSchema>;
 /** The purposes whose runs produce Learnings; `calls` runs produce Call labels (ADR 0002). */
 export type LearningRunPurpose = Exclude<ProcessingRunPurpose, "calls">;
 
+/** What `get_instructions` serves: each Processing run purpose, plus Source ingestion (not a run). */
+export const instructionPurposeSchema = z.enum(["extract", "tips", "calls", "ingest"]);
+export type InstructionPurpose = z.infer<typeof instructionPurposeSchema>;
+
 export const processingRunStatusSchema = z.enum(["open", "finished", "abandoned"]);
 export type ProcessingRunStatus = z.infer<typeof processingRunStatusSchema>;
 

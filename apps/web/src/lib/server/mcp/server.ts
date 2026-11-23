@@ -1,13 +1,21 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { claimStatusSchema, isoCountryCodeSchema, processingRunPurposeSchema } from "@geo-coach/shared";
+import {
+  claimStatusSchema,
+  instructionPurposeSchema,
+  isoCountryCodeSchema,
+  processingRunPurposeSchema,
+  sourceKindSchema,
+} from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
 import { extractBearerToken, verifyApiToken } from "../auth/index.js";
 import {
   mcpAddCallLabels,
   mcpAddClaims,
   mcpAddLearnings,
+  mcpAddSource,
+  mcpAddSourceImage,
   mcpFinishRun,
   mcpGetInstructions,
   mcpListWork,
@@ -24,9 +32,9 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
 
   server.tool(
     "get_instructions",
-    "Return the versioned processing instructions for extract, tips or calls runs.",
+    "Return the versioned instructions for extract, tips or calls Processing runs, or for ingesting a Source into the knowledge bank (ingest).",
     {
-      purpose: processingRunPurposeSchema,
+      purpose: instructionPurposeSchema,
     },
     async ({ purpose }) => {
       const res = await mcpGetInstructions(purpose);
@@ -159,6 +167,42 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
   );
 
   server.tool(
+    "add_source",
+    "Store a reference document (Plonkit page, PDF, guide) a Player gave you, converted to markdown, as a knowledge bank Source. Pass sourceId to add a new version of an existing Source. Returns the section anchors to cite, the image names to upload, and Claims to re-check. The server never fetches URLs.",
+    {
+      title: z.string().trim().min(1).max(300),
+      url: z.string().url().max(2000).optional(),
+      kind: sourceKindSchema,
+      sourceId: z.string().uuid().optional(),
+      markdown: z.string().min(1),
+      duo: z.string().optional(),
+    },
+    async (args) => {
+      const res = await mcpAddSource(db, playerId, args);
+      return {
+        content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    "add_source_image",
+    "Upload one image of a Source version (PNG, JPEG, GIF or WebP, base64, size-capped), named as the markdown references it. Uploading the same name again replaces it.",
+    {
+      sourceVersionId: z.string().uuid(),
+      name: z.string().trim().min(1).max(200),
+      mimeType: z.string().min(1).max(100),
+      base64: z.string().min(1),
+    },
+    async (args) => {
+      const res = await mcpAddSourceImage(db, playerId, args);
+      return {
+        content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
     "add_call_labels",
     "Add a batch of Call labels to an open calls Processing run: { roundId, called, utteranceRefs, note? } per Split or Spread Round. Valid items are saved even if other items fail validation.",
     {
@@ -204,6 +248,13 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
 
   server.prompt("calls", "Label Calls on Split and Spread Rounds in a geo-coach Session", async () => {
     const { instructions } = await mcpGetInstructions("calls");
+    return {
+      messages: [{ role: "user", content: { type: "text", text: instructions } }],
+    };
+  });
+
+  server.prompt("ingest", "Ingest a reference document into the geo-coach knowledge bank", async () => {
+    const { instructions } = await mcpGetInstructions("ingest");
     return {
       messages: [{ role: "user", content: { type: "text", text: instructions } }],
     };

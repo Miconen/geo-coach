@@ -8,8 +8,10 @@ import {
   regionName,
   roundHedge,
   type DerivedGuess,
+  type InstructionPurpose,
   type ProcessingRunPurpose,
   type SearchClaimsInput,
+  type SourceKind,
 } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
 import {
@@ -22,10 +24,14 @@ import {
   recordings,
   rounds,
   sessions,
+  sourceVersions,
+  sources,
   utterances,
 } from "../db/schema.js";
 import {
   DomainError,
+  addSourceImage,
+  addSourceVersion,
   deriveClaims,
   deriveCurrentCallLabels,
   deriveLearningsWithStatus,
@@ -42,6 +48,7 @@ import {
   insertRunCallLabels,
   insertRunLearnings,
   isCallableRound,
+  resolveDocumentationCitation,
   roundGuessingInterval,
   startProcessingRun,
 } from "../services/index.js";
@@ -127,7 +134,7 @@ async function loadCurrentSessionUtterances(
   });
 }
 
-export async function mcpGetInstructions(purpose: ProcessingRunPurpose) {
+export async function mcpGetInstructions(purpose: InstructionPurpose) {
   return loadPromptInstructions(purpose);
 }
 
@@ -578,7 +585,19 @@ export async function mcpAddClaims(
           evidence.push({ kind: "round", direction: "for", roundId: e.roundId, note: e.note });
         }
       } else {
-        problems.push("Documentation Evidence needs an ingested Source, which isn't supported yet");
+        const resolved = await resolveDocumentationCitation(db, duoId, e);
+        if ("error" in resolved) {
+          problems.push(resolved.error);
+        } else {
+          evidence.push({
+            kind: "documentation",
+            direction: e.direction,
+            sourceVersionId: e.sourceVersionId,
+            sectionAnchor: e.section,
+            imageIds: resolved.imageIds,
+            note: e.note,
+          });
+        }
       }
     }
     if (problems.length > 0) {
@@ -937,4 +956,49 @@ export async function mcpAddCallLabels(
 
   const savedIds = valid.length > 0 ? await insertRunCallLabels(db, run.id, run.duoId, valid) : [];
   return { savedCount: savedIds.length, savedIds, errors };
+}
+
+/**
+ * `add_source`: stores a document an agent converted to markdown as a new
+ * Source, or as the next version of `sourceId`. Not a Processing run.
+ */
+export async function mcpAddSource(
+  db: AppDb,
+  playerId: string,
+  input: {
+    duo?: string;
+    sourceId?: string;
+    title: string;
+    url?: string;
+    kind: SourceKind;
+    markdown: string;
+  },
+) {
+  let duoId: string;
+  if (input.sourceId) {
+    const source = await db.query.sources.findFirst({ where: eq(sources.id, input.sourceId) });
+    if (!source) throw new DomainError("NOT_FOUND", "Source not found", 404);
+    duoId = (await resolveDuoForPlayer(db, playerId, source.duoId)).id;
+  } else {
+    duoId = (await resolveDuoForPlayer(db, playerId, input.duo)).id;
+  }
+  const res = await addSourceVersion(db, playerId, { ...input, duoId });
+  duoEventBus.emitChanged(duoId, "source", res.sourceId);
+  return res;
+}
+
+/** `add_source_image`: one image of a Source version, base64, size-capped. */
+export async function mcpAddSourceImage(
+  db: AppDb,
+  playerId: string,
+  input: { sourceVersionId: string; name: string; mimeType: string; base64: string },
+) {
+  const version = await db.query.sourceVersions.findFirst({
+    where: eq(sourceVersions.id, input.sourceVersionId),
+  });
+  if (!version) throw new DomainError("NOT_FOUND", "Source version not found", 404);
+  await resolveDuoForPlayer(db, playerId, version.duoId);
+  const res = await addSourceImage(db, playerId, input);
+  duoEventBus.emitChanged(version.duoId, "source", version.sourceId);
+  return res;
 }

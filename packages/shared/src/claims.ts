@@ -136,3 +136,7 @@ export const playerEvidenceInputSchema = z.object({
   direction: evidenceDirectionSchema.nullable(),
 });
 export type PlayerEvidenceInput = z.infer<typeof playerEvidenceInputSchema>;
+
+/** What kind of document a Source is (GLOSSARY: Source). */
+export const sourceKindSchema = z.enum(["web", "pdf", "other"]);
+export type SourceKind = z.infer<typeof sourceKindSchema>;

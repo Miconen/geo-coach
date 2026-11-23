@@ -27,3 +27,7 @@ Hosting runs on the existing LeaseWeb VPS behind Cloudflare (no OpenTofu).
 - To roll back, trigger `Deploy` via `workflow_dispatch` with an earlier SHA tag.
 - Pre-migration dumps live in `/srv/geo-coach/dumps/` (last 5 kept).
 - House rule: **don't deploy mid-Session**.
+
+## 5. Data to back up
+- **Postgres** (`pgdata` volume): everything except Source images. The pre-migration dumps above are not a backup.
+- **Source images** (`source-images` volume, mounted at `/data/source-images` in `web`): images of knowledge bank Sources, which the database only references. A database backup without this volume restores Claims whose images are missing, so back up both together (#22).

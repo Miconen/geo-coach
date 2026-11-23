@@ -20,6 +20,7 @@ import type {
   EvidenceKind,
   GameMode,
   LearningRegion,
+  SourceKind,
   ProcessingRunPurpose,
   RoundPhaseInterval,
   WordTiming,
@@ -532,6 +533,11 @@ export const claimEvidence = pgTable(
     direction: text("direction").$type<EvidenceDirection>().notNull(),
     roundId: uuid("round_id").references(() => rounds.id, { onDelete: "cascade" }),
     playerId: uuid("player_id").references(() => players.id, { onDelete: "cascade" }),
+    /** Documentation Evidence stays pinned to the Source version it cited. */
+    sourceVersionId: uuid("source_version_id").references(() => sourceVersions.id, {
+      onDelete: "cascade",
+    }),
+    sectionAnchor: text("section_anchor"),
     runId: uuid("run_id").references(() => processingRuns.id, { onDelete: "set null" }),
     note: text("note"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -541,10 +547,109 @@ export const claimEvidence = pgTable(
     index("claim_evidence_duo_idx").on(table.duoId),
     uniqueIndex("claim_evidence_claim_round_uidx").on(table.claimId, table.roundId),
     uniqueIndex("claim_evidence_claim_player_uidx").on(table.claimId, table.playerId),
+    uniqueIndex("claim_evidence_claim_section_uidx").on(
+      table.claimId,
+      table.sourceVersionId,
+      table.sectionAnchor,
+    ),
     check("claim_evidence_round_only_for", sql`${table.kind} <> 'round' OR ${table.direction} = 'for'`),
     check(
       "claim_evidence_kind_ref",
-      sql`(${table.kind} = 'round' AND ${table.roundId} IS NOT NULL) OR (${table.kind} = 'player' AND ${table.playerId} IS NOT NULL) OR ${table.kind} = 'documentation'`,
+      sql`(${table.kind} = 'round' AND ${table.roundId} IS NOT NULL) OR (${table.kind} = 'player' AND ${table.playerId} IS NOT NULL) OR (${table.kind} = 'documentation' AND ${table.sourceVersionId} IS NOT NULL AND ${table.sectionAnchor} IS NOT NULL)`,
     ),
   ],
+);
+
+/**
+ * A reference document in a Duo's knowledge bank (GLOSSARY: Source). Agents
+ * ingest it from what a Player hands them; the server never fetches it.
+ */
+export const sources = pgTable(
+  "sources",
+  {
+    id: uuid("id").primaryKey(),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    url: text("url"),
+    kind: text("kind").$type<SourceKind>().notNull(),
+    createdByPlayerId: uuid("created_by_player_id").references(() => players.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("sources_duo_idx").on(table.duoId)],
+);
+
+/** One ingestion of a Source. Re-ingesting adds a version; older ones are kept for their Evidence. */
+export const sourceVersions = pgTable(
+  "source_versions",
+  {
+    id: uuid("id").primaryKey(),
+    sourceId: uuid("source_id")
+      .notNull()
+      .references(() => sources.id, { onDelete: "cascade" }),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    versionNo: integer("version_no").notNull(),
+    markdown: text("markdown").notNull(),
+    createdByPlayerId: uuid("created_by_player_id").references(() => players.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("source_versions_source_no_uidx").on(table.sourceId, table.versionNo)],
+);
+
+/** A heading-delimited section of a Source version, addressed by a stable anchor. */
+export const sourceSections = pgTable(
+  "source_sections",
+  {
+    sourceVersionId: uuid("source_version_id")
+      .notNull()
+      .references(() => sourceVersions.id, { onDelete: "cascade" }),
+    anchor: text("anchor").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    heading: text("heading").notNull(),
+    level: integer("level").notNull(),
+    body: text("body").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.sourceVersionId, table.anchor] })],
+);
+
+/** An image of a Source version, stored on disk (never in git) under `storageKey`. */
+export const sourceImages = pgTable(
+  "source_images",
+  {
+    id: uuid("id").primaryKey(),
+    sourceVersionId: uuid("source_version_id")
+      .notNull()
+      .references(() => sourceVersions.id, { onDelete: "cascade" }),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    sha256: text("sha256").notNull(),
+    storageKey: text("storage_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("source_images_version_name_uidx").on(table.sourceVersionId, table.name)],
+);
+
+/** Source images a Claim shows, attached with its Documentation Evidence. */
+export const claimImages = pgTable(
+  "claim_images",
+  {
+    claimId: uuid("claim_id")
+      .notNull()
+      .references(() => claims.id, { onDelete: "cascade" }),
+    sourceImageId: uuid("source_image_id")
+      .notNull()
+      .references(() => sourceImages.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.claimId, table.sourceImageId] })],
 );

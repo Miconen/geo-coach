@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ProcessingRunPurpose } from "@geo-coach/shared";
+import type { InstructionPurpose, ProcessingRunPurpose } from "@geo-coach/shared";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -22,10 +22,11 @@ function resolvePromptsDir(): string {
   return candidates[0] ?? path.resolve(process.cwd(), "prompts");
 }
 
-const CURRENT_VERSIONS: Record<ProcessingRunPurpose, { version: string; file: string }> = {
+const CURRENT_VERSIONS: Record<InstructionPurpose, { version: string; file: string }> = {
   extract: { version: "extract-v3", file: "extract-v3.md" },
   tips: { version: "tips-v3", file: "tips-v3.md" },
   calls: { version: "calls-v1", file: "calls-v1.md" },
+  ingest: { version: "ingest-v1", file: "ingest-v1.md" },
 };
 
 export function getCurrentPromptVersion(purpose: ProcessingRunPurpose): string {
@@ -33,7 +34,7 @@ export function getCurrentPromptVersion(purpose: ProcessingRunPurpose): string {
 }
 
 export async function loadPromptInstructions(
-  purpose: ProcessingRunPurpose,
+  purpose: InstructionPurpose,
 ): Promise<{ promptVersion: string; instructions: string }> {
   const entry = CURRENT_VERSIONS[purpose];
   const filePath = path.join(resolvePromptsDir(), entry.file);

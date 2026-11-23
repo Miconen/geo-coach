@@ -6,13 +6,18 @@ class Pcm16Processor extends AudioWorkletProcessor {
   }
 
   process(inputs) {
-    const input = inputs[0]?.[0];
-    if (!input || input.length === 0) return true;
+    const channels = inputs[0];
+    const length = channels?.[0]?.length ?? 0;
+    if (length === 0) return true;
 
-    // Downsample from AudioContext sampleRate to 16 kHz
+    // Downsample from AudioContext sampleRate to 16 kHz, averaging all channels into mono
+    // (some headsets put the mic on the right channel only, leaving the left one silent)
     const ratio = sampleRate / 16000;
-    for (let i = 0; i < input.length; i += ratio) {
-      const s = Math.max(-1, Math.min(1, input[Math.floor(i)] ?? 0));
+    for (let i = 0; i < length; i += ratio) {
+      const idx = Math.floor(i);
+      let sum = 0;
+      for (const ch of channels) sum += ch[idx] ?? 0;
+      const s = Math.max(-1, Math.min(1, sum / channels.length));
       this.buffer.push(s < 0 ? s * 0x8000 : s * 0x7fff);
     }
 

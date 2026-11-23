@@ -121,11 +121,24 @@ interface RawTeamPlayer {
   };
 }
 
+/** A team's own result for one Round. Each team carries its own damage multiplier. */
+export interface RawTeamRoundResult {
+  roundNumber?: number;
+  score?: number;
+  healthBefore?: number;
+  healthAfter?: number;
+  /** The multiplier on Damage this team deals in the Round. */
+  multiplier?: number;
+  /** Damage this team dealt, multiplier applied and overkill counted. */
+  damageDealt?: number;
+}
+
 export interface RawTeam {
   id?: string;
   name?: string;
   health?: number;
   players?: RawTeamPlayer[];
+  roundResults?: RawTeamRoundResult[];
 }
 
 interface RawRound {
@@ -143,7 +156,34 @@ interface RawRound {
   startTime?: string;
   timerStartTime?: string | null;
   endTime?: string;
+  /** Stays 1 in ranked team duels; the real multiplier is per team, in `roundResults`. */
   damageMultiplier?: number;
+}
+
+/**
+ * A Round's Damage (GLOSSARY) and the multiplier behind it. The team with the
+ * higher best score deals the score gap times *its own* multiplier: each team
+ * has one in `teams[].roundResults`, and they differ. That team's `damageDealt`
+ * is GeoGuessr's own figure, so it wins when present. Older payloads without
+ * `roundResults` fall back to the Round's `damageMultiplier`.
+ */
+export function roundDamage(input: {
+  duoBestScore: number;
+  opponentBestScore: number;
+  duoResult?: RawTeamRoundResult;
+  opponentResult?: RawTeamRoundResult;
+  roundMultiplier?: number;
+}): { hpDelta: number; damageMultiplier: number } {
+  const gap = input.duoBestScore - input.opponentBestScore;
+  const dealer = gap > 0 ? input.duoResult : gap < 0 ? input.opponentResult : input.duoResult;
+  const fallback = typeof input.roundMultiplier === "number" ? input.roundMultiplier : 1;
+  const damageMultiplier = typeof dealer?.multiplier === "number" ? dealer.multiplier : fallback;
+  if (gap === 0) return { hpDelta: 0, damageMultiplier };
+  const damage =
+    typeof dealer?.damageDealt === "number" && dealer.damageDealt > 0
+      ? dealer.damageDealt
+      : Math.round(Math.abs(gap) * damageMultiplier);
+  return { hpDelta: gap > 0 ? damage : -damage, damageMultiplier };
 }
 
 interface RawMovementOptions {
@@ -377,8 +417,13 @@ export function deriveGameFromRawDuel(
       }
     }
 
-    const damageMultiplier = typeof r.damageMultiplier === "number" ? r.damageMultiplier : 1;
-    const hpDelta = Math.round((duoBestScore - opponentBestScore) * damageMultiplier);
+    const { hpDelta, damageMultiplier } = roundDamage({
+      duoBestScore,
+      opponentBestScore,
+      duoResult: duoTeam?.roundResults?.find((x) => x.roundNumber === roundNumber),
+      opponentResult: oppTeam?.roundResults?.find((x) => x.roundNumber === roundNumber),
+      roundMultiplier: r.damageMultiplier,
+    });
 
     const countryCode = normalizeCountryCode(r.panorama?.countryCode);
     const lat = typeof r.panorama?.lat === "number" ? r.panorama.lat : null;

@@ -10,5 +10,7 @@ export default defineConfig({
   test: {
     environment: "node",
     testTimeout: 20_000,
+    // Each file migrates a fresh PGlite database in beforeEach, slow when every package tests at once
+    hookTimeout: 30_000,
   },
 });

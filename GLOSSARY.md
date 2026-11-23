@@ -29,7 +29,7 @@ A first-level subdivision of a country as geo-coach groups it: a US state, a Bra
 _Avoid_: subdivision, province, state (for the general idea)
 
 **Damage**
-What the team with the lower best score takes in a Round: the score gap times the Round's multiplier, counted in full even when it exceeds the HP that team had left.
+What the team with the lower best score takes in a Round: the score gap times the multiplier of the team that dealt it, counted in full even when it exceeds the HP the losing team had left. Each team has its own multiplier, so the two can differ in the same Round.
 _Avoid_: HP lost (for the uncapped amount)
 
 **Split**

@@ -478,3 +478,37 @@ export async function listSources(db: AppDb, duoId: string): Promise<SourceSumma
       })),
   }));
 }
+
+export interface CitedSection {
+  sourceVersionId: string;
+  anchor: string;
+  heading: string;
+  versionNo: number;
+  sourceId: string;
+  title: string;
+}
+
+/** Every Source section a Duo's Documentation Evidence cites, with its Source's title and version. */
+export async function listCitedSections(db: AppDb, duoId: string): Promise<CitedSection[]> {
+  const rows = await db
+    .selectDistinct({
+      sourceVersionId: sourceSections.sourceVersionId,
+      anchor: sourceSections.anchor,
+      heading: sourceSections.heading,
+      versionNo: sourceVersions.versionNo,
+      sourceId: sources.id,
+      title: sources.title,
+    })
+    .from(claimEvidence)
+    .innerJoin(
+      sourceSections,
+      and(
+        eq(sourceSections.sourceVersionId, claimEvidence.sourceVersionId),
+        eq(sourceSections.anchor, claimEvidence.sectionAnchor),
+      ),
+    )
+    .innerJoin(sourceVersions, eq(sourceVersions.id, sourceSections.sourceVersionId))
+    .innerJoin(sources, eq(sources.id, sourceVersions.sourceId))
+    .where(and(eq(claimEvidence.duoId, duoId), eq(claimEvidence.kind, "documentation")));
+  return rows;
+}

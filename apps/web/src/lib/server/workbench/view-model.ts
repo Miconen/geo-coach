@@ -8,7 +8,11 @@ import {
   regionName,
   intervalsOverlap,
   undirectedConfusionPairs,
+  type ClaimStatus,
   type Continent,
+  type EvidenceDirection,
+  type EvidenceKind,
+  type SourceKind,
   type DerivedGuess,
   type LearningKind,
   type LearningRegion,
@@ -30,9 +34,12 @@ import {
 import { duoEventBus, type PlayerLiveStatus } from "../events/bus.js";
 import {
   DomainError,
+  deriveClaims,
   deriveLearningsWithStatus,
   deriveSessionWorkRanges,
   getCurrentTranscriptVersionId,
+  listCitedSections,
+  listSources,
 } from "../services/index.js";
 
 export interface WorkbenchPlayer {
@@ -151,6 +158,8 @@ export interface WorkbenchLearning {
   regions: LearningRegion[];
   topics: string[];
   agentNote: string | null;
+  /** The Claim this Learning rests on; look it up in `WorkbenchData.claimsById`. */
+  claimId: string | null;
   sourceSpanStart: string | null;
   sourceSpanEnd: string | null;
   createdAt: string;
@@ -182,11 +191,60 @@ export interface CountryDossier {
   name: string;
   continent: Continent;
   learningCount: number;
+  claimCount: number;
   roundsPlayed: number;
   avgScore: number | null;
   missCount: number;
   netHpDelta: number;
   roundIds: string[];
+}
+
+/** One piece of Evidence on a Claim, resolved to what it points at. */
+export interface WorkbenchEvidence {
+  id: string;
+  kind: EvidenceKind;
+  direction: EvidenceDirection;
+  roundId: string | null;
+  playerId: string | null;
+  /** For Documentation Evidence: the Source section it cites, pinned to its version. */
+  source: {
+    sourceId: string;
+    title: string;
+    versionNo: number;
+    anchor: string;
+    heading: string;
+  } | null;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface WorkbenchClaim {
+  id: string;
+  text: string;
+  countries: string[];
+  regions: LearningRegion[];
+  topics: string[];
+  /** Derived from `evidence`, never stored (ADR 0005). */
+  status: ClaimStatus;
+  evidence: WorkbenchEvidence[];
+  /** The viewing Player's own ✓ (`for`) or ✗ (`against`), if any. */
+  viewerDirection: EvidenceDirection | null;
+  /** Current Learnings resting on this Claim. */
+  learningIds: string[];
+  imageUrls: string[];
+  createdAt: string;
+}
+
+export interface WorkbenchSource {
+  id: string;
+  title: string;
+  url: string | null;
+  kind: SourceKind;
+  latestVersionNo: number;
+  versionCount: number;
+  updatedAt: string;
+  sectionCount: number;
+  imageCount: number;
 }
 
 export interface ConfusionPair {
@@ -215,6 +273,9 @@ export interface WorkbenchData {
   utterances: WorkbenchUtterance[];
   utterancesById: Record<string, WorkbenchUtterance>;
   learnings: WorkbenchLearning[];
+  claims: WorkbenchClaim[];
+  claimsById: Record<string, WorkbenchClaim>;
+  sources: WorkbenchSource[];
   countryDossiers: CountryDossier[];
   confusionPairs: ConfusionPair[];
   totalPendingRanges: number;
@@ -231,8 +292,18 @@ export async function buildWorkbenchData(
     throw new DomainError("NOT_FOUND", "Duo not found", 404);
   }
 
-  const [memberships, allSessions, allRecordings, allGames, allRounds, allReplays, derivedLearnings] =
-    await Promise.all([
+  const [
+    memberships,
+    allSessions,
+    allRecordings,
+    allGames,
+    allRounds,
+    allReplays,
+    derivedLearnings,
+    derivedClaims,
+    duoSources,
+    citedSections,
+  ] = await Promise.all([
       db.query.duoMemberships.findMany({ where: eq(duoMemberships.duoId, duoId) }),
       db.query.sessions.findMany({
         where: eq(sessions.duoId, duoId),
@@ -252,6 +323,9 @@ export async function buildWorkbenchData(
       }),
       db.query.replays.findMany({ where: eq(replays.duoId, duoId) }),
       deriveLearningsWithStatus(db, duoId),
+      deriveClaims(db, duoId),
+      listSources(db, duoId),
+      listCitedSections(db, duoId),
     ]);
 
   const duoPlayerIds = memberships.map((m) => m.playerId);
@@ -666,6 +740,7 @@ export async function buildWorkbenchData(
         regions: l.regions,
         topics: l.topics,
         agentNote: l.agentNote,
+        claimId: l.claimId,
         sourceSpanStart: l.sourceSpanStart ? l.sourceSpanStart.toISOString() : null,
         sourceSpanEnd: l.sourceSpanEnd ? l.sourceSpanEnd.toISOString() : null,
         createdAt: l.createdAt.toISOString(),
@@ -701,11 +776,70 @@ export async function buildWorkbenchData(
       };
     });
 
+  // Knowledge bank: Claims with resolved Evidence, and the Duo's Sources
+  const currentLearningIds = new Set(
+    wbLearnings.filter((l) => l.status === "current").map((l) => l.id),
+  );
+  const sectionByKey = new Map(citedSections.map((c) => [`${c.sourceVersionId}:${c.anchor}`, c]));
+  const claims: WorkbenchClaim[] = derivedClaims.map((c) => ({
+    id: c.id,
+    text: c.text,
+    countries: c.countries,
+    regions: c.regions,
+    topics: c.topics,
+    status: c.status,
+    evidence: c.evidence.map((e) => {
+      const section =
+        e.kind === "documentation" ? sectionByKey.get(`${e.sourceVersionId}:${e.sectionAnchor}`) : null;
+      return {
+        id: e.id,
+        kind: e.kind,
+        direction: e.kind === "round" ? "for" : e.direction,
+        roundId: e.roundId,
+        playerId: e.playerId,
+        source: section
+          ? {
+              sourceId: section.sourceId,
+              title: section.title,
+              versionNo: section.versionNo,
+              anchor: section.anchor,
+              heading: section.heading,
+            }
+          : null,
+        note: e.note,
+        createdAt: e.createdAt.toISOString(),
+      };
+    }),
+    viewerDirection:
+      c.evidence.find((e) => e.kind === "player" && e.playerId === viewerPlayerId)?.direction ?? null,
+    learningIds: c.learningIds.filter((id) => currentLearningIds.has(id)),
+    imageUrls: c.imageIds.map((id) => `/api/sources/images/${id}`),
+    createdAt: c.createdAt.toISOString(),
+  }));
+  const claimsById: Record<string, WorkbenchClaim> = {};
+  for (const c of claims) claimsById[c.id] = c;
+
+  const sources: WorkbenchSource[] = duoSources.map((s) => {
+    const latest = s.versions[s.versions.length - 1];
+    return {
+      id: s.id,
+      title: s.title,
+      url: s.url,
+      kind: s.kind,
+      latestVersionNo: latest?.versionNo ?? 0,
+      versionCount: s.versions.length,
+      updatedAt: (latest?.createdAt ?? s.createdAt).toISOString(),
+      sectionCount: latest?.sectionCount ?? 0,
+      imageCount: latest?.imageCount ?? 0,
+    };
+  });
+
   // Derive Country Dossiers (including 0-Learning countries with played Rounds)
   const countryAcc = new Map<
     string,
     {
       learningCount: number;
+      claimCount: number;
       roundsPlayed: number;
       scoreSum: number;
       missCount: number;
@@ -720,6 +854,7 @@ export async function buildWorkbenchData(
     if (!entry) {
       entry = {
         learningCount: 0,
+        claimCount: 0,
         roundsPlayed: 0,
         scoreSum: 0,
         missCount: 0,
@@ -735,6 +870,12 @@ export async function buildWorkbenchData(
     if (l.status !== "current" || l.dismissed) continue;
     for (const code of l.countries) {
       ensureCountry(code).learningCount += 1;
+    }
+  }
+
+  for (const c of claims) {
+    for (const code of c.countries) {
+      ensureCountry(code).claimCount += 1;
     }
   }
 
@@ -787,6 +928,7 @@ export async function buildWorkbenchData(
       name: getCountryName(code),
       continent: getCountryContinent(code),
       learningCount: acc.learningCount,
+      claimCount: acc.claimCount,
       roundsPlayed: acc.roundsPlayed,
       avgScore: acc.roundsPlayed > 0 ? Math.round(acc.scoreSum / acc.roundsPlayed) : null,
       missCount: acc.missCount,
@@ -825,6 +967,9 @@ export async function buildWorkbenchData(
     utterances: wbUtterances,
     utterancesById,
     learnings: wbLearnings,
+    claims,
+    claimsById,
+    sources,
     countryDossiers,
     confusionPairs,
     totalPendingRanges,

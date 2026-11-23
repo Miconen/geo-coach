@@ -72,7 +72,8 @@ export class TranscriberClient {
       method: "POST",
       headers: {
         "Content-Type": "application/octet-stream",
-        "X-Hotwords": opts.hotwords.join(" "),
+        "X-Hotwords": encodeURIComponent(opts.hotwords.join(" ")),
+        "X-Hotwords-Encoding": "uri",
         "X-Offset-Ms": String(opts.chunkOffsetMs),
       },
       body: pcmBytes,

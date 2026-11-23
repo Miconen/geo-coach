@@ -48,6 +48,7 @@ import {
   insertRunCallLabels,
   insertRunLearnings,
   isCallableRound,
+  loadTranscriptCorrector,
   resolveDocumentationCitation,
   roundGuessingInterval,
   startProcessingRun,
@@ -406,7 +407,9 @@ export async function mcpReadRange(db: AppDb, playerId: string, runId: string) {
     }
   }
 
+  const correctTranscript = await loadTranscriptCorrector(db, run.duoId);
   for (const u of paddedUtterances) {
+    const text = correctTranscript(u).text;
     const ref = utteranceToRef.get(u.id);
     const speaker = playerNameById.get(u.playerId) ?? "Player";
     const lowConf =
@@ -415,8 +418,8 @@ export async function mcpReadRange(db: AppDb, playerId: string, runId: string) {
     const marker = lowConf ? " (?)" : "";
     const ts = formatHmsUtc(u.startedAt);
     const line = ref
-      ? `[${ts}] ${ref} ${speaker}: ${u.text}${marker}`
-      : `[${ts}] (context) ${speaker}: ${u.text}${marker}`;
+      ? `[${ts}] ${ref} ${speaker}: ${text}${marker}`
+      : `[${ts}] (context) ${speaker}: ${text}${marker}`;
     timeline.push({ ts: u.startedAt.getTime(), order: 2, line });
   }
 
@@ -791,12 +794,14 @@ async function loadRunRangeRounds(db: AppDb, run: RunRow): Promise<RoundRow[]> {
  * during that Round's guessing phase.
  */
 async function readCallsRange(db: AppDb, run: RunRow) {
-  const [{ inRange, utteranceToRef }, rangeRounds, allPlayers, currentLabels] = await Promise.all([
-    getRunInRangeUtterances(db, run),
-    loadRunRangeRounds(db, run),
-    db.query.players.findMany(),
-    deriveCurrentCallLabels(db, run.duoId),
-  ]);
+  const [{ inRange, utteranceToRef }, rangeRounds, allPlayers, currentLabels, correctTranscript] =
+    await Promise.all([
+      getRunInRangeUtterances(db, run),
+      loadRunRangeRounds(db, run),
+      db.query.players.findMany(),
+      deriveCurrentCallLabels(db, run.duoId),
+      loadTranscriptCorrector(db, run.duoId),
+    ]);
   const playerNameById = new Map(allPlayers.map((p) => [p.id, p.displayName]));
   const gameIds = [...new Set(rangeRounds.map((r) => r.gameId))];
   const rangeGames =
@@ -828,7 +833,7 @@ async function readCallsRange(db: AppDb, run: RunRow) {
           ref: utteranceToRef.get(u.id)!,
           at: formatHmsUtc(u.startedAt),
           speaker: playerNameById.get(u.playerId) ?? "Player",
-          text: u.text,
+          text: correctTranscript(u).text,
         }));
       const label = currentLabels.get(r.id);
       return {

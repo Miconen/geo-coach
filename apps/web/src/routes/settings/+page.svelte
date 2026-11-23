@@ -3,6 +3,7 @@
   import { THEMES } from "@geo-coach/shared";
   import { getTheme, setTheme } from "$lib/theme.svelte.js";
   import { getDeveloperMode, setDeveloperMode } from "$lib/developer-mode.svelte.js";
+  import TranscriptCorrections from "$lib/components/TranscriptCorrections.svelte";
 
   let { data } = $props();
   let scope = $state<"companion" | "mcp">("companion");
@@ -236,6 +237,19 @@
           Save Hotwords
         </button>
       </div>
+    {/each}
+  </section>
+
+  <section class="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 space-y-4">
+    <div>
+      <h2 class="text-base font-semibold">Transcript corrections</h2>
+      <p class="text-xs text-[var(--muted)]">
+        Fix words Whisper mishears. Corrections apply to what you and the coaching agents read; the original Transcript is kept.
+      </p>
+    </div>
+
+    {#each data.duos as duo (duo.id)}
+      <TranscriptCorrections duoId={duo.id} duoName={duo.name} />
     {/each}
   </section>
 </main>

@@ -5,6 +5,7 @@ import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import unquote
 
 from faster_whisper import WhisperModel
 
@@ -87,7 +88,10 @@ class TranscriberHandler(BaseHTTPRequestHandler):
         if self.path == "/transcribe":
             length = int(self.headers.get("Content-Length", "0"))
             raw_bytes = self.rfile.read(length)
-            hotwords = (self.headers.get("X-Hotwords") or "").strip()
+            hotwords = self.headers.get("X-Hotwords") or ""
+            if self.headers.get("X-Hotwords-Encoding") == "uri":
+                hotwords = unquote(hotwords)
+            hotwords = hotwords.strip()
 
             model, name = ensure_model()
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:

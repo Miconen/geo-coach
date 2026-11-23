@@ -285,6 +285,7 @@ export const duoSseEventSchema = z.discriminatedUnion("type", [
       "learning",
       "reaction",
       "hotwords",
+      "corrections",
       "claim",
       "source",
     ]),

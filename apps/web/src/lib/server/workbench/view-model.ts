@@ -40,6 +40,7 @@ import {
   getCurrentTranscriptVersionId,
   listCitedSections,
   listSources,
+  loadTranscriptCorrector,
 } from "../services/index.js";
 
 export interface WorkbenchPlayer {
@@ -57,6 +58,8 @@ export interface WorkbenchUtterance {
   sessionId: string;
   playerId: string;
   text: string;
+  /** What Whisper heard, before Transcript corrections. */
+  rawText: string;
   startedAt: string;
   endedAt: string;
   avgLogprob: number | null;
@@ -416,6 +419,7 @@ export async function buildWorkbenchData(
     return "processed";
   };
 
+  const correctTranscript = await loadTranscriptCorrector(db, duoId);
   const wbUtterances: WorkbenchUtterance[] = rawUtterances.map((u) => {
     const sesId = recSessionById.get(u.recordingId) ?? "";
     const sessionWork = workRangesBySession.get(sesId);
@@ -426,7 +430,8 @@ export async function buildWorkbenchData(
       recordingId: u.recordingId,
       sessionId: sesId,
       playerId: u.playerId,
-      text: u.text,
+      text: correctTranscript(u).text,
+      rawText: u.text,
       startedAt: u.startedAt.toISOString(),
       endedAt: u.endedAt.toISOString(),
       avgLogprob: u.avgLogprob,

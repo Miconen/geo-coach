@@ -8,5 +8,6 @@ export * from "./geoguessr.js";
 export * from "./linking.js";
 export * from "./contracts.js";
 export * from "./themes.js";
+export * from "./transcript-corrections.js";
 export * from "./stats/index.js";
 export * from "./claims.js";

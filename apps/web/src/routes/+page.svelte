@@ -30,7 +30,13 @@
   } from "$lib/server/workbench/view-model.js";
 
   let { data } = $props();
-  const wb = $derived(data.workbench);
+  let liveWorkbench = $state.raw<{
+    base: typeof data.workbench;
+    value: NonNullable<typeof data.workbench>;
+  } | null>(null);
+  const wb = $derived(
+    liveWorkbench && liveWorkbench.base === data.workbench ? liveWorkbench.value : data.workbench,
+  );
 
   // Navigation & filter state
   let mode = $state<"learnings" | "knowledge" | "session" | "game">("learnings");
@@ -342,6 +348,35 @@
     selectedGameId = null;
   }
 
+  let refreshingWorkbench = false;
+  let refreshWorkbenchAgain = false;
+
+  // invalidateAll swaps the page for an error screen if its request is cancelled, which
+  // Firefox does as soon as a reload starts. Live updates fetch separately so they can't.
+  async function refreshWorkbench() {
+    if (refreshingWorkbench) {
+      refreshWorkbenchAgain = true;
+      return;
+    }
+    refreshingWorkbench = true;
+    try {
+      do {
+        refreshWorkbenchAgain = false;
+        const base = data.workbench;
+        if (!base) return;
+        const res = await fetch(`/api/duos/${base.duo.id}/workbench`);
+        if (res.ok) {
+          const value = (await res.json()) as NonNullable<typeof data.workbench>;
+          if (base === data.workbench) liveWorkbench = { base, value };
+        }
+      } while (refreshWorkbenchAgain);
+    } catch {
+      // Cancelled or offline: keep showing the current data until the next change.
+    } finally {
+      refreshingWorkbench = false;
+    }
+  }
+
   onMount(() => {
     let es: EventSource | null = null;
     if (wb) {
@@ -353,7 +388,7 @@
             const others = liveStatuses.filter((s) => s.playerId !== parsed.playerId);
             sseLiveStatuses = [...others, parsed];
           } else if (parsed.type === "changed") {
-            void invalidateAll();
+            void refreshWorkbench();
           }
         } catch {
           // ignore malformed event

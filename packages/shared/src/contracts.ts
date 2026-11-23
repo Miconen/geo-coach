@@ -288,6 +288,7 @@ export const duoSseEventSchema = z.discriminatedUnion("type", [
       "corrections",
       "claim",
       "source",
+      "processing",
     ]),
     id: z.string().optional(),
     at: z.string().datetime(),

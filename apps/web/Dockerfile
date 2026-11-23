@@ -19,9 +19,13 @@ RUN pnpm --filter @geo-coach/web exec esbuild src/lib/server/db/rebuild-derived.
       --bundle --platform=node --format=esm \
       --external:drizzle-orm --external:postgres --external:zod \
       --outfile=build-rebuild-derived.mjs
+RUN pnpm --filter @geo-coach/web exec esbuild src/lib/server/processor/run-worker.ts \
+      --bundle --platform=node --format=esm \
+      --outfile=build-processor.mjs
 
 FROM node:24-slim
 WORKDIR /app
+RUN npm install -g @anthropic-ai/claude-code@2.1.330
 ENV NODE_ENV=production \
     PORT=3000 \
     HOST=0.0.0.0 \
@@ -36,6 +40,7 @@ COPY --from=build /app/apps/web/build ./apps/web/build
 COPY --from=build /app/apps/web/build-migrate.mjs ./apps/web/build-migrate.mjs
 COPY --from=build /app/apps/web/build-seed.mjs ./apps/web/build-seed.mjs
 COPY --from=build /app/apps/web/build-rebuild-derived.mjs ./apps/web/build-rebuild-derived.mjs
+COPY --from=build /app/apps/web/build-processor.mjs ./apps/web/build-processor.mjs
 COPY --from=build /app/apps/web/drizzle ./apps/web/drizzle
 COPY --from=build /app/apps/web/prompts ./apps/web/prompts
 

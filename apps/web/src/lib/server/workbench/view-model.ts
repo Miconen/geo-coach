@@ -41,7 +41,14 @@ import {
   listCitedSections,
   listSources,
   loadTranscriptCorrector,
+  type WorkRange,
+  type WorkRangeCause,
 } from "../services/index.js";
+import {
+  isProcessorOnline,
+  listRecentProcessingJobs,
+  type WorkbenchProcessingJob,
+} from "../mcp/processing-jobs.js";
 
 export interface WorkbenchPlayer {
   id: string;
@@ -129,6 +136,7 @@ export interface WorkbenchSession {
   playerIds: string[];
   micCount: number;
   gameIds: string[];
+  recordingIds: string[];
   ratingDelta: number;
   extractWorkCount: number;
   tipsWorkCount: number;
@@ -138,6 +146,8 @@ export interface WorkbenchSession {
     startUtc: string;
     endUtc: string;
     reason: "unprocessed" | "stale";
+    causes: Array<{ playerName: string; summary: string }>;
+    lastRun: { playerName: string; model: string; finishedAt: string | null } | null;
   }>;
   deletedRanges: Array<{
     recordingId: string;
@@ -146,6 +156,9 @@ export interface WorkbenchSession {
     endUtc: string;
   }>;
 }
+
+/** How long after a Round's results unlinked speech still counts as a debrief of that Round. */
+const DEBRIEF_LINK_WINDOW_MS = 2 * 60_000;
 
 export interface WorkbenchLearning {
   id: string;
@@ -283,6 +296,54 @@ export interface WorkbenchData {
   confusionPairs: ConfusionPair[];
   totalPendingRanges: number;
   allTopics: string[];
+  processing: { workerOnline: boolean; jobs: WorkbenchProcessingJob[] };
+}
+
+function describeCause(cause: WorkRangeCause): string {
+  return cause.changes
+    .map((change) => {
+      switch (change) {
+        case "not-processed":
+          return "not processed yet";
+        case "missing-from-run":
+          return "added after the last run";
+        case "retranscribed":
+          return "re-transcribed";
+        case "chunks-changed":
+          return cause.newChunks > 0
+            ? `${cause.newChunks} new chunk${cause.newChunks === 1 ? "" : "s"}`
+            : "chunks changed";
+        case "clock":
+          return `clock corrected by ${(Math.abs(cause.clockShiftMs) / 1000).toFixed(1)}s`;
+        case "speech-deleted":
+          return "speech deleted";
+      }
+    })
+    .join(", ");
+}
+
+function describeWorkRange(range: WorkRange, playersById: Record<string, WorkbenchPlayer>) {
+  const nameOf = (id: string) => playersById[id]?.displayName ?? "Unknown player";
+  const latest = range.causes
+    .flatMap((c) => (c.lastRun ? [c.lastRun] : []))
+    .sort((a, b) => (b.finishedAt?.getTime() ?? 0) - (a.finishedAt?.getTime() ?? 0))[0];
+  return {
+    purpose: range.purpose,
+    startUtc: range.startUtc.toISOString(),
+    endUtc: range.endUtc.toISOString(),
+    reason: range.reason,
+    causes: range.causes.map((c) => ({
+      playerName: nameOf(c.playerId),
+      summary: describeCause(c),
+    })),
+    lastRun: latest
+      ? {
+          playerName: nameOf(latest.startedByPlayerId),
+          model: latest.model,
+          finishedAt: latest.finishedAt?.toISOString() ?? null,
+        }
+      : null,
+  };
 }
 
 export async function buildWorkbenchData(
@@ -507,24 +568,12 @@ export async function buildWorkbenchData(
       playerIds: [...playerSet],
       micCount: playerSet.size,
       gameIds: [],
+      recordingIds: recs.map((r) => r.id),
       ratingDelta: 0,
       extractWorkCount: work.extract.length,
       tipsWorkCount: work.tips.length,
       status,
-      workRanges: [
-        ...work.extract.map((w) => ({
-          purpose: w.purpose,
-          startUtc: w.startUtc.toISOString(),
-          endUtc: w.endUtc.toISOString(),
-          reason: w.reason,
-        })),
-        ...work.tips.map((w) => ({
-          purpose: w.purpose,
-          startUtc: w.startUtc.toISOString(),
-          endUtc: w.endUtc.toISOString(),
-          reason: w.reason,
-        })),
-      ],
+      workRanges: [...work.extract, ...work.tips].map((w) => describeWorkRange(w, playersMap)),
       deletedRanges,
     });
   }
@@ -687,8 +736,30 @@ export async function buildWorkbenchData(
       }
 
       const explicitRoundIds = l.explicitRoundIds;
-      const allRoundIds = [...new Set([...derivedRoundSet, ...explicitRoundIds])];
-      const isDebrief = explicitRoundIds.some((rId) => !derivedRoundSet.has(rId));
+      const debriefRoundIds = explicitRoundIds.filter((rId) => !derivedRoundSet.has(rId));
+      if (derivedRoundSet.size === 0 && explicitRoundIds.length === 0) {
+        // Speech outside every Round is a debrief of the Round that just ended
+        const spokenAt = Math.min(
+          ...l.utteranceIds.flatMap((uId) => {
+            const u = utterancesById[uId];
+            return u ? [Date.parse(u.startedAt)] : [];
+          }),
+        );
+        let nearest: { id: string; endedAt: number } | null = null;
+        for (const [rId, b] of roundDateBounds.entries()) {
+          const endedAt = b.end.getTime();
+          if (
+            endedAt <= spokenAt &&
+            spokenAt - endedAt <= DEBRIEF_LINK_WINDOW_MS &&
+            (!nearest || endedAt > nearest.endedAt)
+          ) {
+            nearest = { id: rId, endedAt };
+          }
+        }
+        if (nearest) debriefRoundIds.push(nearest.id);
+      }
+      const allRoundIds = [...new Set([...derivedRoundSet, ...explicitRoundIds, ...debriefRoundIds])];
+      const isDebrief = debriefRoundIds.length > 0;
 
       // Derive Session for Manual Learnings via Utterance -> Recording -> Session OR Round -> Game -> Session
       let sessionId = l.sessionId;
@@ -725,7 +796,7 @@ export async function buildWorkbenchData(
           const r = roundsById[rId];
           if (!r) continue;
           if (!r.learningIds.includes(l.id)) r.learningIds.push(l.id);
-          if (isDebrief && explicitRoundIds.includes(rId) && !r.debriefLearningIds.includes(l.id)) {
+          if (debriefRoundIds.includes(rId) && !r.debriefLearningIds.includes(l.id)) {
             r.debriefLearningIds.push(l.id);
           }
         }
@@ -979,6 +1050,10 @@ export async function buildWorkbenchData(
     confusionPairs,
     totalPendingRanges,
     allTopics: [...allTopicsSet].sort(),
+    processing: {
+      workerOnline: isProcessorOnline(),
+      jobs: await listRecentProcessingJobs(db, duoId),
+    },
   };
 }
 

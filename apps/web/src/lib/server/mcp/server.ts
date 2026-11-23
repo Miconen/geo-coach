@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
 import {
@@ -26,12 +26,54 @@ import {
   mcpSearchClaims,
   mcpStartRun,
 } from "./workflow.js";
+import {
+  JOB_TOKEN_PREFIX,
+  verifyProcessingJobToken,
+  type ProcessingJobScope,
+} from "./processing-jobs.js";
+import { DomainError } from "../services/index.js";
 
-export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer {
+/** All a site-started job may use. New tools stay unavailable to jobs unless added here. */
+const JOB_TOOLS = new Set([
+  "get_instructions",
+  "read_range",
+  "search_claims",
+  "add_claims",
+  "add_learnings",
+  "finish_run",
+]);
+
+function trackRegisteredTools(server: McpServer): Map<string, RegisteredTool> {
+  const registered = new Map<string, RegisteredTool>();
+  const register = server.tool.bind(server) as unknown as (
+    name: string,
+    ...rest: unknown[]
+  ) => RegisteredTool;
+  server.tool = ((name: string, ...rest: unknown[]) => {
+    const tool = register(name, ...rest);
+    registered.set(name, tool);
+    return tool;
+  }) as typeof server.tool;
+  return registered;
+}
+
+function assertJobRun(job: ProcessingJobScope | null, runId: string | undefined) {
+  if (job && runId !== job.runId) {
+    throw new DomainError("FORBIDDEN", "This job can only use its own Processing run", 403);
+  }
+}
+
+/** With a job scope, only the tools for that one run are exposed. */
+export function createGeoCoachMcpServer(
+  db: AppDb,
+  playerId: string,
+  job: ProcessingJobScope | null = null,
+): McpServer {
   const server = new McpServer({
     name: "geo-coach",
     version: "0.1.0",
   });
+  const registeredTools = trackRegisteredTools(server);
 
   server.tool(
     "get_instructions",
@@ -89,6 +131,7 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
       runId: z.string().uuid(),
     },
     async ({ runId }) => {
+      assertJobRun(job, runId);
       const res = await mcpReadRange(db, playerId, runId);
       if (res.purpose === "calls") {
         const text = [
@@ -128,6 +171,7 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
       items: z.array(z.record(z.unknown())).min(1),
     },
     async ({ runId, items }) => {
+      assertJobRun(job, runId);
       const res = await mcpAddLearnings(db, playerId, runId, items);
       return {
         content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
@@ -146,7 +190,7 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
       duo: z.string().optional(),
     },
     async (args) => {
-      const res = await mcpSearchClaims(db, playerId, args);
+      const res = await mcpSearchClaims(db, playerId, job ? { ...args, duo: job.duoId } : args);
       return {
         content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
       };
@@ -162,6 +206,7 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
       items: z.array(z.record(z.unknown())).min(1),
     },
     async (args) => {
+      assertJobRun(job, args.runId);
       const res = await mcpAddClaims(db, playerId, args);
       return {
         content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
@@ -273,12 +318,20 @@ export function createGeoCoachMcpServer(db: AppDb, playerId: string): McpServer 
       runId: z.string().uuid(),
     },
     async ({ runId }) => {
+      assertJobRun(job, runId);
       const res = await mcpFinishRun(db, playerId, runId);
       return {
         content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
       };
     },
   );
+
+  if (job) {
+    for (const [name, tool] of registeredTools) {
+      if (!JOB_TOOLS.has(name)) tool.remove();
+    }
+    return server;
+  }
 
   // Also register MCP prompts per purpose
   server.prompt("extract", "Extract Learnings from a geo-coach Session", async () => {
@@ -325,8 +378,12 @@ export async function handleMcpHttpRequest(db: AppDb, request: Request): Promise
     });
   }
 
-  const verified = await verifyApiToken(db, rawToken, "mcp");
-  if (!verified) {
+  const job = rawToken.startsWith(JOB_TOKEN_PREFIX)
+    ? await verifyProcessingJobToken(db, rawToken)
+    : null;
+  const verified = job ? null : await verifyApiToken(db, rawToken, "mcp");
+  const playerId = job?.playerId ?? verified?.player.id;
+  if (!playerId) {
     return new Response(
       JSON.stringify({ error: "Invalid, expired, or wrong-scope mcp bearer token" }),
       {
@@ -336,7 +393,7 @@ export async function handleMcpHttpRequest(db: AppDb, request: Request): Promise
     );
   }
 
-  const server = createGeoCoachMcpServer(db, verified.player.id);
+  const server = createGeoCoachMcpServer(db, playerId, job);
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,

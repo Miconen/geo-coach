@@ -718,3 +718,39 @@ export const claimImages = pgTable(
   },
   (table) => [primaryKey({ columns: [table.claimId, table.sourceImageId] })],
 );
+
+/** A Player's request to process one range from the site, picked up by the processor worker. */
+export const processingJobs = pgTable(
+  "processing_jobs",
+  {
+    id: uuid("id").primaryKey(),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    requestedByPlayerId: uuid("requested_by_player_id")
+      .notNull()
+      .references(() => players.id, { onDelete: "cascade" }),
+    purpose: text("purpose").$type<"extract" | "tips">().notNull(),
+    rangeStart: timestamp("range_start", { withTimezone: true }).notNull(),
+    rangeEnd: timestamp("range_end", { withTimezone: true }).notNull(),
+    status: text("status")
+      .$type<"queued" | "running" | "succeeded" | "failed" | "cancelled">()
+      .notNull()
+      .default("queued"),
+    runId: uuid("run_id").references(() => processingRuns.id, { onDelete: "set null" }),
+    tokenHash: text("token_hash"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("processing_jobs_status_created_idx").on(table.status, table.createdAt),
+    index("processing_jobs_session_idx").on(table.duoId, table.sessionId, table.purpose, table.status),
+    uniqueIndex("processing_jobs_token_uidx").on(table.tokenHash),
+  ],
+);

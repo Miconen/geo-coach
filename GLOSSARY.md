@@ -89,7 +89,7 @@ _Avoid_: track, take
 The text version of one Recording, made of Utterances. A player's speech in a Session is the union of their Transcripts. A Transcript can be redone; each redo is a new version, and the parts it changes need processing again.
 
 **Processing run**
-One manual pass of an AI agent over part of a Session. Each run has a purpose: extracting what the Duo said or adding Tips (both produce Learnings), or labelling Calls. Any part can be processed again, possibly by a different agent; the new run replaces only what earlier runs of the same purpose produced for that part.
+One pass of an AI agent over part of a Session, started by a Player from their own agent or the site. Each run has a purpose: extracting what the Duo said or adding Tips (both produce Learnings), or labelling Calls. Any part can be processed again, possibly by a different agent; the new run replaces only what earlier runs of the same purpose produced for that part.
 
 **Companion**
 The program each player runs on their own PC. It keeps that player's audio and turns it into their Transcript.

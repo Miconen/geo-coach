@@ -23,7 +23,7 @@
     highlightedRoundIds?: string[];
     highlightedUtteranceId?: string | null;
     timelineSearch?: string;
-    onSelectUtterance?: (utteranceId: string) => void;
+    onSelectUtterance?: (utteranceId: string, roundId: string) => void;
     onSelectLearning?: (learningId: string) => void;
     onAddLearning?: (opts: { utteranceIds: string[]; roundIds: string[]; country?: string }) => void;
     onDeleteUtterance?: (utterance: WorkbenchUtterance) => void;
@@ -68,7 +68,7 @@
         Game vs {game.opponentTeamName ?? "Opponents"} · {game.won ? "Win" : "Loss"} ({game.duoRatingBefore ?? "?"} → {game.duoRatingAfter ?? "?"}) · {game.micCount} mic{game.micCount === 1 ? "" : "s"}
       </div>
       {#each rounds as { round, utterances, players }}
-        <div class="space-y-1.5">
+        <div class="space-y-1.5" data-round-anchor={round.id}>
           <RoundCoachingCard
             {round}
             {utterances}
@@ -89,7 +89,7 @@
                       ? 'bg-[var(--debrief-bg)] text-[var(--debrief)]'
                       : 'bg-[var(--accent-soft)] text-[var(--accent-soft-ink)]'}"
                   >
-                    {isDebrief ? "Debrief ← between-Game talk: " : `${l.kind}: `}{l.text}
+                    {isDebrief ? "Debrief: " : `${l.kind}: `}{l.text}
                   </button>
                 {/if}
               {/each}
@@ -102,6 +102,7 @@
               timelineSearch.trim() !== "" &&
               u.text.toLowerCase().includes(timelineSearch.trim().toLowerCase())}
             <div
+              data-utterance-anchor={u.id}
               class="ml-3 flex items-start justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs {highlightedUtteranceId === u.id || matchHighlight
                 ? 'bg-[var(--warn-bg)]'
                 : 'bg-[var(--surface-subtle)]'}"
@@ -141,13 +142,15 @@
     </div>
   {:else}
     {#each rounds as { round, utterances, players }}
-      <RoundCoachingCard
-        {round}
-        {utterances}
-        {players}
-        highlighted={highlightedRoundIds.includes(round.id)}
-        {onSelectUtterance}
-      />
+      <div data-round-anchor={round.id}>
+        <RoundCoachingCard
+          {round}
+          {utterances}
+          {players}
+          highlighted={highlightedRoundIds.includes(round.id)}
+          {onSelectUtterance}
+        />
+      </div>
     {/each}
   {/if}
 </Inspect>

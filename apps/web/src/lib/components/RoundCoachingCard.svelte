@@ -11,7 +11,7 @@
     players: Record<string, WorkbenchPlayer>;
     recallHidden?: boolean;
     highlighted?: boolean;
-    onSelectUtterance?: (utteranceId: string) => void;
+    onSelectUtterance?: (utteranceId: string, roundId: string) => void;
   }
 
   let {
@@ -169,8 +169,9 @@
         <button
           type="button"
           title={marker.tooltip}
-          onclick={() => onSelectUtterance?.(marker.id)}
-          class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-3 w-3 rounded-full border-2 border-[var(--surface)] shadow hover:scale-125"
+          disabled={!onSelectUtterance}
+          onclick={() => onSelectUtterance?.(marker.id, round.id)}
+          class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-3 w-3 rounded-full border-2 border-[var(--surface)] shadow enabled:cursor-pointer enabled:hover:scale-125"
           style="left: {marker.pct}%; background: color-mix(in srgb, {marker.color}, #ffffff var(--speaker-lighten))"
           aria-label="Jump to Utterance"
         ></button>

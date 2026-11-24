@@ -3,6 +3,8 @@
   import type { WorkbenchClaim, WorkbenchData } from "$lib/server/workbench/view-model.js";
   import { CLAIM_STATUS_META, describeEvidence } from "$lib/workbench/knowledge.js";
   import Masked from "./Masked.svelte";
+  import EntityChip from "./EntityChip.svelte";
+  import { entityHref, links } from "$lib/links.js";
 
   interface Props {
     claim: WorkbenchClaim;
@@ -13,9 +15,34 @@
     onSelectLearning?: (learningId: string) => void;
     /** Per-item Recall reveals: a sibling Learning not in it stays masked while Recall is on (X4). */
     revealedLearningIds?: Record<string, boolean>;
+    /** With a Duo, Evidence renders as chips to its Round or Source section (#56 3a); without, plain text. */
+    duoId?: string;
+    /** Linked Learnings as links (e.g. /knowledge pins them on Review) instead of onSelectLearning buttons. */
+    learningHref?: (learningId: string) => string;
   }
 
-  let { claim, wb, compact = false, onSetEvidence, onSelectLearning, revealedLearningIds = {} }: Props = $props();
+  let {
+    claim,
+    wb,
+    compact = false,
+    onSetEvidence,
+    onSelectLearning,
+    revealedLearningIds = {},
+    duoId,
+    learningHref,
+  }: Props = $props();
+
+  function evidenceHref(e: WorkbenchClaim["evidence"][number]): string | null {
+    if (!duoId) return null;
+    if (e.kind === "round") {
+      const round = e.roundId ? wb.roundsById[e.roundId] : null;
+      return round ? entityHref({ kind: "round", duoId, id: round.id, gameId: round.gameId, roundNumber: round.roundNumber }) : null;
+    }
+    if (e.kind === "documentation" && e.source) {
+      return links.source(duoId, e.source.sourceId, { v: e.source.versionNo, section: e.source.anchor });
+    }
+    return null;
+  }
 
   const meta = $derived(CLAIM_STATUS_META[claim.status]);
   const linkedLearnings = $derived(
@@ -122,7 +149,11 @@
           <span class="rounded bg-[var(--surface-subtle)] px-1 text-[10px] uppercase text-[var(--muted)]">
             {e.kind === "documentation" ? "Source" : e.kind}
           </span>
-          <span class="truncate">{describeEvidence(e, wb)}</span>
+          {#if duoId && e.kind !== "player"}
+            <EntityChip kind={e.kind === "round" ? "round" : "source"} label={describeEvidence(e, wb)} href={evidenceHref(e)} />
+          {:else}
+            <span class="truncate">{describeEvidence(e, wb)}</span>
+          {/if}
         </div>
       {/each}
     </div>
@@ -130,6 +161,15 @@
     {#if linkedLearnings.length > 0}
       <div class="mt-1.5 space-y-0.5 border-t border-[var(--border)] pt-1.5">
         {#each linkedLearnings as l}
+          {#if learningHref}
+            <a
+              href={learningHref(l.id)}
+              data-testid="claim-learning-link"
+              class="block w-full truncate text-left text-[11px] text-[var(--accent)] hover:underline"
+            >
+              {l.origin === "agent" ? "Tip" : "Learning"}: <Masked revealed={Boolean(revealedLearningIds[l.id])}>{l.text}</Masked>
+            </a>
+          {:else}
           <button
             type="button"
             onclick={() => onSelectLearning?.(l.id)}
@@ -137,6 +177,7 @@
           >
             {l.origin === "agent" ? "Tip" : "Learning"}: <Masked revealed={Boolean(revealedLearningIds[l.id])}>{l.text}</Masked>
           </button>
+          {/if}
         {/each}
       </div>
     {/if}

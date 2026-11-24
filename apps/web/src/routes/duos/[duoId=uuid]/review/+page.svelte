@@ -17,7 +17,8 @@
   import RunTimeline from "$lib/components/RunTimeline.svelte";
   import UtteranceText from "$lib/components/UtteranceText.svelte";
   import { formatRelSec } from "$lib/workbench/format.js";
-  import { entityHref } from "$lib/links.js";
+  import { entityHref, links } from "$lib/links.js";
+  import ClaimDrawer from "$lib/components/ClaimDrawer.svelte";
   import { gameTitle, roundLabel, sessionTitle } from "$lib/entity-titles.js";
   import { getDuoStream } from "$lib/live/context.js";
   import { getPendingWork } from "$lib/live/pending-work.svelte.js";
@@ -80,6 +81,14 @@
     revealedClaimIds = {};
     revealedRoundIds = {};
   }
+
+  // ?claim= (#56 3a): the canonical Claim drawer route. Closing keeps the other params.
+  const claimParam = $derived(page.url.searchParams.get("claim"));
+  const claimCloseHref = $derived.by(() => {
+    const params = new URLSearchParams(page.url.searchParams);
+    params.delete("claim");
+    return `${page.url.pathname}${params.size ? `?${params}` : ""}`;
+  });
 
   function revealLearning(id: string) {
     revealedIds = { ...revealedIds, [id]: true };
@@ -932,9 +941,9 @@
                 <div class="mt-3 space-y-1.5 border-t border-[var(--border)] pt-3">
                   <div class="flex items-center justify-between text-xs font-semibold text-[var(--muted)]">
                     <span>Knowledge bank · {activeCountryClaims.length} Claim{activeCountryClaims.length === 1 ? "" : "s"}</span>
-                    <button onclick={() => (mode = "knowledge")} class="text-[var(--accent)] hover:underline">
+                    <a href={links.knowledge(wb.duo.id, { country: activeCountryDossier.code })} data-testid="dossier-evidence" class="text-[var(--accent)] hover:underline">
                       Evidence →
-                    </button>
+                    </a>
                   </div>
                   {#each activeCountryClaims as claim (claim.id)}
                     <Masked block revealed={Boolean(revealedClaimIds[claim.id])}>
@@ -1128,6 +1137,17 @@
                     </button>
                   </span>
                 {/if}
+                {#if item.claimId}
+                  <!-- The Claim trigger: a sibling of the select control (never nested), opening its drawer. -->
+                  <div class="px-3.5 pb-2">
+                    <a
+                      href={links.review(wb.duo.id, { claim: item.claimId })}
+                      data-sveltekit-noscroll
+                      data-testid="learning-claim"
+                      class="text-[11px] font-semibold text-[var(--accent)] hover:underline">Claim</a
+                    >
+                  </div>
+                {/if}
                 </div>
                   {/each}
                 </div>
@@ -1233,7 +1253,7 @@
                     <span class="mono ml-1 font-normal text-[var(--muted)]">{group.claims.length}</span>
                   </div>
                   {#each group.claims as claim (claim.id)}
-                    <ClaimCard {claim} {wb} revealedLearningIds={revealedIds} onSetEvidence={setClaimEvidence} onSelectLearning={openLearning} />
+                    <ClaimCard {claim} {wb} duoId={wb.duo.id} revealedLearningIds={revealedIds} onSetEvidence={setClaimEvidence} onSelectLearning={openLearning} />
                   {/each}
                 </div>
               {/each}
@@ -1619,7 +1639,7 @@
                   <div class="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
                     Rests on Claim
                   </div>
-                  <ClaimCard claim={activeLearningClaim} {wb} revealedLearningIds={revealedIds} onSetEvidence={setClaimEvidence} />
+                  <ClaimCard claim={activeLearningClaim} {wb} duoId={wb.duo.id} revealedLearningIds={revealedIds} onSetEvidence={setClaimEvidence} onSelectLearning={openLearning} />
                 </div>
                 </Masked>
               {/if}
@@ -1758,6 +1778,16 @@
       </aside>
     </div>
   </div>
+
+  {#if claimParam}
+    <ClaimDrawer
+      claim={wb.claimsById[claimParam] ?? null}
+      closeHref={claimCloseHref}
+      revealed={Boolean(revealedClaimIds[claimParam])}
+      onReveal={() => (revealedClaimIds = { ...revealedClaimIds, [claimParam!]: true })}
+      card={{ wb, duoId: wb.duo.id, revealedLearningIds: revealedIds, onSetEvidence: setClaimEvidence, onSelectLearning: openLearning }}
+    />
+  {/if}
 
   <ManualLearningModal
     bind:open={manualOpen}

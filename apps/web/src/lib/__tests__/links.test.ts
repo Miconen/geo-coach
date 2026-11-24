@@ -51,9 +51,17 @@ describe("links", () => {
     // X7: Round 0 and negative numbers never link.
     expect(entityHref({ kind: "round", duoId: D, id: "r", gameId: "G", roundNumber: 0 })).toBeNull();
     expect(entityHref({ kind: "round", duoId: D, id: "r", gameId: "G", roundNumber: -1 })).toBeNull();
-    for (const kind of ["claim", "source"] as const) {
-      expect(entityHref({ kind, duoId: D, id: "x" })).toBeNull();
-    }
+    expect(entityHref({ kind: "claim", duoId: D, id: "C" })).toBe(`/duos/${D}/review?claim=C`);
+    expect(entityHref({ kind: "source", duoId: D, id: "S" })).toBe(`/duos/${D}/knowledge/sources/S`);
+  });
+
+  it("builds Knowledge, Claim, Source and Source image links (#56 3a)", () => {
+    expect(links.knowledge(D)).toBe(`/duos/${D}/knowledge`);
+    expect(links.knowledge(D, { country: "ES", claim: "C" })).toBe(`/duos/${D}/knowledge?country=ES&claim=C`);
+    expect(links.claim(D, "C")).toBe(`/duos/${D}/review?claim=C`);
+    expect(links.source(D, "S")).toBe(`/duos/${D}/knowledge/sources/S`);
+    expect(links.source(D, "S", { v: 2, section: "bollards" })).toBe(`/duos/${D}/knowledge/sources/S?v=2&section=bollards#bollards`);
+    expect(links.sourceImage("I")).toBe("/api/sources/images/I?r=2");
   });
 });
 

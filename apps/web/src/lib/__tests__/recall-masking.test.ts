@@ -29,6 +29,8 @@ const ANSWER_FIELDS: Array<{ file: string; fields: string[] }> = [
     ],
   },
   { file: "lib/components/ClaimCard.svelte", fields: ["{l.text}"] },
+  { file: "lib/components/ClaimDrawer.svelte", fields: ["<ClaimCard {claim} {...card} />"] },
+  { file: "routes/duos/[duoId=uuid]/knowledge/+page.svelte", fields: ["<ClaimCard {claim} {...cardProps} />"] },
   { file: "lib/components/GameCard.svelte", fields: ["{l.text}"] },
   { file: "lib/components/LearningRow.svelte", fields: ["{learning.text}"] },
   { file: "lib/components/ClaimRow.svelte", fields: ["{claim.text}"] },

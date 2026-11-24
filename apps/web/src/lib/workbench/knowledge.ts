@@ -21,6 +21,8 @@ export interface ClaimFilters {
   query: string;
   /** Only Claims about this country. */
   country: string | null;
+  /** Recall (#56 X4): a Claim still masked matches no query, so a search never hints at hidden text. */
+  masked?: (claimId: string) => boolean;
 }
 
 export function filterWorkbenchClaims(claims: WorkbenchClaim[], f: ClaimFilters): WorkbenchClaim[] {
@@ -30,6 +32,7 @@ export function filterWorkbenchClaims(claims: WorkbenchClaim[], f: ClaimFilters)
     if (f.topic !== "all" && !c.topics.includes(f.topic)) return false;
     if (f.country && !c.countries.includes(f.country)) return false;
     if (q) {
+      if (f.masked?.(c.id)) return false;
       const hay = [c.text, ...c.countries, ...c.countries.map(getCountryName), ...c.regions.map((r) => r.name), ...c.topics]
         .join(" ")
         .toLowerCase();

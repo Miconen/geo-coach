@@ -103,6 +103,7 @@ test("a cold legacy ?run= with Recall on keeps the Session's speech behind a rev
   await page.goto(`/?run=${s.runId}`);
   await expect(page.locator(`#run-${s.runId}`)).toBeVisible();
   await expect(visible(page, SPEECH)).toHaveCount(0);
+  await page.waitForLoadState("networkidle"); // hydrated, so the reveal click lands
   await page.getByTestId("session-reveal").click();
   await expect(visible(page, SPEECH).first()).toBeVisible();
   // Learnings elsewhere stay masked: the Session reveal is its own.

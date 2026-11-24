@@ -5,7 +5,7 @@ type Changed = Extract<DuoSseEvent, { type: "changed" }>;
 export type ChangedEntity = Changed["entity"];
 
 /** Which consumer a batch is checked against (#56 X5 Consumers). */
-export type Consumer = "review" | "pending-work" | "game" | "round" | "session" | "session-runs" | "stats";
+export type Consumer = "review" | "pending-work" | "game" | "round" | "session" | "session-runs" | "stats" | "knowledge";
 
 /** X5 Consumers, by event type (learning and reaction name no Game, Round or Session: pages refresh Duo-wide). */
 const CONSUMES: Record<Exclude<Consumer, "review" | "pending-work" | "stats">, ReadonlySet<ChangedEntity>> = {
@@ -14,6 +14,9 @@ const CONSUMES: Record<Exclude<Consumer, "review" | "pending-work" | "stats">, R
   session: new Set(["session", "game", "run", "learning", "processing", "reaction", "claim", "corrections"]),
   // Events that change RunTimeline rows or counts: they reset the paged history to page one.
   "session-runs": new Set(["run", "processing", "claim", "learning", "session"]),
+  // /knowledge and Claim drawers (#56 3a): Evidence labels read the Round's country and the Game's date; linked
+  // current Learnings change on run.
+  knowledge: new Set(["claim", "source", "learning", "run", "game"]),
 };
 
 /** True when the batch needs one refresh for this consumer: always after a (re)connection, else per event type. */

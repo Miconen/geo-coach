@@ -14,6 +14,8 @@ import { uuidv7, type Geocoder } from "@geo-coach/shared";
 import * as schema from "../src/lib/server/db/schema.js";
 import type { AppDb } from "../src/lib/server/db/index.js";
 import {
+  addSourceImage,
+  addSourceVersion,
   completeTranscriptVersion,
   finishProcessingRun,
   insertRunLearnings,
@@ -324,6 +326,44 @@ async function main() {
     rangeEnd: new Date(anchor3 + 60_000),
   });
 
+  // Knowledge (#56 3a): a Source with an image, and Claims with Round and Source Evidence. The Claims have no
+  // run, so run counts elsewhere are unchanged.
+  const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+  const source = await addSourceVersion(db, mikoId, {
+    duoId,
+    title: "Spain guide",
+    url: null,
+    kind: "web",
+    markdown: [
+      "# Bollards",
+      "Spanish bollards have a red band.",
+      "",
+      String.raw`![A Spanish bollard](bollard.png "Spain")`,
+      "",
+      "```",
+      "red band",
+      "```",
+      "",
+      "# Poles",
+      "Wooden poles.",
+    ].join("\n"),
+  });
+  const image = await addSourceImage(db, mikoId, { sourceVersionId: source.sourceVersionId, name: "bollard.png", mimeType: "image/png", base64: PNG });
+  const game2 = games[1]!;
+  const claimIds = { bollards: uuidv7(), roundZero: uuidv7(), white: uuidv7() };
+  await db.insert(schema.claims).values([
+    { id: claimIds.bollards, duoId, text: "Spanish bollards have a red band.", countries: ["ES"], topics: ["bollards"] },
+    { id: claimIds.roundZero, duoId, text: "Castilla-La Mancha has dry plains.", countries: ["ES"], topics: ["landscape"] },
+    { id: claimIds.white, duoId, text: "Portuguese poles are white.", countries: ["PT"], topics: ["poles"] },
+  ]);
+  await db.insert(schema.claimEvidence).values([
+    { id: uuidv7(), claimId: claimIds.bollards, duoId, kind: "round", direction: "for", roundId: roundsByGame[game1.id]!.find((r) => r.roundNumber === 2)!.id },
+    { id: uuidv7(), claimId: claimIds.bollards, duoId, kind: "documentation", direction: "for", sourceVersionId: source.sourceVersionId, sectionAnchor: "bollards" },
+    { id: uuidv7(), claimId: claimIds.roundZero, duoId, kind: "round", direction: "for", roundId: roundsByGame[game2.id]!.find((r) => r.roundNumber === 0)!.id },
+  ]);
+  await db.insert(schema.claimImages).values({ claimId: claimIds.bollards, sourceImageId: image.imageId });
+  await db.update(schema.learnings).set({ claimId: claimIds.bollards }).where(eq(schema.learnings.id, learningIds[1]!));
+
   const seed = {
     duoId,
     otherDuoId,
@@ -337,6 +377,9 @@ async function main() {
     run2Id: run2.id,
     otherRunId: otherRun.id,
     learningIds,
+    sourceId: source.sourceId,
+    sourceImageId: image.imageId,
+    claimIds,
     games: games.map((g) => ({ id: g.id, geoguessrGameId: g.geoguessrGameId, rounds: roundsByGame[g.id]! })),
   };
   await writeFile(path.resolve(__dirname, ".seed.json"), JSON.stringify(seed, null, 2));

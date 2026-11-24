@@ -271,6 +271,8 @@ export interface WorkbenchClaim {
   /** Current Learnings resting on this Claim. */
   learningIds: string[];
   imageUrls: string[];
+  /** The Source images behind imageUrls (new surfaces build ?r=2 URLs from them, #56 3a). */
+  imageIds: string[];
   createdAt: string;
 }
 
@@ -984,6 +986,7 @@ export async function buildWorkbenchData(
       c.evidence.find((e) => e.kind === "player" && e.playerId === viewerPlayerId)?.direction ?? null,
     learningIds: c.learningIds.filter((id) => currentLearningIds.has(id)),
     imageUrls: c.imageIds.map((id) => `/api/sources/images/${id}`),
+    imageIds: c.imageIds,
     createdAt: c.createdAt.toISOString(),
   }));
   const claimsById: Record<string, WorkbenchClaim> = {};

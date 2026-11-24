@@ -18,6 +18,9 @@ export interface Seed {
   run2Id: string;
   otherRunId: string;
   learningIds: string[];
+  sourceId: string;
+  sourceImageId: string;
+  claimIds: { bollards: string; roundZero: string; white: string };
   games: { id: string; geoguessrGameId: string; rounds: { id: string; roundNumber: number }[] }[];
 }
 

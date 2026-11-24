@@ -52,6 +52,7 @@
     { key: "review", label: "Review", href: (id: string) => links.review(id) },
     { key: "games", label: "Games", href: (id: string) => links.games(id) },
     { key: "sessions", label: "Sessions", href: (id: string) => links.sessions(id) },
+    { key: "knowledge", label: "Knowledge", href: (id: string) => links.knowledge(id) },
     { key: "stats", label: "Stats", href: (id: string) => links.stats(id) },
   ] as const;
   // Entity pages add their own crumbs below the section (the parent first, then the page itself).
@@ -92,7 +93,7 @@
       class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs"
     >
       <ol class="flex flex-wrap items-center gap-1.5" aria-label="Breadcrumb" data-testid="breadcrumb">
-        <li class="font-semibold text-[var(--ink)]">{data.duo.name}</li>
+        <li><a class="font-semibold text-[var(--ink)] hover:underline" href={links.duo(duoId)} data-testid="crumb-duo">{data.duo.name}</a></li>
         {#if current}
           <li aria-hidden="true" class="text-[var(--muted)]">›</li>
           {#if crumbs.length > 0}

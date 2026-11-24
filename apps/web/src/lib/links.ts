@@ -17,11 +17,28 @@ function withQuery(path: string, query: Query = {}, hash?: string | null): strin
 }
 
 export const links = {
-  /** The Duo's entry point (redirects to Review until Home ships). */
+  /** The Duo's Home (#56 3a). */
   duo: (duoId: string) => `/duos/${duoId}`,
-  /** Review. ?learning= pins a Learning even if filters hide it; ?run= opens a run in its Session. */
-  review: (duoId: string, q: { learning?: string | null; run?: string | null; country?: string | null } = {}) =>
-    withQuery(`/duos/${duoId}/review`, { learning: q.learning, run: q.run, country: q.country }, q.run ? `run-${q.run}` : null),
+  /** Review. ?learning= pins a Learning even if filters hide it; ?run= opens a run in its Session; ?claim= a Claim drawer. */
+  review: (
+    duoId: string,
+    q: { learning?: string | null; run?: string | null; country?: string | null; claim?: string | null } = {},
+  ) =>
+    withQuery(
+      `/duos/${duoId}/review`,
+      { learning: q.learning, run: q.run, country: q.country, claim: q.claim },
+      q.run ? `run-${q.run}` : null,
+    ),
+  /** A Claim's drawer; its canonical route is Review's ?claim= (#56 X1). */
+  claim: (duoId: string, claimId: string) => withQuery(`/duos/${duoId}/review`, { claim: claimId }),
+  /** Knowledge: Claims and Sources. ?country= filters; ?claim= opens a Claim drawer in place. */
+  knowledge: (duoId: string, q: { country?: string | null; claim?: string | null } = {}) =>
+    withQuery(`/duos/${duoId}/knowledge`, { country: q.country, claim: q.claim }),
+  /** A Source; ?v= pins a version (else the current one), ?section= one excerpt (#anchor). */
+  source: (duoId: string, sourceId: string, q: { v?: number | null; section?: string | null } = {}) =>
+    withQuery(`/duos/${duoId}/knowledge/sources/${sourceId}`, { v: q.v, section: q.section }, q.section),
+  /** A Source image. ?r=2 is revalidated on every view through the member check (no-cache), unlike the old URL. */
+  sourceImage: (imageId: string) => `/api/sources/images/${imageId}?r=2`,
   /** Statistics; `params` are the Stats filter params (see packages/shared stats filter). */
   stats: (duoId: string, params: URLSearchParams | Query = {}) =>
     params instanceof URLSearchParams
@@ -86,6 +103,10 @@ export function entityHref(ref: EntityRef): string | null {
       return links.session(ref.duoId, ref.id);
     case "country":
       return links.stats(ref.duoId, { country: ref.id });
+    case "claim":
+      return links.claim(ref.duoId, ref.id);
+    case "source":
+      return links.source(ref.duoId, ref.id);
     default:
       return null;
   }

@@ -21,6 +21,7 @@ function claim(id: string, status: ClaimStatus, countries: string[], topics: str
     viewerDirection: null,
     learningIds: [],
     imageUrls: [],
+    imageIds: [],
     createdAt: "2026-11-20T19:00:00.000Z",
   };
 }
@@ -47,6 +48,15 @@ describe("knowledge bank view helpers", () => {
     expect(filterWorkbenchClaims(CLAIMS, { ...ALL, topic: "coverage" }).map((c) => c.id)).toEqual(["a", "c"]);
     expect(filterWorkbenchClaims(CLAIMS, { ...ALL, country: "RO" }).map((c) => c.id)).toEqual(["b"]);
     expect(filterWorkbenchClaims(CLAIMS, { ...ALL, query: "panama" }).map((c) => c.id)).toEqual(["c"]);
+  });
+
+  it("under Recall a masked Claim matches no query, so its count stays out (#56 3a)", () => {
+    const masked = (id: string) => id === "c";
+    expect(filterWorkbenchClaims(CLAIMS, { ...ALL, query: "panama", masked })).toEqual([]);
+    expect(countByStatus(filterWorkbenchClaims(CLAIMS, { ...ALL, query: "panama", masked }))[CLAIMS.find((c) => c.id === "c")!.status]).toBe(0);
+    // Without a query the masked Claim is listed (as a masked card), and a revealed one matches.
+    expect(filterWorkbenchClaims(CLAIMS, { ...ALL, masked }).map((c) => c.id)).toContain("c");
+    expect(filterWorkbenchClaims(CLAIMS, { ...ALL, query: "panama", masked: () => false }).map((c) => c.id)).toEqual(["c"]);
   });
 
   it("groups Claims by country name, a distinguisher under each country, general last", () => {

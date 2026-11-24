@@ -14,6 +14,9 @@ export interface Seed {
   sessionId: string;
   recordingId: string;
   runId: string;
+  session2Id: string;
+  run2Id: string;
+  otherRunId: string;
   learningIds: string[];
   games: { id: string; geoguessrGameId: string; rounds: { id: string; roundNumber: number }[] }[];
 }

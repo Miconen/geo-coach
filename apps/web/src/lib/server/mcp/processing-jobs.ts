@@ -12,6 +12,8 @@ export const JOB_TOKEN_PREFIX = "gc_job_";
 const LEASE_MS = 3 * 60 * 1000;
 const PROCESSOR_ONLINE_MS = 45 * 1000;
 const WORKER_AGENT = "geo-coach-worker";
+/** The cancellation note for a job whose range was already processed; the run history collapses these. */
+export const ALREADY_UP_TO_DATE = "Already up to date.";
 
 export type ProcessingJobPurpose = "extract" | "tips";
 type JobRow = typeof processingJobs.$inferSelect;
@@ -183,6 +185,8 @@ export async function claimNextProcessingJob(db: AppDb, model: string, now: Date
     if (!claimed) return null;
 
     const { job, mcpToken } = claimed;
+    // The claim committed: the run history shows the job as starting before its run exists.
+    duoEventBus.emitChanged(job.duoId, "processing", job.sessionId);
     try {
       const { ranges } = await mcpListWork(db, job.requestedByPlayerId, {
         purpose: job.purpose,
@@ -197,7 +201,7 @@ export async function claimNextProcessingJob(db: AppDb, model: string, now: Date
           ),
       );
       if (!stillNeeded) {
-        await closeJob(db, job, "cancelled", "Already up to date.");
+        await closeJob(db, job, "cancelled", ALREADY_UP_TO_DATE);
         continue;
       }
 

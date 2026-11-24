@@ -32,6 +32,7 @@ import {
   type ProcessingJobScope,
 } from "./processing-jobs.js";
 import { DomainError } from "../services/index.js";
+import { duoEventBus } from "../events/bus.js";
 
 /** All a site-started job may use. New tools stay unavailable to jobs unless added here. */
 const JOB_TOOLS = new Set([
@@ -118,6 +119,8 @@ export function createGeoCoachMcpServer(
     },
     async (args) => {
       const res = await mcpStartRun(db, playerId, args);
+      // External agents' runs appear in the run history at once (#56 0b); the worker's runs emit via their job.
+      duoEventBus.emitChanged(res.duoId, "run", res.runId);
       return {
         content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
       };

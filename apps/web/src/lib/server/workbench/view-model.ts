@@ -20,6 +20,7 @@ import {
   type ReactionType,
 } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
+import { isUuid } from "../../uuid.js";
 import {
   duoMemberships,
   duos,
@@ -43,15 +44,20 @@ import {
   loadTranscriptCorrector,
   type WorkRange,
   type WorkRangeCause,
+  type DerivedLearningRecord,
+  deriveCallLabelHistory,
+  findRunInDuo,
   recordingInDuo,
   roundInDuo,
   speechInDuo,
 } from "../services/index.js";
+import { isProcessorOnline } from "../mcp/processing-jobs.js";
 import {
-  isProcessorOnline,
-  listRecentProcessingJobs,
-  type WorkbenchProcessingJob,
-} from "../mcp/processing-jobs.js";
+  buildRunTimeline,
+  sessionWorkRangeJobs,
+  type RunTimeline,
+  type WorkRangeJobState,
+} from "./run-timeline.js";
 
 export interface WorkbenchPlayer {
   id: string;
@@ -299,7 +305,28 @@ export interface WorkbenchData {
   confusionPairs: ConfusionPair[];
   totalPendingRanges: number;
   allTopics: string[];
-  processing: { workerOnline: boolean; jobs: WorkbenchProcessingJob[] };
+  /** The Session the SESSION pane shows: ?sessionId=, else the ?run= pin's Session, else the newest. A
+   * Recording-less Session stays selected; buildWorkbenchData lists only Sessions with Recordings. */
+  selectedSession: { id: string; startedAt: string; recordingLess: boolean } | null;
+  /** The selected Session's run history (#56 0b). */
+  runTimeline: RunTimeline | null;
+  processing: { workerOnline: boolean; rangeJobs: Record<string, WorkRangeJobState> };
+}
+
+export interface WorkbenchOptions {
+  /** A Session of this Duo (callers validate it). */
+  sessionId?: string | null;
+  /** A ?run= pin; dropped (pinMissing) when malformed, missing, foreign or of another pinned Session. */
+  runId?: string | null;
+}
+
+/** Whether two Learnings' source spans overlap (supersession is per span, ADR 0001). */
+function spansOverlap(a: DerivedLearningRecord, b: DerivedLearningRecord) {
+  if (!a.sourceSpanStart || !a.sourceSpanEnd || !b.sourceSpanStart || !b.sourceSpanEnd) return false;
+  return intervalsOverlap(
+    { startedAt: a.sourceSpanStart, endedAt: a.sourceSpanEnd },
+    { startedAt: b.sourceSpanStart, endedAt: b.sourceSpanEnd },
+  );
 }
 
 function describeCause(cause: WorkRangeCause): string {
@@ -353,6 +380,7 @@ export async function buildWorkbenchData(
   db: AppDb,
   duoId: string,
   viewerPlayerId: string,
+  options: WorkbenchOptions = {},
 ): Promise<WorkbenchData> {
   const duo = await db.query.duos.findFirst({ where: eq(duos.id, duoId) });
   if (!duo) {
@@ -692,25 +720,24 @@ export async function buildWorkbenchData(
     recentGames.push(wbGame);
   }
 
-  // Two-way supersession links + derived Round links + Session fallback for Manual Learnings
-  const learningsByRun = new Map<string, string[]>();
+  // Two-way supersession links follow supersededByRunId only, through the same span overlap that decided it,
+  // so a replacement lists only the Learnings it actually displaced.
+  const learningsByRun = new Map<string, DerivedLearningRecord[]>();
   for (const l of derivedLearnings) {
     if (l.runId) {
       const arr = learningsByRun.get(l.runId) ?? [];
-      arr.push(l.id);
+      arr.push(l);
       learningsByRun.set(l.runId, arr);
     }
   }
-
+  const supersededByMap = new Map<string, string[]>();
   const supersedesMap = new Map<string, string[]>();
   for (const l of derivedLearnings) {
-    if (l.supersededByRunId) {
-      const replacements = learningsByRun.get(l.supersededByRunId) ?? [];
-      for (const repId of replacements) {
-        const list = supersedesMap.get(repId) ?? [];
-        list.push(l.id);
-        supersedesMap.set(repId, list);
-      }
+    if (!l.supersededByRunId) continue;
+    for (const rep of learningsByRun.get(l.supersededByRunId) ?? []) {
+      if (!spansOverlap(l, rep)) continue;
+      supersededByMap.set(l.id, [...(supersededByMap.get(l.id) ?? []), rep.id]);
+      supersedesMap.set(rep.id, [...(supersedesMap.get(rep.id) ?? []), l.id]);
     }
   }
 
@@ -820,9 +847,7 @@ export async function buildWorkbenchData(
         createdAt: l.createdAt.toISOString(),
         status: l.status,
         supersededByRunId: l.supersededByRunId,
-        supersededByLearningIds: l.supersededByRunId
-          ? (learningsByRun.get(l.supersededByRunId) ?? [])
-          : [],
+        supersededByLearningIds: supersededByMap.get(l.id) ?? [],
         supersedesLearningIds: supersedesMap.get(l.id) ?? [],
         isStale,
         utteranceIds: l.utteranceIds,
@@ -1022,6 +1047,50 @@ export async function buildWorkbenchData(
 
   const currentRating = recentGames.find((g) => g.duoRatingAfter !== null)?.duoRatingAfter ?? null;
 
+  // The SESSION pane's Session and its run history (#56 0b). ?run= resolves first (X2), else the newest Session.
+  let pinMissing = false;
+  let pinnedRunSessionId: string | null = null;
+  const requestedRunId = options.runId ?? null;
+  if (requestedRunId) {
+    const run = isUuid(requestedRunId) ? await findRunInDuo(db, duoId, requestedRunId) : null;
+    // A run of another Session than a pinned ?sessionId= is foreign (X2).
+    if (!run || (options.sessionId && run.sessionId !== options.sessionId)) pinMissing = true;
+    else pinnedRunSessionId = run.sessionId;
+  }
+  const selectedSessionId = options.sessionId ?? pinnedRunSessionId ?? wbSessions[0]?.id ?? null;
+  let selectedSession: WorkbenchData["selectedSession"] = null;
+  if (selectedSessionId) {
+    const listed = wbSessions.find((ses) => ses.id === selectedSessionId);
+    const row = listed ? null : allSessions.find((ses) => ses.id === selectedSessionId);
+    if (listed) selectedSession = { id: listed.id, startedAt: listed.startedAt, recordingLess: false };
+    else if (row) selectedSession = { id: row.id, startedAt: row.createdAt.toISOString(), recordingLess: true };
+  }
+  let runTimeline: RunTimeline | null = null;
+  let rangeJobs: Record<string, WorkRangeJobState> = {};
+  if (selectedSession) {
+    const callLabelHistory = await deriveCallLabelHistory(db, duoId);
+    const manualCurrent = wbLearnings.filter(
+      (l) =>
+        l.origin === "manual" &&
+        l.status === "current" &&
+        l.sessionId === selectedSession.id &&
+        (l.utteranceIds.length > 0 || l.roundIds.length > 0),
+    ).length;
+    runTimeline = await buildRunTimeline(db, duoId, selectedSession.id, {
+      learnings: derivedLearnings,
+      callLabelHistory,
+      manualCurrent,
+      selectedRunId: pinMissing ? null : requestedRunId,
+      pinMissing,
+    });
+    rangeJobs = await sessionWorkRangeJobs(
+      db,
+      duoId,
+      selectedSession.id,
+      wbSessions.find((ses) => ses.id === selectedSession.id)?.workRanges ?? [],
+    );
+  }
+
   return {
     duo: {
       id: duo.id,
@@ -1048,9 +1117,11 @@ export async function buildWorkbenchData(
     confusionPairs,
     totalPendingRanges,
     allTopics: [...allTopicsSet].sort(),
+    selectedSession,
+    runTimeline,
     processing: {
       workerOnline: isProcessorOnline(),
-      jobs: await listRecentProcessingJobs(db, duoId),
+      rangeJobs,
     },
   };
 }

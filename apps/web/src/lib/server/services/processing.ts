@@ -832,7 +832,7 @@ export async function deriveLearningsWithStatus(
             agent: run.agent,
             model: run.model,
             promptVersion: run.promptVersion,
-            finishedAt: run.finishedAt,
+            finishedAt: run.status === "finished" ? run.finishedAt : null,
           }
         : null,
     };

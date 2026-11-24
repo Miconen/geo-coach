@@ -12,6 +12,7 @@
   import ClaimCard from "$lib/components/ClaimCard.svelte";
   import GameCard from "$lib/components/GameCard.svelte";
   import RoundCoachingCard from "$lib/components/RoundCoachingCard.svelte";
+  import RunTimeline from "$lib/components/RunTimeline.svelte";
   import ThemeSwitcher from "$lib/components/ThemeSwitcher.svelte";
   import UtteranceText from "$lib/components/UtteranceText.svelte";
   import { formatRelSec } from "$lib/workbench/format.js";
@@ -38,12 +39,19 @@
     liveWorkbench && liveWorkbench.base === data.workbench ? liveWorkbench.value : data.workbench,
   );
 
+  // A ?run= deep link (X2) opens the SESSION pane on the run's Session, with the run pinned.
+  const initialRunId = (() => data.selectedRunId ?? null)();
+  const initialSessionId = (() => (initialRunId ? (data.workbench?.selectedSession?.id ?? null) : null))();
+
   // Navigation & filter state
-  let mode = $state<"learnings" | "knowledge" | "session" | "game">("learnings");
+  let mode = $state<"learnings" | "knowledge" | "session" | "game">(initialRunId ? "session" : "learnings");
   let queueFilter = $state<"all" | "mistakes" | "starred" | "manual" | "stale" | "study">("all");
   let selectedCountry = $state<string | null>(null);
   let selectedPair = $state<[string, string] | null>(null);
-  let selectedSessionId = $state<string | null>(null);
+  let selectedSessionId = $state<string | null>(initialSessionId);
+  let selectedRunId = $state<string | null>(initialRunId);
+  // Bumped on every Session switch, so a run history fetched for a Session already left is dropped.
+  let sessionGeneration = 0;
   let selectedGameId = $state<string | null>(null);
   let kindFilter = $state<LearningKind | "all">("all");
   let sortMode = $state<"newest" | "hp-leaks">("newest");
@@ -211,8 +219,36 @@
 
   const standaloneGameSlice = $derived(wb && standaloneGame ? gameSlice(wb, standaloneGame.id) : null);
 
-  const activeSession = $derived(
-    wb?.sessions.find((s) => s.id === selectedSessionId) ?? wb?.sessions[0] ?? null,
+  // A Recording-less Session (no transcript, so not in wb.sessions) stays selected: the pane shows its run
+  // history with an empty Transcript.
+  const activeSession = $derived.by(() => {
+    if (!wb) return null;
+    const listed = wb.sessions.find((s) => s.id === selectedSessionId);
+    if (listed) return listed;
+    const sel = wb.selectedSession;
+    if (sel && sel.recordingLess && sel.id === selectedSessionId) {
+      return {
+        id: sel.id,
+        startedAt: sel.startedAt,
+        endedAt: sel.startedAt,
+        ended: true,
+        playerIds: [],
+        micCount: 0,
+        gameIds: [],
+        recordingIds: [],
+        ratingDelta: 0,
+        extractWorkCount: 0,
+        tipsWorkCount: 0,
+        status: "up-to-date" as const,
+        workRanges: [],
+        deletedRanges: [],
+      };
+    }
+    return wb.sessions[0] ?? null;
+  });
+
+  const activeRunTimeline = $derived(
+    wb?.runTimeline && activeSession && wb.runTimeline.sessionId === activeSession.id ? wb.runTimeline : null,
   );
 
   const visibleSessionRoundIds = $derived.by(() => {
@@ -343,7 +379,7 @@
       return;
     }
     mode = "session";
-    selectedSessionId = game.sessionIds[0] ?? null;
+    selectSession(game.sessionIds[0] ?? null);
   }
 
   async function openRound(roundId: string) {
@@ -372,7 +408,7 @@
       ? wb.roundsById[roundId]
       : Object.values(wb.roundsById).find((r) => r.utteranceIds.includes(utteranceId));
     mode = "session";
-    selectedSessionId = utterance.sessionId;
+    selectSession(utterance.sessionId);
     selectedGameId = round?.gameId ?? null;
     selectedRoundId = round?.id ?? null;
     return focusUtterance(utteranceId, round?.id);
@@ -380,8 +416,16 @@
 
   function jumpToSession(sessionId: string) {
     mode = "session";
-    selectedSessionId = sessionId;
+    selectSession(sessionId);
     selectedGameId = null;
+  }
+
+  /** Every Session selection fetches that Session's run history and clears the selected run. */
+  function selectSession(sessionId: string | null) {
+    if (sessionId !== selectedSessionId) sessionGeneration += 1;
+    selectedSessionId = sessionId;
+    selectedRunId = null;
+    void refreshWorkbench();
   }
 
   let refreshingWorkbench = false;
@@ -400,10 +444,17 @@
         refreshWorkbenchAgain = false;
         const base = data.workbench;
         if (!base) return;
-        const res = await fetch(`/api/duos/${base.duo.id}/workbench`);
+        const generation = sessionGeneration;
+        const params = new URLSearchParams();
+        const sessionId = selectedSessionId ?? activeSession?.id ?? null;
+        if (sessionId) params.set("sessionId", sessionId);
+        if (selectedRunId) params.set("run", selectedRunId);
+        const res = await fetch(`/api/duos/${base.duo.id}/workbench?${params}`);
         if (res.ok) {
           const value = (await res.json()) as NonNullable<typeof data.workbench>;
-          if (base === data.workbench) liveWorkbench = { base, value };
+          // A response for a Session already left is dropped; the loop fetches the new one.
+          if (generation !== sessionGeneration) refreshWorkbenchAgain = true;
+          else if (base === data.workbench) liveWorkbench = { base, value };
         }
       } while (refreshWorkbenchAgain);
     } catch {
@@ -422,21 +473,9 @@
     return `${sessionId}:${wr.purpose}:${wr.startUtc}`;
   }
 
+  /** The selected Session's jobs for a work range, looked up server-side (scoped, newest per chunk). */
   function workRangeJobs(sessionId: string, wr: SessionWorkRange) {
-    const start = Date.parse(wr.startUtc);
-    const end = Date.parse(wr.endUtc);
-    const latestPerChunk = new Map<string, NonNullable<typeof wb>["processing"]["jobs"][number]>();
-    for (const job of wb?.processing.jobs ?? []) {
-      if (job.sessionId !== sessionId || job.purpose !== wr.purpose) continue;
-      if (Date.parse(job.startUtc) >= end || Date.parse(job.endUtc) <= start) continue;
-      if (!latestPerChunk.has(job.startUtc)) latestPerChunk.set(job.startUtc, job);
-    }
-    const jobs = [...latestPerChunk.values()];
-    return {
-      running: jobs.filter((j) => j.status === "running").length,
-      queued: jobs.filter((j) => j.status === "queued").length,
-      failed: jobs.find((j) => j.status === "failed") ?? null,
-    };
+    return wb?.processing.rangeJobs[workRangeKey(sessionId, wr)] ?? { running: 0, queued: 0, failed: null };
   }
 
   function isSessionRecording(session: { recordingIds: string[] }) {
@@ -476,6 +515,7 @@
   }
 
   onMount(() => {
+    if (initialRunId) void scrollToAnchor(`#run-${initialRunId}`);
     let es: EventSource | null = null;
     if (wb) {
       es = new EventSource(`/api/duos/${wb.duo.id}/events`);
@@ -786,6 +826,8 @@
           <div class="mt-1.5 grid gap-1 text-xs">
             {#each wb.sessions as ses}
               <button
+                data-testid="session-button"
+                data-session-id={ses.id}
                 onclick={() => jumpToSession(ses.id)}
                 class="rounded-md border px-2 py-1.5 text-left {mode === 'session' && activeSession?.id === ses.id
                   ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
@@ -1254,6 +1296,14 @@
               </div>
             </div>
 
+            {#if activeRunTimeline}
+              <RunTimeline
+                timeline={activeRunTimeline}
+                duoId={wb.duo.id}
+                playerName={(id) => (id ? (wb.players[id]?.displayName ?? "Player") : "Player")}
+              />
+            {/if}
+
             <!-- Pending work range banners -->
             {#each activeSession.workRanges as wr}
               {@const key = workRangeKey(activeSession.id, wr)}
@@ -1274,7 +1324,7 @@
                     </div>
                   {/if}
                   {#if fixErrors[key] || (jobs.failed && !active)}
-                    <div class="font-semibold" role="alert">{fixErrors[key] ?? jobs.failed?.error}</div>
+                    <div class="font-semibold" role="alert">{fixErrors[key] ?? jobs.failed}</div>
                   {/if}
                 </div>
                 <button
@@ -1487,7 +1537,7 @@
               {/if}
 
               <!-- Two-way supersession links -->
-              {#if activeLearning.supersededByLearningIds.length > 0}
+              {#if activeLearning.supersededByLearningIds.length > 0 && activeLearningRevealed}
                 <div class="rounded-lg bg-[var(--surface-subtle)] p-2 text-xs">
                   Superseded by newer run:
                   {#each activeLearning.supersededByLearningIds as repId}
@@ -1500,7 +1550,7 @@
                   {/each}
                 </div>
               {/if}
-              {#if activeLearning.supersedesLearningIds.length > 0}
+              {#if activeLearning.supersedesLearningIds.length > 0 && activeLearningRevealed}
                 <div class="rounded-lg bg-[var(--surface-subtle)] p-2 text-xs">
                   Replaces:
                   {#each activeLearning.supersedesLearningIds as oldId}

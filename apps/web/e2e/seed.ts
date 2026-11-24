@@ -250,6 +250,69 @@ async function main() {
   ]);
   await finishProcessingRun(db, run.id);
 
+  // A second Session two hours later, with its own finished run.
+  const anchor2 = Date.parse(at("21:00:00"));
+  const recording2Id = uuidv7();
+  const tv2Id = uuidv7();
+  const started2 = await startRecording(db, soraId, {
+    recordingId: recording2Id,
+    transcriptVersionId: tv2Id,
+    duoId,
+    startedAt: new Date(anchor2).toISOString(),
+    clockAnchorMs: anchor2,
+    companionVersion: "0.1.0",
+    model: "large-v3",
+    transcriberSettings: {},
+    hotwordsUsed: [],
+  });
+  await uploadTranscriptChunk(db, soraId, tv2Id, {
+    recordingId: recording2Id,
+    chunkNo: 0,
+    utterances: [speech("Evening session, warming up", 30_000), speech("Bollards again", 90_000)],
+  });
+  await completeTranscriptVersion(db, soraId, tv2Id, { totalChunks: 1 });
+  await stopRecording(db, soraId, recording2Id, {
+    stoppedAt: new Date(anchor2 + 10 * 60_000).toISOString(),
+    stopReason: "stop",
+  });
+  const run2 = await startProcessingRun(db, {
+    duoId,
+    sessionId: started2.sessionId,
+    startedByPlayerId: soraId,
+    purpose: "tips",
+    agent: "claude",
+    model: "e2e-evening",
+    promptVersion: "e2e",
+    rangeStart: new Date(anchor2),
+    rangeEnd: new Date(anchor2 + 10 * 60_000),
+  });
+  await finishProcessingRun(db, run2.id);
+
+  // The other Duo's Session and run, for cross-Duo checks.
+  const anchor3 = Date.parse(at("18:00:00"));
+  const started3 = await startRecording(db, outsiderId, {
+    recordingId: uuidv7(),
+    transcriptVersionId: uuidv7(),
+    duoId: otherDuoId,
+    startedAt: new Date(anchor3).toISOString(),
+    clockAnchorMs: anchor3,
+    companionVersion: "0.1.0",
+    model: "large-v3",
+    transcriberSettings: {},
+    hotwordsUsed: [],
+  });
+  const otherRun = await startProcessingRun(db, {
+    duoId: otherDuoId,
+    sessionId: started3.sessionId,
+    startedByPlayerId: outsiderId,
+    purpose: "extract",
+    agent: "claude",
+    model: "e2e-other",
+    promptVersion: "e2e",
+    rangeStart: new Date(anchor3),
+    rangeEnd: new Date(anchor3 + 60_000),
+  });
+
   const seed = {
     duoId,
     otherDuoId,
@@ -259,6 +322,9 @@ async function main() {
     sessionId: started.sessionId,
     recordingId,
     runId: run.id,
+    session2Id: started2.sessionId,
+    run2Id: run2.id,
+    otherRunId: otherRun.id,
     learningIds,
     games: games.map((g) => ({ id: g.id, geoguessrGameId: g.geoguessrGameId, rounds: roundsByGame[g.id]! })),
   };

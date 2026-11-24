@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   RUN_ABANDON_MS,
   intervalsOverlap,
@@ -131,13 +131,22 @@ interface RecordingCurrentState {
   deletedRangeCount: number;
 }
 
-async function getSessionRecordingStates(
+/**
+ * Current Recording states for the given Sessions (all of the Duo's when null), batched: one query each for
+ * Recordings, elected versions and chunk counts, whatever the number of Sessions.
+ */
+async function getRecordingStatesBySession(
   db: AppDb,
   duoId: string,
-  sessionId: string,
-): Promise<RecordingCurrentState[]> {
+  sessionIds: readonly string[] | null,
+): Promise<Map<string, RecordingCurrentState[]>> {
+  const out = new Map<string, RecordingCurrentState[]>();
+  if (sessionIds !== null && sessionIds.length === 0) return out;
   const recs = await db.query.recordings.findMany({
-    where: and(recordingInDuo(duoId), eq(recordings.sessionId, sessionId)),
+    where:
+      sessionIds === null
+        ? recordingInDuo(duoId)
+        : and(recordingInDuo(duoId), inArray(recordings.sessionId, [...sessionIds])),
     orderBy: [asc(recordings.startedAt)],
   });
 
@@ -147,21 +156,24 @@ async function getSessionRecordingStates(
     recs.map((r) => r.id),
   );
   const versionIds = [...versionByRecording.values()];
-  const chunkRows =
+  const chunkCounts =
     versionIds.length > 0
       ? await db
-          .select({ transcriptVersionId: transcriptChunks.transcriptVersionId, recordingId: transcriptChunks.recordingId })
+          .select({
+            transcriptVersionId: transcriptChunks.transcriptVersionId,
+            recordingId: transcriptChunks.recordingId,
+            count: sql<number>`count(*)::int`,
+          })
           .from(transcriptChunks)
           .where(inArray(transcriptChunks.transcriptVersionId, versionIds))
+          .groupBy(transcriptChunks.transcriptVersionId, transcriptChunks.recordingId)
       : [];
+  // A chunk counts only when it belongs to the version's own Recording.
+  const chunkCount = new Map(chunkCounts.map((c) => [`${c.transcriptVersionId}:${c.recordingId}`, Number(c.count)]));
 
-  const states: RecordingCurrentState[] = [];
   for (const rec of recs) {
     const currentVersionId = versionByRecording.get(rec.id) ?? null;
-    // A chunk counts only when it belongs to the version's own Recording.
-    const chunks = currentVersionId
-      ? chunkRows.filter((c) => c.transcriptVersionId === currentVersionId && c.recordingId === rec.id)
-      : [];
+    const chunks = currentVersionId ? (chunkCount.get(`${currentVersionId}:${rec.id}`) ?? 0) : 0;
 
     // Derive endMs from stoppedAt or latest utterance or startedAt + 1s
     let endMs = rec.stoppedAt ? rec.stoppedAt.getTime() : rec.startedAt.getTime();
@@ -174,22 +186,24 @@ async function getSessionRecordingStates(
         endMs = Math.max(endMs, latestU.endedAt.getTime());
       }
     }
-    if (endMs <= rec.startedAt.getTime() && chunks.length > 0) {
+    if (endMs <= rec.startedAt.getTime() && chunks > 0) {
       endMs = rec.startedAt.getTime() + 1000;
     }
 
-    states.push({
+    const list = out.get(rec.sessionId) ?? [];
+    list.push({
       recordingId: rec.id,
       playerId: rec.playerId,
       startMs: rec.startedAt.getTime(),
       endMs,
       currentVersionId,
-      chunkCount: chunks.length,
+      chunkCount: chunks,
       effectiveOffsetMs: rec.effectiveOffsetMs,
       deletedRangeCount: rec.deletedRanges.length,
     });
+    out.set(rec.sessionId, list);
   }
-  return states;
+  return out;
 }
 
 function compareRunInput(
@@ -225,6 +239,9 @@ function causesOverlapping(
   return [...byRecording.values()];
 }
 
+type FinishedRun = typeof processingRuns.$inferSelect;
+type RunInput = typeof processingRunInputs.$inferSelect;
+
 /**
  * Derives unprocessed and stale ranges for a Session & purpose per ADR 0001 + ADR 0002.
  */
@@ -234,7 +251,69 @@ export async function deriveSessionWorkRanges(
   sessionId: string,
   purpose: ProcessingRunPurpose,
 ): Promise<WorkRange[]> {
-  const recStates = await getSessionRecordingStates(db, duoId, sessionId);
+  const all = await deriveWorkRangesBySession(db, duoId, [purpose], [sessionId]);
+  return all.get(sessionId)?.[purpose] ?? [];
+}
+
+/**
+ * Work ranges for many Sessions and purposes at once (all of the Duo's Sessions when sessionIds is omitted): the
+ * same derivation as deriveSessionWorkRanges with a fixed number of queries, so pages and the pending-work badge
+ * no longer cost several queries per Session. Sessions without ranges are absent or map to empty lists.
+ */
+export async function deriveWorkRangesBySession<P extends ProcessingRunPurpose>(
+  db: AppDb,
+  duoId: string,
+  purposes: readonly P[],
+  sessionIds: readonly string[] | null = null,
+): Promise<Map<string, Record<P, WorkRange[]>>> {
+  const out = new Map<string, Record<P, WorkRange[]>>();
+  const states = await getRecordingStatesBySession(db, duoId, sessionIds);
+  const activeSessionIds = [...states.keys()];
+  if (activeSessionIds.length === 0 || purposes.length === 0) return out;
+
+  const runs = await db.query.processingRuns.findMany({
+    where: and(
+      eq(processingRuns.duoId, duoId),
+      inArray(processingRuns.sessionId, activeSessionIds),
+      inArray(processingRuns.purpose, [...purposes]),
+      eq(processingRuns.status, "finished"),
+    ),
+    orderBy: [asc(processingRuns.finishedAt), asc(processingRuns.id)],
+  });
+  const inputs =
+    runs.length > 0
+      ? await db.query.processingRunInputs.findMany({
+          where: inArray(
+            processingRunInputs.runId,
+            runs.map((r) => r.id),
+          ),
+        })
+      : [];
+  const inputsByRun = new Map<string, Map<string, RunInput>>();
+  for (const inp of inputs) {
+    const map = inputsByRun.get(inp.runId) ?? new Map();
+    map.set(inp.recordingId, inp);
+    inputsByRun.set(inp.runId, map);
+  }
+
+  for (const [sessionId, recStates] of states) {
+    const entry = {} as Record<P, WorkRange[]>;
+    for (const purpose of purposes) {
+      const finishedRuns = runs.filter((r) => r.sessionId === sessionId && r.purpose === purpose);
+      entry[purpose] = computeWorkRanges(sessionId, purpose, recStates, finishedRuns, inputsByRun);
+    }
+    out.set(sessionId, entry);
+  }
+  return out;
+}
+
+function computeWorkRanges(
+  sessionId: string,
+  purpose: ProcessingRunPurpose,
+  recStates: RecordingCurrentState[],
+  finishedRuns: FinishedRun[],
+  inputsByRun: Map<string, Map<string, RunInput>>,
+): WorkRange[] {
   const activeStates = recStates.filter((r) => r.endMs > r.startMs && r.chunkCount > 0);
   if (activeStates.length === 0) return [];
 
@@ -253,16 +332,6 @@ export async function deriveSessionWorkRanges(
     },
   }));
 
-  const finishedRuns = await db.query.processingRuns.findMany({
-    where: and(
-      eq(processingRuns.duoId, duoId),
-      eq(processingRuns.sessionId, sessionId),
-      eq(processingRuns.purpose, purpose),
-      eq(processingRuns.status, "finished"),
-    ),
-    orderBy: [asc(processingRuns.finishedAt), asc(processingRuns.id)],
-  });
-
   if (finishedRuns.length === 0) {
     return sessionIntervals.map((seg) => ({
       sessionId,
@@ -272,17 +341,6 @@ export async function deriveSessionWorkRanges(
       reason: "unprocessed",
       causes: causesOverlapping(unprocessedEntries, seg),
     }));
-  }
-
-  const runIds = finishedRuns.map((r) => r.id);
-  const allInputs = await db.query.processingRunInputs.findMany({
-    where: inArray(processingRunInputs.runId, runIds),
-  });
-  const inputsByRun = new Map<string, Map<string, typeof allInputs[number]>>();
-  for (const inp of allInputs) {
-    const map = inputsByRun.get(inp.runId) ?? new Map();
-    map.set(inp.recordingId, inp);
-    inputsByRun.set(inp.runId, map);
   }
 
   // Evaluate freshness of each finished run against current Recording states;
@@ -531,7 +589,7 @@ export async function finishProcessingRun(
     throw new DomainError("CONFLICT", `Processing run is already ${run.status}`, 409);
   }
 
-  const states = await getSessionRecordingStates(db, run.duoId, run.sessionId);
+  const states = (await getRecordingStatesBySession(db, run.duoId, [run.sessionId])).get(run.sessionId) ?? [];
   const overlapping = states.filter(
     (rec) =>
       rec.currentVersionId !== null &&

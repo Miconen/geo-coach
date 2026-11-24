@@ -47,6 +47,7 @@ import {
   deriveClaims,
   deriveLearningsWithStatus,
   deriveSessionWorkRanges,
+  deriveWorkRangesBySession,
   getCurrentTranscriptVersionIds,
   listCitedSections,
   listSources,
@@ -528,13 +529,17 @@ export async function buildWorkbenchData(
   >();
   let totalPendingRanges = 0;
 
+  // One batched derivation for every Session (a fixed number of queries, not several per Session).
+  const workBySession = await deriveWorkRangesBySession(
+    db,
+    duoId,
+    ["extract", "tips"] as const,
+    allSessions.map((ses) => ses.id),
+  );
   for (const ses of allSessions) {
-    const [extractWork, tipsWork] = await Promise.all([
-      deriveSessionWorkRanges(db, duoId, ses.id, "extract"),
-      deriveSessionWorkRanges(db, duoId, ses.id, "tips"),
-    ]);
-    workRangesBySession.set(ses.id, { extract: extractWork, tips: tipsWork });
-    totalPendingRanges += extractWork.length;
+    const work = workBySession.get(ses.id) ?? { extract: [], tips: [] };
+    workRangesBySession.set(ses.id, work);
+    totalPendingRanges += work.extract.length;
   }
 
   // Build citation map (Utterance -> current Learning ids)
@@ -663,6 +668,22 @@ export async function buildWorkbenchData(
   // Full windows (#56 1a-derivation): a Round with a missing start links nothing, and a window stops at its own
   // end when the successor's start is missing.
   const windowsByRound = roundWindowsById(allRounds);
+  // Utterances sorted by start, so each window scans only those that could overlap it (start within the longest
+  // Utterance's duration before the window, up to its end) instead of every Utterance; the exact check is unchanged.
+  const byStart = rawUtterances
+    .map((u, index) => ({ u, index, startMs: u.startedAt.getTime() }))
+    .sort((a, b) => a.startMs - b.startMs);
+  const maxDurationMs = rawUtterances.reduce((m, u) => Math.max(m, u.endedAt.getTime() - u.startedAt.getTime()), 0);
+  const firstStartingAtOrAfter = (ms: number) => {
+    let lo = 0;
+    let hi = byStart.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (byStart[mid]!.startMs < ms) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
 
   for (const r of allRounds) {
     const list = roundsByGame.get(r.gameId) ?? [];
@@ -672,11 +693,17 @@ export async function buildWorkbenchData(
     const window = windowsByRound.get(r.id) ?? null;
     const matchingUIds: string[] = [];
     if (window) {
-      for (const u of rawUtterances) {
-        if (intervalsOverlap({ startedAt: u.startedAt, endedAt: u.endedAt }, window.full)) {
-          matchingUIds.push(u.id);
+      const endMs = window.full.endedAt.getTime();
+      const matches: Array<{ id: string; index: number }> = [];
+      for (let i = firstStartingAtOrAfter(window.full.startedAt.getTime() - maxDurationMs); i < byStart.length; i++) {
+        const c = byStart[i]!;
+        if (c.startMs > endMs) break;
+        if (intervalsOverlap({ startedAt: c.u.startedAt, endedAt: c.u.endedAt }, window.full)) {
+          matches.push({ id: c.u.id, index: c.index });
         }
       }
+      // In the Utterances' own order, as before.
+      for (const m of matches.sort((a, b) => a.index - b.index)) matchingUIds.push(m.id);
       roundDateBounds.set(r.id, { start: window.full.startedAt, end: window.full.endedAt });
     }
     roundsById[r.id] = {

@@ -12,6 +12,7 @@ import {
 import type { AppDb } from "../db/index.js";
 import { claimEvidence, claimImages, claims, learnings, sourceImages } from "../db/schema.js";
 import { DomainError, assertPlayerInDuo } from "./recordings.js";
+import { evidenceInDuo, sourceImageInDuo } from "./scope.js";
 
 export interface DerivedEvidence {
   id: string;
@@ -51,10 +52,11 @@ export async function deriveClaims(db: AppDb, duoId: string): Promise<DerivedCla
       where: eq(claims.duoId, duoId),
       orderBy: [asc(claims.createdAt), asc(claims.id)],
     }),
-    db.query.claimEvidence.findMany({
-      where: eq(claimEvidence.duoId, duoId),
-      orderBy: [asc(claimEvidence.createdAt), asc(claimEvidence.id)],
-    }),
+    db
+      .select()
+      .from(claimEvidence)
+      .where(evidenceInDuo(duoId))
+      .orderBy(asc(claimEvidence.createdAt), asc(claimEvidence.id)),
     db
       .select({ id: learnings.id, claimId: learnings.claimId })
       .from(learnings)
@@ -63,7 +65,8 @@ export async function deriveClaims(db: AppDb, duoId: string): Promise<DerivedCla
       .select({ claimId: claimImages.claimId, imageId: claimImages.sourceImageId })
       .from(claimImages)
       .innerJoin(sourceImages, eq(sourceImages.id, claimImages.sourceImageId))
-      .where(eq(sourceImages.duoId, duoId)),
+      .innerJoin(claims, eq(claims.id, claimImages.claimId))
+      .where(and(eq(claims.duoId, duoId), sourceImageInDuo(duoId))),
   ]);
 
   const evidenceByClaim = new Map<string, DerivedEvidence[]>();

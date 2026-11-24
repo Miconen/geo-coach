@@ -15,6 +15,8 @@ import {
   deriveCurrentCallLabels,
   deriveLearningsWithStatus,
   isCallableRound,
+  recordingInDuo,
+  roundInDuo,
   type CurrentCallLabel,
 } from "../services/index.js";
 
@@ -36,12 +38,9 @@ export async function buildStatsPayload(db: AppDb, duoId: string): Promise<Stats
   const callLabels = await deriveCurrentCallLabels(db, duoId);
   const [memberships, allRecordings, allGames, allRounds, derivedLearnings] = await Promise.all([
     db.query.duoMemberships.findMany({ where: eq(duoMemberships.duoId, duoId) }),
-    db.query.recordings.findMany({ where: eq(recordings.duoId, duoId) }),
+    db.select().from(recordings).where(recordingInDuo(duoId)),
     db.query.games.findMany({ where: eq(games.duoId, duoId), orderBy: [asc(games.startedAt)] }),
-    db.query.rounds.findMany({
-      where: eq(rounds.duoId, duoId),
-      orderBy: [asc(rounds.startTime), asc(rounds.roundNumber)],
-    }),
+    db.select().from(rounds).where(roundInDuo(duoId)).orderBy(asc(rounds.startTime), asc(rounds.roundNumber)),
     deriveLearningsWithStatus(db, duoId),
   ]);
 

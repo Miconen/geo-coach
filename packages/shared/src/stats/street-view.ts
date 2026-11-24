@@ -77,7 +77,10 @@ function finite(value: unknown): number | null {
  */
 export function panoViewsByRound(raw: RawDuelPayload): Map<number, PanoView> {
   const views = new Map<number, PanoView>();
-  for (const round of raw.rounds ?? []) {
+  const rounds: unknown = raw?.rounds;
+  if (!Array.isArray(rounds)) return views;
+  for (const round of rounds as NonNullable<RawDuelPayload["rounds"]>) {
+    if (!round || typeof round !== "object") continue;
     const p = round.panorama;
     if (typeof round.roundNumber !== "number" || !p) continue;
     const heading = finite(p.heading);

@@ -26,6 +26,7 @@ import {
 } from "../db/schema.js";
 import { commonEnglishWords } from "./common-english-words.js";
 import { DomainError } from "./recordings.js";
+import { recordingInDuo, roundInDuo, speechInDuo, versionInDuo } from "./scope.js";
 
 const SUGGESTION_RECORDING_LIMIT = 50;
 const SUGGESTION_UTTERANCE_LIMIT = 5000;
@@ -140,11 +141,8 @@ async function currentVersionIds(db: AppDb, duoId: string, recordingIds?: string
     .from(transcriptVersions)
     .where(
       recordingIds
-        ? and(
-            eq(transcriptVersions.duoId, duoId),
-            inArray(transcriptVersions.recordingId, recordingIds),
-          )
-        : eq(transcriptVersions.duoId, duoId),
+        ? and(versionInDuo(duoId), inArray(transcriptVersions.recordingId, recordingIds))
+        : versionInDuo(duoId),
     )
     .orderBy(desc(transcriptVersions.createdAt), desc(transcriptVersions.id));
   const newest = new Map<string, string>();
@@ -268,7 +266,7 @@ export async function loadTranscriptCorrector(
       })
       .from(utteranceEdits)
       .innerJoin(utterances, eq(utterances.id, utteranceEdits.utteranceId))
-      .where(eq(utteranceEdits.duoId, duoId))
+      .where(and(eq(utteranceEdits.duoId, duoId), speechInDuo(duoId)))
       .orderBy(desc(utteranceEdits.createdAt), desc(utteranceEdits.id)),
   ]);
 
@@ -305,11 +303,11 @@ export async function loadTranscriptCorrector(
           guesses: rounds.guesses,
         })
         .from(rounds)
-        .where(eq(rounds.duoId, duoId)),
+        .where(roundInDuo(duoId)),
       db
         .select({ id: recordings.id })
         .from(recordings)
-        .where(and(eq(recordings.duoId, duoId), eq(recordings.isCalibrated, true))),
+        .where(and(recordingInDuo(duoId), eq(recordings.isCalibrated, true))),
     ]);
     roundIndex = buildRoundIndex(roundRows);
     calibrated = new Set(recordingRows.map((r) => r.id));
@@ -441,7 +439,7 @@ export async function applySuggestionOnce(
         transcriptVersionId: utterances.transcriptVersionId,
       })
       .from(utterances)
-      .where(and(inArray(utterances.id, ids), eq(utterances.duoId, input.duoId)))
+      .where(and(inArray(utterances.id, ids), speechInDuo(input.duoId)))
       .orderBy(utterances.id)
       .for("update");
     const current = await currentVersionIds(
@@ -549,10 +547,11 @@ async function utteranceRoundCountries(
 ): Promise<string[]> {
   const span = speechSpanMs(u);
   if (!span) return [];
-  const recording = await db.query.recordings.findFirst({
-    where: and(eq(recordings.id, u.recordingId), eq(recordings.duoId, duoId)),
-    columns: { isCalibrated: true },
-  });
+  const [recording] = await db
+    .select({ isCalibrated: recordings.isCalibrated })
+    .from(recordings)
+    .where(and(eq(recordings.id, u.recordingId), recordingInDuo(duoId)))
+    .limit(1);
   if (!recording?.isCalibrated) return [];
   const roundRows = await db
     .select({
@@ -564,7 +563,7 @@ async function utteranceRoundCountries(
     .from(rounds)
     .where(
       and(
-        eq(rounds.duoId, duoId),
+        roundInDuo(duoId),
         lt(rounds.startTime, new Date(span.lastMs + ROUND_BOUNDARY_MARGIN_MS)),
         gt(rounds.resultsEndTime, new Date(span.firstMs - ROUND_BOUNDARY_MARGIN_MS)),
       ),
@@ -585,9 +584,11 @@ export async function fixUtterance(
     countryCode?: string | null;
   },
 ) {
-  const row = await db.query.utterances.findFirst({
-    where: and(eq(utterances.id, input.utteranceId), eq(utterances.duoId, input.duoId)),
-  });
+  const [row] = await db
+    .select()
+    .from(utterances)
+    .where(and(eq(utterances.id, input.utteranceId), speechInDuo(input.duoId)))
+    .limit(1);
   if (!row) throw new DomainError("NOT_FOUND", "Utterance not found", 404);
   const current = await currentVersionIds(db, input.duoId, [row.recordingId]);
   if (!current.has(row.transcriptVersionId)) {
@@ -710,7 +711,7 @@ export async function listUtteranceEdits(
       })
       .from(utteranceEdits)
       .innerJoin(utterances, eq(utterances.id, utteranceEdits.utteranceId))
-      .where(eq(utteranceEdits.duoId, duoId))
+      .where(and(eq(utteranceEdits.duoId, duoId), speechInDuo(duoId)))
       .orderBy(desc(utteranceEdits.createdAt), desc(utteranceEdits.id)),
     currentVersionIds(db, duoId),
   ]);
@@ -732,7 +733,7 @@ export async function listTranscriptSuggestions(
   const recs = await db
     .select({ id: recordings.id })
     .from(recordings)
-    .where(and(eq(recordings.duoId, duoId), eq(recordings.isCalibrated, true)))
+    .where(and(recordingInDuo(duoId), eq(recordings.isCalibrated, true)))
     .orderBy(desc(recordings.startedAt))
     .limit(SUGGESTION_RECORDING_LIMIT);
   if (recs.length === 0) return [];
@@ -755,7 +756,7 @@ export async function listTranscriptSuggestions(
       endedAt: utterances.endedAt,
     })
     .from(utterances)
-    .where(inArray(utterances.transcriptVersionId, [...versions]))
+    .where(and(inArray(utterances.transcriptVersionId, [...versions]), speechInDuo(duoId)))
     .orderBy(desc(utterances.startedAt))
     .limit(SUGGESTION_UTTERANCE_LIMIT);
 
@@ -780,7 +781,7 @@ export async function listTranscriptSuggestions(
       .from(rounds)
       .where(
         and(
-          eq(rounds.duoId, duoId),
+          roundInDuo(duoId),
           lt(rounds.startTime, new Date(latest + ROUND_BOUNDARY_MARGIN_MS)),
           gt(rounds.resultsEndTime, new Date(earliest - ROUND_BOUNDARY_MARGIN_MS)),
         ),

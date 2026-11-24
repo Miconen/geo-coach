@@ -52,7 +52,11 @@ async function assertSessionNotRecording(db: AppDb, duoId: string, sessionId: st
     .flatMap((s) => (s.recording && s.recordingId ? [s.recordingId] : []));
   if (liveIds.length === 0) return;
   const live = await db.query.recordings.findFirst({
-    where: and(eq(recordings.sessionId, sessionId), inArray(recordings.id, liveIds)),
+    where: and(
+      eq(recordings.sessionId, sessionId),
+      eq(recordings.duoId, duoId),
+      inArray(recordings.id, liveIds),
+    ),
   });
   if (live) {
     throw new DomainError(

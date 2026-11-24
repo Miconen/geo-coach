@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import {
   PLAIN_COUNTRY,
   SESSION_GAP_MS,
@@ -43,6 +43,9 @@ import {
   loadTranscriptCorrector,
   type WorkRange,
   type WorkRangeCause,
+  recordingInDuo,
+  roundInDuo,
+  speechInDuo,
 } from "../services/index.js";
 import {
   isProcessorOnline,
@@ -373,18 +376,12 @@ export async function buildWorkbenchData(
         where: eq(sessions.duoId, duoId),
         orderBy: [desc(sessions.createdAt)],
       }),
-      db.query.recordings.findMany({
-        where: eq(recordings.duoId, duoId),
-        orderBy: [asc(recordings.startedAt)],
-      }),
+      db.select().from(recordings).where(recordingInDuo(duoId)).orderBy(asc(recordings.startedAt)),
       db.query.games.findMany({
         where: eq(games.duoId, duoId),
         orderBy: [desc(games.startedAt)],
       }),
-      db.query.rounds.findMany({
-        where: eq(rounds.duoId, duoId),
-        orderBy: [asc(rounds.startTime)],
-      }),
+      db.select().from(rounds).where(roundInDuo(duoId)).orderBy(asc(rounds.startTime)),
       db.query.replays.findMany({ where: eq(replays.duoId, duoId) }),
       deriveLearningsWithStatus(db, duoId),
       deriveClaims(db, duoId),
@@ -426,10 +423,11 @@ export async function buildWorkbenchData(
 
   const rawUtterances =
     currentVersionIds.length > 0
-      ? await db.query.utterances.findMany({
-          where: inArray(utterances.transcriptVersionId, currentVersionIds),
-          orderBy: [asc(utterances.startedAt), asc(utterances.id)],
-        })
+      ? await db
+          .select()
+          .from(utterances)
+          .where(and(inArray(utterances.transcriptVersionId, currentVersionIds), speechInDuo(duoId)))
+          .orderBy(asc(utterances.startedAt), asc(utterances.id))
       : [];
 
   // Derive work ranges per Session for both purposes

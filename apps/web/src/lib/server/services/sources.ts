@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { and, asc, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { uuidv7, type SourceKind } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
 import {
@@ -13,6 +13,7 @@ import {
   sources,
 } from "../db/schema.js";
 import { DomainError, assertPlayerInDuo } from "./recordings.js";
+import { evidenceInDuo, sourceImageInDuo, sourceVersionInDuo } from "./scope.js";
 
 export const MAX_SOURCE_MARKDOWN_CHARS = 1_000_000;
 export const MAX_SOURCE_IMAGE_BYTES = Number(process.env.SOURCE_IMAGE_MAX_BYTES ?? 2 * 1024 * 1024);
@@ -246,12 +247,13 @@ export async function addSourceVersion(
     sections: sections.map((s) => ({ anchor: s.anchor, heading: s.heading, level: s.level })),
     imagesToUpload: referencedImageNames(input.markdown),
     claimsToRecheck:
-      versionNo > 1 ? await findClaimsToRecheck(db, sourceId, sourceVersionId, sections) : [],
+      versionNo > 1 ? await findClaimsToRecheck(db, input.duoId, sourceId, sourceVersionId, sections) : [],
   };
 }
 
 async function findClaimsToRecheck(
   db: AppDb,
+  duoId: string,
   sourceId: string,
   newVersionId: string,
   newSections: SourceSectionDraft[],
@@ -278,7 +280,7 @@ async function findClaimsToRecheck(
         eq(sourceSections.anchor, claimEvidence.sectionAnchor),
       ),
     )
-    .where(inArray(claimEvidence.sourceVersionId, [...versionNoById.keys()]));
+    .where(and(inArray(claimEvidence.sourceVersionId, [...versionNoById.keys()]), evidenceInDuo(duoId)));
 
   // Only each Claim's latest citation of this Source counts: one re-checked on v2 isn't flagged by v1
   const latestByClaim = new Map<string, number>();
@@ -362,7 +364,19 @@ export async function readSourceImageForPlayer(
   playerId: string,
   imageId: string,
 ): Promise<{ bytes: Buffer; mimeType: string; sha256: string }> {
-  const image = await db.query.sourceImages.findFirst({ where: eq(sourceImages.id, imageId) });
+  // The image, its version and the version's Source must share one Duo (X6).
+  const [image] = await db
+    .select()
+    .from(sourceImages)
+    .where(
+      and(
+        eq(sourceImages.id, imageId),
+        sql`exists (select 1 from ${sourceVersions} v join ${sources} so on so.id = v.source_id
+          where v.id = ${sourceImages.sourceVersionId} and v.duo_id = ${sourceImages.duoId}
+            and so.duo_id = ${sourceImages.duoId})`,
+      ),
+    )
+    .limit(1);
   if (!image) throw new DomainError("NOT_FOUND", "Image not found", 404);
   try {
     await assertPlayerInDuo(db, playerId, image.duoId);
@@ -437,10 +451,16 @@ export interface SourceSummary {
 export async function listSources(db: AppDb, duoId: string): Promise<SourceSummary[]> {
   const [rows, versions] = await Promise.all([
     db.query.sources.findMany({ where: eq(sources.duoId, duoId), orderBy: [asc(sources.createdAt)] }),
-    db.query.sourceVersions.findMany({
-      where: eq(sourceVersions.duoId, duoId),
-      orderBy: [asc(sourceVersions.versionNo)],
-    }),
+    db
+      .select({
+        id: sourceVersions.id,
+        sourceId: sourceVersions.sourceId,
+        versionNo: sourceVersions.versionNo,
+        createdAt: sourceVersions.createdAt,
+      })
+      .from(sourceVersions)
+      .where(sourceVersionInDuo(duoId))
+      .orderBy(asc(sourceVersions.versionNo)),
   ]);
   if (rows.length === 0) return [];
   const versionIds = versions.map((v) => v.id);
@@ -452,7 +472,7 @@ export async function listSources(db: AppDb, duoId: string): Promise<SourceSumma
     db
       .select({ versionId: sourceImages.sourceVersionId })
       .from(sourceImages)
-      .where(inArray(sourceImages.sourceVersionId, versionIds)),
+      .where(and(inArray(sourceImages.sourceVersionId, versionIds), sourceImageInDuo(duoId))),
   ]);
   const count = (list: Array<{ versionId: string }>) => {
     const m = new Map<string, number>();
@@ -509,6 +529,13 @@ export async function listCitedSections(db: AppDb, duoId: string): Promise<Cited
     )
     .innerJoin(sourceVersions, eq(sourceVersions.id, sourceSections.sourceVersionId))
     .innerJoin(sources, eq(sources.id, sourceVersions.sourceId))
-    .where(and(eq(claimEvidence.duoId, duoId), eq(claimEvidence.kind, "documentation")));
+    .where(
+      and(
+        evidenceInDuo(duoId),
+        eq(claimEvidence.kind, "documentation"),
+        eq(sources.duoId, duoId),
+        eq(sourceVersions.duoId, duoId),
+      ),
+    );
   return rows;
 }

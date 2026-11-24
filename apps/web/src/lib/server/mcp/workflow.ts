@@ -32,6 +32,10 @@ import {
 } from "../db/schema.js";
 import {
   DomainError,
+  findScopedRun,
+  recordingInDuo,
+  roundInDuo,
+  speechInDuo,
   addSourceImage,
   addSourceVersion,
   deriveClaims,
@@ -121,9 +125,10 @@ async function loadCurrentSessionUtterances(
   startUtc: Date,
   endUtc: Date,
 ) {
-  const recs = await db.query.recordings.findMany({
-    where: and(eq(recordings.duoId, duoId), eq(recordings.sessionId, sessionId)),
-  });
+  const recs = await db
+    .select()
+    .from(recordings)
+    .where(and(recordingInDuo(duoId), eq(recordings.sessionId, sessionId)));
   const currentVersionIds: string[] = [];
   for (const r of recs) {
     const tvId = await getCurrentTranscriptVersionId(db, r.id);
@@ -134,6 +139,7 @@ async function loadCurrentSessionUtterances(
   return db.query.utterances.findMany({
     where: and(
       inArray(utterances.transcriptVersionId, currentVersionIds),
+      speechInDuo(duoId),
       lt(utterances.startedAt, endUtc),
       gt(utterances.endedAt, startUtc),
     ),
@@ -315,9 +321,7 @@ async function getRunInRangeUtterances(
 }
 
 export async function mcpReadRange(db: AppDb, playerId: string, runId: string) {
-  const run = await db.query.processingRuns.findFirst({
-    where: eq(processingRuns.id, runId),
-  });
+  const run = await findScopedRun(db, runId);
   if (!run) {
     throw new DomainError("NOT_FOUND", "Processing run not found", 404);
   }
@@ -541,8 +545,7 @@ export async function mcpAddClaims(
   let duoId: string;
   if (input.runId) {
     run =
-      (await db.query.processingRuns.findFirst({ where: eq(processingRuns.id, input.runId) })) ??
-      null;
+      await findScopedRun(db, input.runId);
     if (!run) throw new DomainError("NOT_FOUND", "Processing run not found", 404);
     await resolveDuoForPlayer(db, playerId, run.duoId);
     if (run.status !== "open") {
@@ -758,9 +761,7 @@ export async function mcpAddLearnings(
   runId: string,
   rawItems: unknown[],
 ) {
-  const run = await db.query.processingRuns.findFirst({
-    where: eq(processingRuns.id, runId),
-  });
+  const run = await findScopedRun(db, runId);
   if (!run) {
     throw new DomainError("NOT_FOUND", "Processing run not found", 404);
   }
@@ -780,7 +781,7 @@ export async function mcpAddLearnings(
   const duoRounds = await db
     .select({ id: rounds.id })
     .from(rounds)
-    .where(eq(rounds.duoId, run.duoId));
+    .where(roundInDuo(run.duoId));
   const validDuoRoundIds = new Set(duoRounds.map((r) => r.id));
   const parsedItems = rawItems.map((raw) => learningItemInputSchema.safeParse(raw));
   const linkableClaimIds = await duoClaimIds(
@@ -871,9 +872,7 @@ export async function mcpAddLearnings(
 }
 
 export async function mcpFinishRun(db: AppDb, playerId: string, runId: string) {
-  const run = await db.query.processingRuns.findFirst({
-    where: eq(processingRuns.id, runId),
-  });
+  const run = await findScopedRun(db, runId);
   if (!run) {
     throw new DomainError("NOT_FOUND", "Processing run not found", 404);
   }
@@ -890,7 +889,7 @@ type RoundRow = typeof rounds.$inferSelect;
 async function loadRunRounds(db: AppDb, run: RunRow): Promise<RoundRow[]> {
   return db.query.rounds.findMany({
     where: and(
-      eq(rounds.duoId, run.duoId),
+      roundInDuo(run.duoId),
       lt(rounds.startTime, run.rangeEnd),
       gt(rounds.resultsEndTime, run.rangeStart),
     ),
@@ -902,7 +901,7 @@ async function loadRunRounds(db: AppDb, run: RunRow): Promise<RoundRow[]> {
 async function loadRunRangeRounds(db: AppDb, run: RunRow): Promise<RoundRow[]> {
   const candidates = await db.query.rounds.findMany({
     where: and(
-      eq(rounds.duoId, run.duoId),
+      roundInDuo(run.duoId),
       lt(rounds.startTime, run.rangeEnd),
       gt(rounds.endTime, run.rangeStart),
     ),
@@ -1015,9 +1014,7 @@ export async function mcpAddCallLabels(
   runId: string,
   rawItems: unknown[],
 ) {
-  const run = await db.query.processingRuns.findFirst({
-    where: eq(processingRuns.id, runId),
-  });
+  const run = await findScopedRun(db, runId);
   if (!run) {
     throw new DomainError("NOT_FOUND", "Processing run not found", 404);
   }

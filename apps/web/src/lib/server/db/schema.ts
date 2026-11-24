@@ -482,7 +482,10 @@ export const learningUtterances = pgTable(
       .notNull()
       .references(() => utterances.id, { onDelete: "cascade" }),
   },
-  (table) => [primaryKey({ columns: [table.learningId, table.utteranceId] })],
+  (table) => [
+    primaryKey({ columns: [table.learningId, table.utteranceId] }),
+    index("learning_utterances_utterance_idx").on(table.utteranceId),
+  ],
 );
 
 export const learningRounds = pgTable(
@@ -495,7 +498,10 @@ export const learningRounds = pgTable(
       .notNull()
       .references(() => rounds.id, { onDelete: "cascade" }),
   },
-  (table) => [primaryKey({ columns: [table.learningId, table.roundId] })],
+  (table) => [
+    primaryKey({ columns: [table.learningId, table.roundId] }),
+    index("learning_rounds_round_idx").on(table.roundId),
+  ],
 );
 
 export const learningReactions = pgTable(
@@ -552,7 +558,10 @@ export const callLabelUtterances = pgTable(
       .notNull()
       .references(() => utterances.id, { onDelete: "cascade" }),
   },
-  (table) => [primaryKey({ columns: [table.callLabelId, table.utteranceId] })],
+  (table) => [
+    primaryKey({ columns: [table.callLabelId, table.utteranceId] }),
+    index("call_label_utterances_utterance_idx").on(table.utteranceId),
+  ],
 );
 
 /**
@@ -577,7 +586,10 @@ export const claims = pgTable(
     topics: jsonb("topics").$type<string[]>().notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("claims_duo_idx").on(table.duoId, table.createdAt)],
+  (table) => [
+    index("claims_duo_idx").on(table.duoId, table.createdAt),
+    index("claims_run_idx").on(table.runId),
+  ],
 );
 
 /**
@@ -610,6 +622,8 @@ export const claimEvidence = pgTable(
   (table) => [
     index("claim_evidence_claim_idx").on(table.claimId),
     index("claim_evidence_duo_idx").on(table.duoId),
+    index("claim_evidence_round_idx").on(table.roundId),
+    index("claim_evidence_run_idx").on(table.runId),
     uniqueIndex("claim_evidence_claim_round_uidx").on(table.claimId, table.roundId),
     uniqueIndex("claim_evidence_claim_player_uidx").on(table.claimId, table.playerId),
     uniqueIndex("claim_evidence_claim_section_uidx").on(
@@ -750,6 +764,7 @@ export const processingJobs = pgTable(
   },
   (table) => [
     index("processing_jobs_status_created_idx").on(table.status, table.createdAt),
+    index("processing_jobs_run_idx").on(table.runId),
     index("processing_jobs_session_idx").on(table.duoId, table.sessionId, table.purpose, table.status),
     uniqueIndex("processing_jobs_token_uidx").on(table.tokenHash),
   ],

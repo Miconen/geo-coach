@@ -28,6 +28,9 @@ import {
   assertPlayerInDuo,
   getCurrentTranscriptVersionId,
 } from "./recordings.js";
+import { recordingInDuo, roundInDuo, runInDuo, speechInDuo } from "./scope.js";
+import { isUuid } from "$lib/uuid.js";
+import { rounds, sessions } from "../db/schema.js";
 
 /** Clock estimates wobble by a few ms; only a shift that could move speech between Rounds counts. */
 const STALE_CLOCK_TOLERANCE_MS = 250;
@@ -133,16 +136,20 @@ async function getSessionRecordingStates(
   sessionId: string,
 ): Promise<RecordingCurrentState[]> {
   const recs = await db.query.recordings.findMany({
-    where: and(eq(recordings.duoId, duoId), eq(recordings.sessionId, sessionId)),
+    where: and(recordingInDuo(duoId), eq(recordings.sessionId, sessionId)),
     orderBy: [asc(recordings.startedAt)],
   });
 
   const states: RecordingCurrentState[] = [];
   for (const rec of recs) {
     const currentVersionId = await getCurrentTranscriptVersionId(db, rec.id);
+    // A chunk counts only when it belongs to the version's own Recording.
     const chunks = currentVersionId
       ? await db.query.transcriptChunks.findMany({
-          where: eq(transcriptChunks.transcriptVersionId, currentVersionId),
+          where: and(
+            eq(transcriptChunks.transcriptVersionId, currentVersionId),
+            eq(transcriptChunks.recordingId, rec.id),
+          ),
         })
       : [];
 
@@ -150,7 +157,7 @@ async function getSessionRecordingStates(
     let endMs = rec.stoppedAt ? rec.stoppedAt.getTime() : rec.startedAt.getTime();
     if (!rec.stoppedAt && currentVersionId) {
       const latestU = await db.query.utterances.findFirst({
-        where: eq(utterances.transcriptVersionId, currentVersionId),
+        where: and(eq(utterances.transcriptVersionId, currentVersionId), speechInDuo(duoId)),
         orderBy: [desc(utterances.endedAt)],
       });
       if (latestU) {
@@ -368,6 +375,12 @@ export async function startProcessingRun(
   },
 ) {
   await assertPlayerInDuo(db, input.startedByPlayerId, input.duoId);
+  const session = await db.query.sessions.findFirst({
+    where: and(eq(sessions.id, input.sessionId), eq(sessions.duoId, input.duoId)),
+  });
+  if (!session) {
+    throw new DomainError("NOT_FOUND", "Session not found", 404);
+  }
   if (input.rangeEnd.getTime() <= input.rangeStart.getTime()) {
     throw new DomainError("INVALID_RANGE", "rangeEnd must be after rangeStart", 400);
   }
@@ -558,12 +571,29 @@ export async function createManualLearning(
 ): Promise<string> {
   await assertPlayerInDuo(db, playerId, input.duoId);
 
+  for (const id of [...input.utteranceIds, ...input.roundIds]) {
+    if (!isUuid(id)) throw new DomainError("INVALID_ID", "Invalid Utterance or Round id", 400);
+  }
+  // Every cited Round must pass the Round/Game check; a missing or foreign one is a 404, never dropped.
+  if (input.roundIds.length > 0) {
+    const found = await db
+      .select({ id: rounds.id })
+      .from(rounds)
+      .where(and(inArray(rounds.id, input.roundIds), roundInDuo(input.duoId)));
+    if (new Set(found.map((r) => r.id)).size !== new Set(input.roundIds).size) {
+      throw new DomainError("NOT_FOUND", "Round not found", 404);
+    }
+  }
+
   let sourceSpanStart: Date | null = null;
   let sourceSpanEnd: Date | null = null;
   if (input.utteranceIds.length > 0) {
     const us = await db.query.utterances.findMany({
-      where: inArray(utterances.id, input.utteranceIds),
+      where: and(inArray(utterances.id, input.utteranceIds), speechInDuo(input.duoId)),
     });
+    if (new Set(us.map((u) => u.id)).size !== new Set(input.utteranceIds).size) {
+      throw new DomainError("NOT_FOUND", "Utterance not found", 404);
+    }
     for (const u of us) {
       if (!sourceSpanStart || u.startedAt < sourceSpanStart) sourceSpanStart = u.startedAt;
       if (!sourceSpanEnd || u.endedAt > sourceSpanEnd) sourceSpanEnd = u.endedAt;
@@ -679,21 +709,45 @@ export async function deriveLearningsWithStatus(
   db: AppDb,
   duoId: string,
 ): Promise<DerivedLearningRecord[]> {
-  const [allLearnings, allRuns, allULinks, allRLinks, allReactions] = await Promise.all([
+  // Link and reaction rows are read through this Duo's Learnings, and Utterance/Round links also through the
+  // speech and Round/Game checks, so cross-Duo rows never attach.
+  const [allLearningsRaw, allRuns, allULinks, allRLinks, allReactions] = await Promise.all([
     db.query.learnings.findMany({
       where: eq(learnings.duoId, duoId),
       orderBy: [desc(learnings.createdAt)],
     }),
     db.query.processingRuns.findMany({
-      where: eq(processingRuns.duoId, duoId),
+      where: runInDuo(duoId),
       orderBy: [asc(processingRuns.finishedAt), asc(processingRuns.id)],
     }),
-    db.query.learningUtterances.findMany(),
-    db.query.learningRounds.findMany(),
-    db.query.learningReactions.findMany(),
+    db
+      .select({ learningId: learningUtterances.learningId, utteranceId: learningUtterances.utteranceId })
+      .from(learningUtterances)
+      .innerJoin(learnings, eq(learnings.id, learningUtterances.learningId))
+      .innerJoin(utterances, eq(utterances.id, learningUtterances.utteranceId))
+      .where(and(eq(learnings.duoId, duoId), speechInDuo(duoId))),
+    db
+      .select({ learningId: learningRounds.learningId, roundId: learningRounds.roundId })
+      .from(learningRounds)
+      .innerJoin(learnings, eq(learnings.id, learningRounds.learningId))
+      .innerJoin(rounds, eq(rounds.id, learningRounds.roundId))
+      .where(and(eq(learnings.duoId, duoId), roundInDuo(duoId))),
+    db
+      .select({
+        learningId: learningReactions.learningId,
+        playerId: learningReactions.playerId,
+        reaction: learningReactions.reaction,
+        createdAt: learningReactions.createdAt,
+      })
+      .from(learningReactions)
+      .innerJoin(learnings, eq(learnings.id, learningReactions.learningId))
+      .where(eq(learnings.duoId, duoId)),
   ]);
 
   const runById = new Map(allRuns.map((r) => [r.id, r]));
+  // Run ownership: a Learning whose run fails the run-to-Session check is excluded everywhere;
+  // run-less Manual Learnings survive.
+  const allLearnings = allLearningsRaw.filter((l) => l.runId === null || runById.has(l.runId));
   const finishedRuns = allRuns.filter((r) => r.status === "finished" && r.finishedAt !== null);
 
   const uByLearning = new Map<string, string[]>();

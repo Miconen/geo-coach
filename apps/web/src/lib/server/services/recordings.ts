@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, isNull, lt } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import {
   SESSION_GAP_MS,
   computeRecordingOffsetMs,
@@ -23,6 +23,7 @@ import {
   transcriptVersions,
   utterances,
 } from "../db/schema.js";
+import { recordingInDuo, speechInDuo } from "./scope.js";
 
 export class DomainError extends Error {
   constructor(
@@ -57,8 +58,9 @@ async function resolveOrCreateSession(
   duoId: string,
   startedAt: Date,
 ): Promise<string> {
+  // Only Recordings whose Session belongs to this Duo can lend their Session (Recording-to-Session check).
   const existing = await db.query.recordings.findMany({
-    where: eq(recordings.duoId, duoId),
+    where: recordingInDuo(duoId),
     orderBy: [desc(recordings.startedAt)],
   });
 
@@ -378,8 +380,14 @@ export async function getCurrentTranscriptVersionId(
   db: AppDb,
   recordingId: string,
 ): Promise<string | null> {
+  // Elect only on the verified chain: the version, its Recording and that Recording's Session share one Duo.
   const versions = await db.query.transcriptVersions.findMany({
-    where: eq(transcriptVersions.recordingId, recordingId),
+    where: and(
+      eq(transcriptVersions.recordingId, recordingId),
+      sql`exists (select 1 from ${recordings} r join ${sessions} s on s.id = r.session_id
+        where r.id = ${transcriptVersions.recordingId} and r.duo_id = ${transcriptVersions.duoId}
+          and s.duo_id = ${transcriptVersions.duoId})`,
+    ),
     orderBy: [desc(transcriptVersions.createdAt), desc(transcriptVersions.id)],
   });
   if (versions.length === 0) return null;
@@ -414,7 +422,7 @@ async function recomputeRecordingOffsetAndUtterances(
 
   // Recompute derived UTC timestamps on all Utterances for this Recording
   const recUtterances = await db.query.utterances.findMany({
-    where: eq(utterances.recordingId, recordingId),
+    where: and(eq(utterances.recordingId, recordingId), speechInDuo(rec.duoId)),
   });
 
   for (const u of recUtterances) {
@@ -493,9 +501,12 @@ export async function deleteOwnSpeechRange(
   duoId: string,
   input: { recordingId: string; startUtc: Date; endUtc: Date },
 ): Promise<{ deletedUtteranceCount: number; deletedLearningCount: number }> {
-  const rec = await db.query.recordings.findFirst({
-    where: and(eq(recordings.id, input.recordingId), eq(recordings.duoId, duoId)),
-  });
+  await assertPlayerInDuo(db, playerId, duoId);
+  const [rec] = await db
+    .select()
+    .from(recordings)
+    .where(and(eq(recordings.id, input.recordingId), recordingInDuo(duoId)))
+    .limit(1);
   if (!rec) {
     throw new DomainError("NOT_FOUND", "Recording not found", 404);
   }
@@ -507,6 +518,7 @@ export async function deleteOwnSpeechRange(
   const toDelete = await db.query.utterances.findMany({
     where: and(
       eq(utterances.recordingId, rec.id),
+      speechInDuo(duoId),
       lt(utterances.startedAt, input.endUtc),
       gt(utterances.endedAt, input.startUtc),
     ),
@@ -519,7 +531,21 @@ export async function deleteOwnSpeechRange(
   const deletedIds = new Set(toDelete.map((u) => u.id));
 
   // Find Learnings referencing any of these Utterances before cascade-deleting them
-  const allLinks = await db.query.learningUtterances.findMany();
+  // Only this Duo's Learnings, and only the links of Learnings that cite a deleted Utterance.
+  const touched = await db
+    .selectDistinct({ learningId: learningUtterances.learningId })
+    .from(learningUtterances)
+    .innerJoin(learnings, eq(learnings.id, learningUtterances.learningId))
+    .where(and(eq(learnings.duoId, duoId), inArray(learningUtterances.utteranceId, [...deletedIds])));
+  const allLinks =
+    touched.length === 0
+      ? []
+      : await db.query.learningUtterances.findMany({
+          where: inArray(
+            learningUtterances.learningId,
+            touched.map((t) => t.learningId),
+          ),
+        });
   const learningToUtterances = new Map<string, Set<string>>();
   for (const link of allLinks) {
     const set = learningToUtterances.get(link.learningId) ?? new Set<string>();
@@ -548,7 +574,7 @@ export async function deleteOwnSpeechRange(
   }
 
   for (const lId of learningsToDelete) {
-    await db.delete(learnings).where(eq(learnings.id, lId));
+    await db.delete(learnings).where(and(eq(learnings.id, lId), eq(learnings.duoId, duoId)));
   }
 
   const nextDeletedRanges = [

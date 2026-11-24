@@ -6,6 +6,7 @@ import {
   panoFieldOfView,
   panoStreetViewUrl,
   panoViewsByRound,
+  type RawDuelPayload,
 } from "../index.js";
 
 // "tcJQ" hex-encoded, as GeoGuessr stores Google's pano ids.
@@ -100,5 +101,12 @@ describe("panoViewsByRound", () => {
 
   it("is empty for a duel without Rounds", () => {
     expect(panoViewsByRound({}).size).toBe(0);
+  });
+
+  it("is empty when a stored payload has non-array rounds", () => {
+    for (const rounds of [{ 1: { roundNumber: 1 } }, "rounds", 3, null]) {
+      expect(panoViewsByRound({ rounds } as unknown as RawDuelPayload).size).toBe(0);
+    }
+    expect(panoViewsByRound(null as unknown as RawDuelPayload).size).toBe(0);
   });
 });

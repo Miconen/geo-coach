@@ -1,7 +1,8 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { hedgeKind, intervalsOverlap, isCallableHedge, uuidv7, type DerivedGuess } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
-import { callLabelUtterances, callLabels, processingRuns, rounds } from "../db/schema.js";
+import { callLabelUtterances, callLabels, processingRuns, rounds, utterances } from "../db/schema.js";
+import { roundInDuo, runInDuo, speechInDuo } from "./scope.js";
 
 type RoundRow = typeof rounds.$inferSelect;
 
@@ -64,37 +65,41 @@ export interface CurrentCallLabel {
   utteranceIds: string[];
 }
 
+export interface CallLabelHistoryEntry extends CurrentCallLabel {
+  sessionId: string;
+  runFinishedAt: Date | null;
+  /** current: in effect for its Session; superseded: a later finished calls run in the same Session covers
+   * the Round's guessing phase; draft: its run is open or abandoned. */
+  status: "current" | "superseded" | "draft";
+  supersededByRunId: string | null;
+}
+
 /**
- * The Call labels in effect for a Duo, one per Round at most (ADR 0001, 0002).
- * A label counts once its run finishes, until a later finished `calls` run in
- * the same Session covers the Round's guessing phase, whether or not that run
- * labelled the Round again.
+ * Per-Session Call label history (plan #56, 0b): every label of this Duo with its status inside its own
+ * Session. A label counts once its run finishes, until a later finished `calls` run in the same Session
+ * covers the Round's guessing phase, whether or not that run labelled the Round again (ADR 0001, 0002).
+ * Another Session's labels never supersede it.
  */
-export async function deriveCurrentCallLabels(
-  db: AppDb,
-  duoId: string,
-): Promise<Map<string, CurrentCallLabel>> {
-  const [labels, callRuns] = await Promise.all([
+export async function deriveCallLabelHistory(db: AppDb, duoId: string): Promise<CallLabelHistoryEntry[]> {
+  const [labels, callRunsAll] = await Promise.all([
     db.query.callLabels.findMany({ where: eq(callLabels.duoId, duoId) }),
     db.query.processingRuns.findMany({
-      where: and(
-        eq(processingRuns.duoId, duoId),
-        eq(processingRuns.purpose, "calls"),
-        eq(processingRuns.status, "finished"),
-      ),
+      where: and(runInDuo(duoId), eq(processingRuns.purpose, "calls")),
     }),
   ]);
-  const current = new Map<string, CurrentCallLabel>();
-  if (labels.length === 0) return current;
+  if (labels.length === 0) return [];
 
-  const runById = new Map(callRuns.map((r) => [r.id, r]));
+  const runById = new Map(callRunsAll.map((r) => [r.id, r]));
+  const callRuns = callRunsAll.filter((r) => r.status === "finished" && r.finishedAt !== null);
   const roundIds = [...new Set(labels.map((l) => l.roundId))];
   const labelIds = labels.map((l) => l.id);
   const [labelRounds, links] = await Promise.all([
-    db.query.rounds.findMany({ where: inArray(rounds.id, roundIds) }),
-    db.query.callLabelUtterances.findMany({
-      where: inArray(callLabelUtterances.callLabelId, labelIds),
-    }),
+    db.query.rounds.findMany({ where: and(inArray(rounds.id, roundIds), roundInDuo(duoId)) }),
+    db
+      .select({ callLabelId: callLabelUtterances.callLabelId, utteranceId: callLabelUtterances.utteranceId })
+      .from(callLabelUtterances)
+      .innerJoin(utterances, eq(utterances.id, callLabelUtterances.utteranceId))
+      .where(and(inArray(callLabelUtterances.callLabelId, labelIds), speechInDuo(duoId))),
   ]);
   const roundById = new Map(labelRounds.map((r) => [r.id, r]));
   const utterancesByLabel = new Map<string, string[]>();
@@ -110,28 +115,80 @@ export async function deriveCurrentCallLabels(
     return aMs > bMs || (aMs === bMs && a.id > b.id);
   };
 
+  const out: CallLabelHistoryEntry[] = [];
   for (const label of labels) {
     const run = runById.get(label.runId);
     const round = roundById.get(label.roundId);
-    if (!run || !run.finishedAt || !round) continue;
-    const guessing = roundGuessingInterval(round);
-    const replaced = callRuns.some(
-      (other) =>
-        other.id !== run.id &&
-        other.finishedAt !== null &&
-        other.sessionId === run.sessionId &&
-        isLater(other, run) &&
-        intervalsOverlap(guessing, { startedAt: other.rangeStart, endedAt: other.rangeEnd }),
-    );
-    if (replaced) continue;
-    current.set(label.roundId, {
+    // A label whose run fails the run-to-Session check, or whose Round fails the Round/Game check, is dropped.
+    if (!run || !round) continue;
+    let status: CallLabelHistoryEntry["status"] = "current";
+    let supersededByRunId: string | null = null;
+    if (run.status !== "finished" || !run.finishedAt) {
+      status = "draft";
+    } else {
+      const guessing = roundGuessingInterval(round);
+      const replacer = callRuns
+        .filter(
+          (other) =>
+            other.id !== run.id &&
+            other.sessionId === run.sessionId &&
+            isLater(other, run) &&
+            intervalsOverlap(guessing, { startedAt: other.rangeStart, endedAt: other.rangeEnd }),
+        )
+        .sort((a, b) => (isLater(a, b) ? 1 : -1))[0];
+      if (replacer) {
+        status = "superseded";
+        supersededByRunId = replacer.id;
+      }
+    }
+    out.push({
       id: label.id,
       runId: label.runId,
       roundId: label.roundId,
       called: label.called,
       note: label.note,
       utteranceIds: utterancesByLabel.get(label.id) ?? [],
+      sessionId: run.sessionId,
+      runFinishedAt: run.finishedAt,
+      status,
+      supersededByRunId,
     });
   }
-  return current;
+  return out;
+}
+
+/**
+ * The Call labels in effect for a Duo, one per Round at most: the Stats/MCP projection of the per-Session
+ * history. Where two Sessions both have a current label for one Round, the winner is the label whose run
+ * finished latest, then the higher run id. The projection never feeds back into the history.
+ */
+export async function deriveCurrentCallLabels(
+  db: AppDb,
+  duoId: string,
+): Promise<Map<string, CurrentCallLabel>> {
+  const history = await deriveCallLabelHistory(db, duoId);
+  const current = new Map<string, CallLabelHistoryEntry>();
+  for (const label of history) {
+    if (label.status !== "current") continue;
+    const held = current.get(label.roundId);
+    if (!held) {
+      current.set(label.roundId, label);
+      continue;
+    }
+    const a = label.runFinishedAt!.getTime();
+    const b = held.runFinishedAt!.getTime();
+    if (a > b || (a === b && label.runId > held.runId)) current.set(label.roundId, label);
+  }
+  const result = new Map<string, CurrentCallLabel>();
+  for (const [roundId, l] of current) {
+    result.set(roundId, {
+      id: l.id,
+      runId: l.runId,
+      roundId: l.roundId,
+      called: l.called,
+      note: l.note,
+      utteranceIds: l.utteranceIds,
+    });
+  }
+  return result;
 }

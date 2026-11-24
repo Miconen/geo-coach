@@ -16,3 +16,6 @@ coverage/
 data/
 dumps/
 .DS_Store
+apps/web/e2e/.seed.json
+apps/web/test-results/
+apps/web/playwright-report/

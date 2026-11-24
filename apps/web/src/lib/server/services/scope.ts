@@ -1,5 +1,5 @@
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
-import { isUuid } from "$lib/uuid.js";
+import { isUuid } from "../../uuid.js";
 import type { AppDb } from "../db/index.js";
 import {
   claimEvidence,

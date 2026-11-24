@@ -22,3 +22,43 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+
+  # Browser gates (#56 0-spike). Becomes a required check once stable; never gates deploy.yml.
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: geocoach
+          POSTGRES_PASSWORD: geocoach
+          POSTGRES_DB: geocoach
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U geocoach -d geocoach"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      E2E_DATABASE_URL: postgres://geocoach:geocoach@localhost:5432/geocoach_e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @geo-coach/web exec playwright install --with-deps chromium
+      - run: pnpm --filter @geo-coach/web exec svelte-kit sync
+      - run: pnpm --filter @geo-coach/web e2e:seed
+      - run: pnpm --filter @geo-coach/web e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          retention-days: 7

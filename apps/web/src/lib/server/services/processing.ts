@@ -29,7 +29,7 @@ import {
   getCurrentTranscriptVersionId,
 } from "./recordings.js";
 import { recordingInDuo, roundInDuo, runInDuo, speechInDuo } from "./scope.js";
-import { isUuid } from "$lib/uuid.js";
+import { isUuid } from "../../uuid.js";
 import { rounds, sessions } from "../db/schema.js";
 
 /** Clock estimates wobble by a few ms; only a shift that could move speech between Rounds counts. */

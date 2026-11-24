@@ -11,6 +11,11 @@ declare global {
       } | null;
       sessionId: string | null;
     }
+    /** Shallow-routing state (ADR 0007): view state lives here, the URL is the cold-load fallback. */
+    interface PageState {
+      focus?: string;
+      filter?: string;
+    }
   }
 }
 

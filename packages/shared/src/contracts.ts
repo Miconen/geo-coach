@@ -311,5 +311,7 @@ export const pendingWorkSchema = z.object({
       count: z.number().int().min(0),
     }),
   ),
+  /** The processing worker polled within the last 45 s (#56 2a(i)). */
+  workerOnline: z.boolean(),
 });
 export type PendingWork = z.infer<typeof pendingWorkSchema>;

@@ -179,7 +179,7 @@ export async function stopRecording(
   playerId: string,
   recordingId: string,
   input: StopRecordingRequest,
-): Promise<{ recordingId: string; sessionId: string }> {
+): Promise<{ recordingId: string; sessionId: string; duoId: string }> {
   const rec = await db.query.recordings.findFirst({
     where: eq(recordings.id, recordingId),
   });
@@ -198,14 +198,14 @@ export async function stopRecording(
     })
     .where(eq(recordings.id, recordingId));
 
-  return { recordingId: rec.id, sessionId: rec.sessionId };
+  return { recordingId: rec.id, sessionId: rec.sessionId, duoId: rec.duoId };
 }
 
 export async function startRetranscription(
   db: AppDb,
   playerId: string,
   input: StartRetranscriptionRequest,
-): Promise<{ transcriptVersionId: string; recordingId: string }> {
+): Promise<{ transcriptVersionId: string; recordingId: string; duoId: string; sessionId: string }> {
   const rec = await db.query.recordings.findFirst({
     where: eq(recordings.id, input.recordingId),
   });
@@ -229,7 +229,7 @@ export async function startRetranscription(
     })
     .onConflictDoNothing();
 
-  return { transcriptVersionId: input.transcriptVersionId, recordingId: rec.id };
+  return { transcriptVersionId: input.transcriptVersionId, recordingId: rec.id, duoId: rec.duoId, sessionId: rec.sessionId };
 }
 
 export async function computeHighestContiguousChunkNo(
@@ -262,6 +262,10 @@ export async function uploadTranscriptChunk(
   duplicate: boolean;
   highestContiguousChunkNo: number;
   utteranceCount: number;
+  /** Event scope (not part of the wire payload). */
+  duoId: string;
+  sessionId: string;
+  recordingId: string;
 }> {
   const tv = await db.query.transcriptVersions.findFirst({
     where: eq(transcriptVersions.id, transcriptVersionId),
@@ -295,6 +299,9 @@ export async function uploadTranscriptChunk(
       duplicate: true,
       highestContiguousChunkNo,
       utteranceCount: existingChunk.utteranceCount,
+      duoId: rec.duoId,
+      sessionId: rec.sessionId,
+      recordingId: rec.id,
     };
   }
 
@@ -338,6 +345,9 @@ export async function uploadTranscriptChunk(
     duplicate: false,
     highestContiguousChunkNo,
     utteranceCount: input.utterances.length,
+    duoId: rec.duoId,
+    sessionId: rec.sessionId,
+    recordingId: rec.id,
   };
 }
 
@@ -346,7 +356,7 @@ export async function completeTranscriptVersion(
   playerId: string,
   transcriptVersionId: string,
   input: CompleteTranscriptRequest,
-): Promise<{ transcriptVersionId: string; recordingId: string; duoId: string }> {
+): Promise<{ transcriptVersionId: string; recordingId: string; duoId: string; sessionId: string }> {
   const tv = await db.query.transcriptVersions.findFirst({
     where: eq(transcriptVersions.id, transcriptVersionId),
   });
@@ -369,7 +379,7 @@ export async function completeTranscriptVersion(
     })
     .where(eq(transcriptVersions.id, transcriptVersionId));
 
-  return { transcriptVersionId: tv.id, recordingId: rec.id, duoId: rec.duoId };
+  return { transcriptVersionId: tv.id, recordingId: rec.id, duoId: rec.duoId, sessionId: rec.sessionId };
 }
 
 /**
@@ -476,12 +486,21 @@ async function recomputeRecordingOffsetAndUtterances(
   return { effectiveOffsetMs: computed.offsetMs, isCalibrated: computed.calibrated };
 }
 
+/** Offset result plus its event scope (duoId, sessionId, recordingId are not part of the wire payload). */
+export interface OffsetResult {
+  effectiveOffsetMs: number;
+  isCalibrated: boolean;
+  duoId: string;
+  sessionId: string;
+  recordingId: string;
+}
+
 export async function addClockOffsetMeasurement(
   db: AppDb,
   playerId: string,
   recordingId: string,
   input: OffsetMeasurementRequest,
-): Promise<{ effectiveOffsetMs: number; isCalibrated: boolean }> {
+): Promise<OffsetResult> {
   const rec = await db.query.recordings.findFirst({
     where: eq(recordings.id, recordingId),
   });
@@ -501,7 +520,8 @@ export async function addClockOffsetMeasurement(
     rttMs: input.rttMs,
   });
 
-  return recomputeRecordingOffsetAndUtterances(db, recordingId);
+  const res = await recomputeRecordingOffsetAndUtterances(db, recordingId);
+  return { ...res, duoId: rec.duoId, sessionId: rec.sessionId, recordingId: rec.id };
 }
 
 export async function setManualOffsetOverride(
@@ -509,7 +529,7 @@ export async function setManualOffsetOverride(
   playerId: string,
   recordingId: string,
   manualOffsetOverrideMs: number | null,
-): Promise<{ effectiveOffsetMs: number; isCalibrated: boolean }> {
+): Promise<OffsetResult> {
   const rec = await db.query.recordings.findFirst({
     where: eq(recordings.id, recordingId),
   });
@@ -523,7 +543,8 @@ export async function setManualOffsetOverride(
     .set({ manualOffsetOverrideMs })
     .where(eq(recordings.id, recordingId));
 
-  return recomputeRecordingOffsetAndUtterances(db, recordingId);
+  const res = await recomputeRecordingOffsetAndUtterances(db, recordingId);
+  return { ...res, duoId: rec.duoId, sessionId: rec.sessionId, recordingId: rec.id };
 }
 
 /**
@@ -535,7 +556,7 @@ export async function deleteOwnSpeechRange(
   playerId: string,
   duoId: string,
   input: { recordingId: string; startUtc: Date; endUtc: Date },
-): Promise<{ deletedUtteranceCount: number; deletedLearningCount: number }> {
+): Promise<{ deletedUtteranceCount: number; deletedLearningCount: number; sessionId: string; recordingId: string }> {
   await assertPlayerInDuo(db, playerId, duoId);
   const [rec] = await db
     .select()
@@ -560,7 +581,7 @@ export async function deleteOwnSpeechRange(
   });
 
   if (toDelete.length === 0) {
-    return { deletedUtteranceCount: 0, deletedLearningCount: 0 };
+    return { deletedUtteranceCount: 0, deletedLearningCount: 0, sessionId: rec.sessionId, recordingId: rec.id };
   }
 
   const deletedIds = new Set(toDelete.map((u) => u.id));
@@ -628,5 +649,7 @@ export async function deleteOwnSpeechRange(
   return {
     deletedUtteranceCount: toDelete.length,
     deletedLearningCount: learningsToDelete.length,
+    sessionId: rec.sessionId,
+    recordingId: rec.id,
   };
 }

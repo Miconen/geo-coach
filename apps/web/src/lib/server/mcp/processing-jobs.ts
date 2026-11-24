@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { intervalsOverlap, uuidv7 } from "@geo-coach/shared";
 import { hashToken } from "../auth/index.js";
 import type { AppDb } from "../db/index.js";
@@ -10,7 +10,8 @@ import { mcpListWork, mcpStartRun } from "./workflow.js";
 
 export const JOB_TOKEN_PREFIX = "gc_job_";
 const LEASE_MS = 3 * 60 * 1000;
-const PROCESSOR_ONLINE_MS = 45 * 1000;
+// A worker is online while it polled (even idle) within this window; e2e shortens it.
+const PROCESSOR_ONLINE_MS = Number(process.env.PROCESSOR_ONLINE_MS) || 45 * 1000;
 const WORKER_AGENT = "geo-coach-worker";
 /** The cancellation note for a job whose range was already processed; the run history collapses these. */
 export const ALREADY_UP_TO_DATE = "Already up to date.";
@@ -54,10 +55,12 @@ async function assertSessionNotRecording(db: AppDb, duoId: string, sessionId: st
     .flatMap((s) => (s.recording && s.recordingId ? [s.recordingId] : []));
   if (liveIds.length === 0) return;
   const live = await db.query.recordings.findFirst({
+    // A committed stop wins over cached heartbeats (kept up to 90 s): only Recordings not yet stopped count.
     where: and(
       eq(recordings.sessionId, sessionId),
       eq(recordings.duoId, duoId),
       inArray(recordings.id, liveIds),
+      isNull(recordings.stoppedAt),
     ),
   });
   if (live) {

@@ -22,8 +22,13 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
       startUtc: new Date(parsed.startUtc),
       endUtc: new Date(parsed.endUtc),
     });
-    duoEventBus.emitChanged(parsed.duoId, "session", params.id);
-    return json(res);
+    duoEventBus.emitChanged(parsed.duoId, "session", res.sessionId, {
+      sessionId: res.sessionId,
+      recordingId: res.recordingId,
+      kind: "chunk",
+    });
+    if (res.deletedLearningCount > 0) duoEventBus.emitChanged(parsed.duoId, "learning");
+    return json({ deletedUtteranceCount: res.deletedUtteranceCount, deletedLearningCount: res.deletedLearningCount });
   } catch (err) {
     if (err instanceof DomainError) {
       return json({ error: err.message }, { status: err.status });

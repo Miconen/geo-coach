@@ -71,6 +71,8 @@ export interface RunTimelineRow {
   claimsCreated: number;
   claimsWithNewEvidence: number;
   supersededBy: RunSupersession[];
+  /** On a collapsed no-op row of the paged history: how many no-op jobs of this purpose it stands for. */
+  noOpCount?: number;
 }
 
 export interface RunTimelineNoOp {
@@ -97,7 +99,7 @@ type RunRow = typeof processingRuns.$inferSelect;
 type JobRow = typeof processingJobs.$inferSelect;
 
 /** A job whose Session belongs to the job's Duo (stored independently). */
-function jobInDuo(duoId: string) {
+export function jobInDuo(duoId: string) {
   return and(
     eq(processingJobs.duoId, duoId),
     sql`exists (select 1 from ${sessions} s where s.id = ${processingJobs.sessionId} and s.duo_id = ${duoId})`,
@@ -193,7 +195,7 @@ export async function buildRunTimeline(
   };
 }
 
-interface OutputCounts {
+export interface OutputCounts {
   learnings: Map<string, RunTimelineCounts>;
   callLabels: Map<string, RunTimelineCounts>;
   claimsCreated: Map<string, number>;
@@ -201,7 +203,7 @@ interface OutputCounts {
   supersededBy: Map<string, RunSupersession[]>;
 }
 
-async function outputCounts(
+export async function outputCounts(
   db: AppDb,
   duoId: string,
   runs: RunRow[],
@@ -281,7 +283,7 @@ async function outputCounts(
   return out;
 }
 
-function runRow(run: RunRow, job: JobRow | null, counts: OutputCounts): RunTimelineRow {
+export function runRow(run: RunRow, job: JobRow | null, counts: OutputCounts): RunTimelineRow {
   const jobActive = job !== null && (job.status === "queued" || job.status === "running");
   const status: RunTimelineStatus = run.status;
   const finished = run.status === "finished" && run.finishedAt !== null;
@@ -314,7 +316,7 @@ function runRow(run: RunRow, job: JobRow | null, counts: OutputCounts): RunTimel
   };
 }
 
-function jobRow(job: JobRow): RunTimelineRow {
+export function jobRow(job: JobRow): RunTimelineRow {
   const status: RunTimelineStatus =
     job.status === "queued"
       ? "queued"

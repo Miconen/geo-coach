@@ -25,6 +25,9 @@ export default defineConfig({
       NODE_ENV: "development",
       DATABASE_URL: E2E_DATABASE_URL,
       E2E_SPIKE: "1",
+      // The worker API (e2e plays the worker) and a short online window for the worker-status tests.
+      PROCESSOR_SECRET: "e2e-processor-secret",
+      PROCESSOR_ONLINE_MS: "3000",
     },
   },
 });

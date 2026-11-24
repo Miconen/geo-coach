@@ -181,7 +181,7 @@ export async function rebuildDerivedGamesForDuo(db: AppDb, duoId: string): Promi
 export async function upsertRawReplay(
   db: AppDb,
   input: UploadReplayRequest,
-): Promise<{ replayId: string; hasEvents: boolean }> {
+): Promise<{ replayId: string; hasEvents: boolean; gameId: string }> {
   const game = await db.query.games.findFirst({
     where: and(
       eq(games.duoId, input.duoId),
@@ -210,7 +210,7 @@ export async function upsertRawReplay(
         fetchedAt: new Date(input.fetchedAt),
       })
       .where(eq(replays.id, existing.id));
-    return { replayId: existing.id, hasEvents };
+    return { replayId: existing.id, hasEvents, gameId: game.id };
   }
 
   const replayId = uuidv7();
@@ -225,7 +225,7 @@ export async function upsertRawReplay(
     hasEvents,
     fetchedAt: new Date(input.fetchedAt),
   });
-  return { replayId, hasEvents };
+  return { replayId, hasEvents, gameId: game.id };
 }
 
 export async function findMissingGeoguessrData(

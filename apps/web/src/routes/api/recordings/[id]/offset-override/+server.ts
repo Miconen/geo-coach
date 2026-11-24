@@ -4,6 +4,7 @@ import type { RequestHandler } from "./$types";
 import { assertAuthAvailable } from "$lib/server/auth/guards.js";
 import { getDb } from "$lib/server/db/index.js";
 import { DomainError, setManualOffsetOverride } from "$lib/server/services/index.js";
+import { duoEventBus } from "$lib/server/events/bus.js";
 
 const bodySchema = z.object({
   manualOffsetOverrideMs: z.number().int().nullable(),
@@ -20,7 +21,12 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
       params.id,
       parsed.manualOffsetOverrideMs,
     );
-    return json(res);
+    duoEventBus.emitChanged(res.duoId, "session", res.sessionId, {
+      sessionId: res.sessionId,
+      recordingId: res.recordingId,
+      kind: "offset",
+    });
+    return json({ effectiveOffsetMs: res.effectiveOffsetMs, isCalibrated: res.isCalibrated });
   } catch (err) {
     if (err instanceof DomainError) {
       return json({ error: err.message }, { status: err.status });

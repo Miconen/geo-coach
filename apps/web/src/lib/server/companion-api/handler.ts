@@ -134,8 +134,15 @@ export async function handleCompanionRequest(
     if (endpoint === "startRecording") {
       const parsed = startRecordingRequestSchema.parse(body);
       const res = await startRecording(db, player.id, parsed);
-      duoEventBus.emitChanged(parsed.duoId, "session", res.sessionId);
-      return jsonResponse(res, 201);
+      duoEventBus.emitChanged(parsed.duoId, "session", res.sessionId, {
+        sessionId: res.sessionId,
+        recordingId: res.recordingId,
+        kind: "bounds",
+      });
+      return jsonResponse(
+        { recordingId: res.recordingId, sessionId: res.sessionId, transcriptVersionId: res.transcriptVersionId },
+        201,
+      );
     }
 
     if (endpoint === "stopRecording") {
@@ -143,7 +150,12 @@ export async function handleCompanionRequest(
       if (!recordingId) return jsonResponse({ error: "BAD_REQUEST" }, 400);
       const parsed = stopRecordingRequestSchema.parse(body);
       const res = await stopRecording(db, player.id, recordingId, parsed);
-      return jsonResponse(res);
+      duoEventBus.emitChanged(res.duoId, "session", res.sessionId, {
+        sessionId: res.sessionId,
+        recordingId: res.recordingId,
+        kind: "bounds",
+      });
+      return jsonResponse({ recordingId: res.recordingId, sessionId: res.sessionId });
     }
 
     if (endpoint === "addOffset") {
@@ -151,13 +163,23 @@ export async function handleCompanionRequest(
       if (!recordingId) return jsonResponse({ error: "BAD_REQUEST" }, 400);
       const parsed = offsetMeasurementRequestSchema.parse(body);
       const res = await addClockOffsetMeasurement(db, player.id, recordingId, parsed);
-      return jsonResponse(res);
+      duoEventBus.emitChanged(res.duoId, "session", res.sessionId, {
+        sessionId: res.sessionId,
+        recordingId: res.recordingId,
+        kind: "offset",
+      });
+      return jsonResponse({ effectiveOffsetMs: res.effectiveOffsetMs, isCalibrated: res.isCalibrated });
     }
 
     if (endpoint === "startRetranscription") {
       const parsed = startRetranscriptionRequestSchema.parse(body);
       const res = await startRetranscription(db, player.id, parsed);
-      return jsonResponse(res, 201);
+      duoEventBus.emitChanged(res.duoId, "session", res.sessionId, {
+        sessionId: res.sessionId,
+        recordingId: res.recordingId,
+        kind: "transcript",
+      });
+      return jsonResponse({ transcriptVersionId: res.transcriptVersionId, recordingId: res.recordingId }, 201);
     }
 
     if (endpoint === "uploadChunk") {
@@ -165,7 +187,18 @@ export async function handleCompanionRequest(
       if (!versionId) return jsonResponse({ error: "BAD_REQUEST" }, 400);
       const parsed = uploadChunkRequestSchema.parse(body);
       const res = await uploadTranscriptChunk(db, player.id, versionId, parsed);
-      return jsonResponse(res);
+      if (!res.duplicate) {
+        duoEventBus.emitChanged(res.duoId, "session", res.sessionId, {
+          sessionId: res.sessionId,
+          recordingId: res.recordingId,
+          kind: "chunk",
+        });
+      }
+      return jsonResponse({
+        duplicate: res.duplicate,
+        highestContiguousChunkNo: res.highestContiguousChunkNo,
+        utteranceCount: res.utteranceCount,
+      });
     }
 
     if (endpoint === "completeTranscript") {
@@ -173,8 +206,12 @@ export async function handleCompanionRequest(
       if (!versionId) return jsonResponse({ error: "BAD_REQUEST" }, 400);
       const parsed = completeTranscriptRequestSchema.parse(body);
       const res = await completeTranscriptVersion(db, player.id, versionId, parsed);
-      duoEventBus.emitChanged(res.duoId, "session", res.recordingId);
-      return jsonResponse(res);
+      duoEventBus.emitChanged(res.duoId, "session", res.recordingId, {
+        sessionId: res.sessionId,
+        recordingId: res.recordingId,
+        kind: "transcript",
+      });
+      return jsonResponse({ transcriptVersionId: res.transcriptVersionId, recordingId: res.recordingId, duoId: res.duoId });
     }
 
     if (endpoint === "heartbeat") {
@@ -219,7 +256,8 @@ export async function handleCompanionRequest(
       const parsed = uploadReplayRequestSchema.parse(body);
       await assertPlayerInDuo(db, player.id, parsed.duoId);
       const res = await upsertRawReplay(db, parsed);
-      return jsonResponse(res);
+      duoEventBus.emitChanged(parsed.duoId, "replay", res.gameId);
+      return jsonResponse({ replayId: res.replayId, hasEvents: res.hasEvents });
     }
 
     return jsonResponse({ error: "NOT_FOUND" }, 404);

@@ -157,6 +157,8 @@ export interface WorkbenchSession {
   micCount: number;
   gameIds: string[];
   recordingIds: string[];
+  /** Recordings with a committed stop: a cached heartbeat naming one never counts as recording again. */
+  stoppedRecordingIds: string[];
   ratingDelta: number;
   extractWorkCount: number;
   tipsWorkCount: number;
@@ -642,6 +644,7 @@ export async function buildWorkbenchData(
       micCount: playerSet.size,
       gameIds: [],
       recordingIds: recs.map((r) => r.id),
+      stoppedRecordingIds: recs.filter((r) => r.stoppedAt).map((r) => r.id),
       ratingDelta: 0,
       extractWorkCount: work.extract.length,
       tipsWorkCount: work.tips.length,

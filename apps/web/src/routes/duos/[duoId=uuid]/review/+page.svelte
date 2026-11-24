@@ -18,6 +18,7 @@
   import { formatRelSec } from "$lib/workbench/format.js";
   import { entityHref } from "$lib/links.js";
   import { getDuoStream } from "$lib/live/context.js";
+  import { getPendingWork } from "$lib/live/pending-work.svelte.js";
   import { heartbeats, needsRefresh } from "$lib/live/dependencies.js";
   import { singleFlight } from "$lib/live/single-flight.js";
   import EntityChip from "$lib/components/EntityChip.svelte";
@@ -270,8 +271,9 @@
         ended: true,
         playerIds: [],
         micCount: 0,
-        gameIds: [],
-        recordingIds: [],
+        gameIds: [] as string[],
+        recordingIds: [] as string[],
+        stoppedRecordingIds: [] as string[],
         ratingDelta: 0,
         extractWorkCount: 0,
         tipsWorkCount: 0,
@@ -466,6 +468,9 @@
   }
 
   const stream = getDuoStream();
+  const pendingWork = getPendingWork();
+  // Worker status from the shared store (polled every 15 s while Review is mounted), else the page payload.
+  const workerOnline = $derived(pendingWork?.workerOnline ?? wb?.processing.workerOnline ?? false);
   // Set when a refresh found the selected Session gone (entity-level 404 with the Duo still accessible).
   let sessionMissing = $state(false);
 
@@ -517,9 +522,15 @@
     return wb?.processing.rangeJobs[workRangeKey(sessionId, wr)] ?? { running: 0, queued: 0, failed: null };
   }
 
+  // A committed stop wins over cached heartbeats (kept up to 90 s): stopped Recordings never count again.
+  const stoppedRecordingIds = $derived(new Set(wb?.sessions.flatMap((s) => s.stoppedRecordingIds) ?? []));
   function isSessionRecording(session: { recordingIds: string[] }) {
     return liveStatuses.some(
-      (s) => s.recording && s.recordingId !== null && session.recordingIds.includes(s.recordingId),
+      (s) =>
+        s.recording &&
+        s.recordingId !== null &&
+        !stoppedRecordingIds.has(s.recordingId) &&
+        session.recordingIds.includes(s.recordingId),
     );
   }
 
@@ -541,6 +552,8 @@
         }),
       });
       if (!res.ok) {
+        // The worker went offline since the last poll: refetch its status at once.
+        if (res.status === 503) void pendingWork?.refresh();
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
         fixErrors = { ...fixErrors, [key]: body?.error ?? "Could not queue this range." };
         return;
@@ -556,6 +569,7 @@
   onMount(() => {
     if (initialRunId) void scrollToAnchor(`#run-${initialRunId}`);
     // The layout's shared stream: heartbeats update the status pills; any change or (re)connection refreshes once.
+    const stopWorkerPoll = pendingWork?.watchWorker();
     const offStream = stream?.subscribe((batch) => {
       for (const hb of heartbeats(batch)) {
         const others = liveStatuses.filter((s) => s.playerId !== hb.playerId);
@@ -606,6 +620,7 @@
     window.addEventListener("keydown", onKeyDown);
     return () => {
       offStream?.();
+      stopWorkerPoll?.();
       window.removeEventListener("keydown", onKeyDown);
     };
   });
@@ -1415,8 +1430,9 @@
                 <button
                   type="button"
                   class="shrink-0 rounded-md bg-[var(--warn)] px-2.5 py-1 font-semibold text-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={active || recording || fixingRangeKey === key || !wb.processing.workerOnline}
-                  title={!wb.processing.workerOnline
+                  disabled={active || recording || fixingRangeKey === key || !workerOnline}
+                  data-testid="work-range-action"
+                  title={!workerOnline
                     ? "The processing worker is offline"
                     : recording
                       ? "Stop recording before processing this Session"
@@ -1427,7 +1443,7 @@
                     Processing…
                   {:else if jobs.queued > 0}
                     Queued
-                  {:else if !wb.processing.workerOnline}
+                  {:else if !workerOnline}
                     Worker offline
                   {:else if jobs.failed}
                     Retry

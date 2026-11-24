@@ -10,6 +10,7 @@
   import { needsRefresh } from "$lib/live/dependencies.js";
   import { browserStreamDeps, DuoStream, type StreamStatus } from "$lib/live/duo-stream.js";
   import { clearRecallAttribute, syncRecall } from "$lib/recall.svelte.js";
+  import { PendingWorkStore, setPendingWork } from "$lib/live/pending-work.svelte.js";
 
   let { data, children } = $props();
   const duoId = $derived(data.duo.id);
@@ -35,13 +36,14 @@
     const offStatus = stream.onStatus((s) => (streamStatus = s));
     // The badge refetches on the first open (mount-to-subscribe race), every reconnect, and Session or run events.
     const offBatch = stream.subscribe((batch) => {
-      if (needsRefresh("pending-work", batch)) void loadPending(duoId);
+      if (needsRefresh("pending-work", batch)) void pendingWork.refresh();
     });
     stream.start();
     return () => {
       offStatus();
       offBatch();
       stream.dispose();
+      pendingWork.dispose();
       clearRecallAttribute();
     };
   });
@@ -52,25 +54,15 @@
   ] as const;
   const current = $derived(SECTIONS.find((s) => page.route.id?.startsWith(`/duos/[duoId=uuid]/${s.key}`)) ?? null);
 
-  // Pending extract ranges, fetched lazily (never part of the layout load).
-  let pending = $state<number | null>(null);
-  function loadPending(id: string) {
-    return fetch(`/api/duos/${id}/pending-work`)
-      .then((res) => {
-        if (res.status === 401 || res.status === 404) void stream.probe();
-        return res.ok ? res.json() : null;
-      })
-      .then((body: { ranges: Array<{ purpose: string; count: number }> } | null) => {
-        if (!body || id !== duoId) return;
-        pending = body.ranges.filter((r) => r.purpose === "extract").reduce((sum, r) => sum + r.count, 0);
-      })
-      .catch(() => {});
-  }
-  $effect(() => {
-    const id = duoId;
-    pending = null;
-    void loadPending(id);
-  });
+  // Pending extract ranges and worker status, fetched lazily (never part of the layout load).
+  const pendingWork = new PendingWorkStore(
+    untrack(() => data.duo.id),
+    () => void stream.probe(),
+  );
+  setPendingWork(pendingWork);
+  const pending = $derived(pendingWork.extractCount);
+  $effect(() => pendingWork.setDuo(duoId));
+  onMount(() => void pendingWork.refresh());
 
   function switchDuo(id: string) {
     if (id !== duoId) void goto(current ? current.href(id) : links.duo(id));

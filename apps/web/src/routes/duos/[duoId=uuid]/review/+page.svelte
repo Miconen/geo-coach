@@ -19,6 +19,9 @@
   import { formatRelSec } from "$lib/workbench/format.js";
   import { entityHref, links } from "$lib/links.js";
   import ClaimDrawer from "$lib/components/ClaimDrawer.svelte";
+  import { parseCountryParam } from "$lib/country-param.js";
+  import { updateQuery } from "$lib/stats/url-query.js";
+  import type { ClaimPayload } from "$lib/server/entities/knowledge.js";
   import { gameTitle, roundLabel, sessionTitle } from "$lib/entity-titles.js";
   import { getDuoStream } from "$lib/live/context.js";
   import { getPendingWork } from "$lib/live/pending-work.svelte.js";
@@ -55,8 +58,15 @@
   // Navigation & filter state
   let mode = $state<"learnings" | "knowledge" | "session" | "game">(initialRunId ? "session" : "learnings");
   let queueFilter = $state<"all" | "mistakes" | "starred" | "manual" | "stale" | "study">("all");
-  let selectedCountry = $state<string | null>((() => page.url.searchParams.get("country"))());
-  let selectedPair = $state<[string, string] | null>(null);
+  let selectedCountry = $state<string | null>(parseCountryParam(page.url.searchParams.get("country")));
+  /** The Continent -> Country list and dossier headers set ?country= (#56 3b), replacing the history entry. */
+  function setCountry(code: string | null) {
+    selectedCountry = code;
+    updateQuery((params) => {
+      if (code) params.set("country", code);
+      else params.delete("country");
+    });
+  }
   let selectedSessionId = $state<string | null>(initialSessionId);
   let selectedRunId = $state<string | null>(initialRunId);
   // Bumped on every Session switch, so a run history fetched for a Session already left is dropped.
@@ -133,10 +143,6 @@
       if (queueFilter === "study" && l.kind !== "study") return false;
 
       if (selectedCountry && !l.countries.includes(selectedCountry)) return false;
-      if (selectedPair) {
-        const [a, b] = selectedPair;
-        if (!(l.countries.includes(a) && l.countries.includes(b))) return false;
-      }
 
       if (q) {
         const answers = recallMode && !revealedIds[l.id] ? [] : [l.text, l.detail ?? "", l.agentNote ?? "", ...l.topics];
@@ -159,19 +165,8 @@
     return items;
   });
 
-  const uncitedSearchHits = $derived.by(() => {
-    if (!wb || !searchQuery.trim()) return [] as WorkbenchUtterance[];
-    const q = searchQuery.trim().toLowerCase();
-    return wb.utterances.filter(
-      (u) =>
-        u.citedByLearningIds.length === 0 &&
-        (!recallMode || revealedSessionIds[u.sessionId]) &&
-        u.text.toLowerCase().includes(q),
-    );
-  });
-
   const flattenDossiers = $derived(
-    Boolean(selectedCountry || selectedPair || sortMode === "hp-leaks"),
+    Boolean(selectedCountry || sortMode === "hp-leaks"),
   );
 
   const groupedLearnings = $derived.by(() => {
@@ -434,13 +429,48 @@
   }
 
   const stream = getDuoStream();
+
+  // The Claim drawer (#56 3b): one Claim fetched on demand, refetched on X5's Claim drawer events. A 404 with the
+  // Duo still reachable (the probe) says it no longer exists; a response for a Claim already left is dropped.
+  let claimDrawer = $state.raw<{ id: string; payload: ClaimPayload | null } | null>(null);
+  const loadClaimDrawer = singleFlight(async () => {
+    const id = claimParam;
+    if (!id) {
+      claimDrawer = null;
+      return;
+    }
+    try {
+      const res = await fetch(`/api/duos/${data.duo.id}/claims/${encodeURIComponent(id)}`);
+      if (id !== claimParam) return true;
+      if (res.status === 400 || res.status === 404) {
+        if (res.status === 404 && (await stream?.probe()) !== "ok") return;
+        if (id === claimParam) claimDrawer = { id, payload: null };
+        return;
+      }
+      if (!res.ok) return;
+      const payload = (await res.json()) as ClaimPayload;
+      if (id !== claimParam) return true;
+      claimDrawer = { id, payload };
+    } catch {
+      // Offline: keep what the drawer shows.
+    }
+  });
+  $effect(() => {
+    void claimParam;
+    void loadClaimDrawer();
+  });
+
+  async function setDrawerClaimEvidence(claimId: string, direction: EvidenceDirection | null) {
+    await setClaimEvidence(claimId, direction);
+    await loadClaimDrawer();
+  }
   const pendingWork = getPendingWork();
   // Worker status from the shared store (polled every 15 s while Review is mounted), else the page payload.
   const workerOnline = $derived(pendingWork?.workerOnline ?? wb?.processing.workerOnline ?? false);
   // Set when a refresh found the selected Session gone (entity-level 404 with the Duo still accessible).
   let sessionMissing = $state(false);
 
-  // Live refresh (X5): fetch-and-overlay through /workbench, never invalidateAll (Firefox cancels its request on
+  // Live refresh (X5): fetch-and-overlay through /review (#56 3b), never invalidateAll (Firefox cancels its request on
   // reload and SvelteKit shows the error screen). Single-flight: a burst costs at most two fetches, in order.
   const refreshWorkbench = singleFlight(async () => {
     const base = data.workbench;
@@ -451,7 +481,7 @@
     if (sessionId) params.set("sessionId", sessionId);
     if (selectedRunId) params.set("run", selectedRunId);
     try {
-      const res = await fetch(`/api/duos/${base.duo.id}/workbench?${params}`);
+      const res = await fetch(`/api/duos/${base.duo.id}/review?${params}`);
       if (res.status === 401 || res.status === 404) {
         // 401 or a Duo-level 404 clears the Duo (the layout's probe); with ?sessionId= a 404 may be the Session.
         const probe = (await stream?.probe()) ?? "unknown";
@@ -542,6 +572,7 @@
         sseLiveStatuses = [...others, hb];
       }
       if (needsRefresh("review", batch)) void refreshWorkbench();
+      if (claimParam && needsRefresh("knowledge", batch)) void loadClaimDrawer();
     });
 
     const onKeyDown = (e: KeyboardEvent) => {
@@ -680,8 +711,8 @@
       </p>
     {/if}
 
-    <!-- Command Telemetry Strip: Recent Games + Confusion Pairs -->
-    <section class="mt-3 grid gap-3 lg:grid-cols-[1.2fr_1fr]">
+    <!-- Recent Games -->
+    <section class="mt-3">
       <div class="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2.5">
         <div class="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
           Recent Games
@@ -703,40 +734,6 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2.5">
-        <div class="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-          Confusion Pairs
-        </div>
-        <div class="mt-1.5 flex flex-wrap gap-1.5">
-          {#if wb.confusionPairs.length === 0}
-            <span class="text-xs text-[var(--muted)]">No confusion pairs yet.</span>
-          {:else}
-            {#each wb.confusionPairs.slice(0, 8) as pair}
-              {@const active =
-                selectedPair &&
-                selectedPair[0] === pair.countries[0] &&
-                selectedPair[1] === pair.countries[1]}
-              <button
-                onclick={() => {
-                  mode = "learnings";
-                  selectedCountry = null;
-                  selectedPair = active ? null : pair.countries;
-                }}
-                class="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs {active
-                  ? 'border-[var(--accent)] bg-[var(--accent-soft)] font-semibold text-[var(--accent-soft-ink)]'
-                  : 'border-[var(--border)] bg-[var(--surface-subtle)] hover:border-[var(--border-strong)]'}"
-              >
-                <span class="mono font-semibold">{pair.countries[0]} ↔ {pair.countries[1]}</span>
-                {#if pair.missCount > 0}
-                  <span class="mono rounded bg-[var(--danger-bg)] px-1 text-[10px] text-[var(--danger)]">
-                    {pair.missCount} miss{pair.missCount === 1 ? "" : "es"}
-                  </span>
-                {/if}
-              </button>
-            {/each}
-          {/if}
-        </div>
-      </div>
     </section>
 
     <!-- 3-Pane Coaching Workbench -->
@@ -760,10 +757,9 @@
                 onclick={() => {
                   mode = "learnings";
                   queueFilter = key as typeof queueFilter;
-                  selectedCountry = null;
-                  selectedPair = null;
+                  setCountry(null);
                 }}
-                class="rounded-md px-2 py-1.5 text-left {mode === 'learnings' && queueFilter === key && !selectedCountry && !selectedPair
+                class="rounded-md px-2 py-1.5 text-left {mode === 'learnings' && queueFilter === key && !selectedCountry
                   ? 'bg-[var(--accent-soft)] font-semibold text-[var(--accent-soft-ink)]'
                   : 'hover:bg-[var(--surface-subtle)]'}"
               >
@@ -783,7 +779,6 @@
                 onclick={() => {
                   mode = "knowledge";
                   claimStatusFilter = key as typeof claimStatusFilter;
-                  selectedPair = null;
                 }}
                 class="rounded-md px-2 py-1.5 text-left {mode === 'knowledge' && claimStatusFilter === key
                   ? 'bg-[var(--accent-soft)] font-semibold text-[var(--accent-soft-ink)]'
@@ -797,7 +792,7 @@
 
         <div>
           <div class="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-            Atlas (Region → Country)
+            Continent → Country
           </div>
           <div class="mt-1.5 space-y-2 text-xs">
             {#each continentsTree as group}
@@ -808,8 +803,7 @@
                     <button
                       onclick={() => {
                         if (mode !== "knowledge") mode = "learnings";
-                        selectedPair = null;
-                        selectedCountry = selectedCountry === c.code ? null : c.code;
+                        setCountry(selectedCountry === c.code ? null : c.code);
                       }}
                       class="flex items-center justify-between rounded px-2 py-1 text-left {selectedCountry === c.code
                         ? 'bg-[var(--accent-soft)] font-semibold text-[var(--accent-soft-ink)]'
@@ -882,7 +876,7 @@
             <input
               bind:this={searchInputEl}
               bind:value={searchQuery}
-              placeholder="Search Learnings & uncited speech (/)"
+              placeholder="Search Learnings (/)"
               class="min-w-[200px] flex-1 rounded-lg border border-[var(--border-strong)] px-2.5 py-1.5 text-sm"
             />
             <select bind:value={kindFilter} class="rounded-lg border border-[var(--border-strong)] px-2 py-1.5">
@@ -1004,7 +998,7 @@
                   {#if group.dossier}
                     <div class="flex items-center justify-between px-1 text-xs">
                       <button
-                        onclick={() => (selectedCountry = group.dossier!.code)}
+                        onclick={() => setCountry(group.dossier!.code)}
                         class="font-bold text-[var(--ink)] hover:text-[var(--accent)]"
                       >
                         <span class="mono mr-1 text-[var(--accent)]">{group.dossier.code}</span>
@@ -1155,45 +1149,6 @@
             </div>
           {/if}
 
-          <!-- Uncited Raw Speech Search Hits -->
-          {#if uncitedSearchHits.length > 0}
-            <section class="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-2">
-              <div class="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
-                Uncited Raw Speech Matches ({uncitedSearchHits.length})
-              </div>
-              {#each ["unprocessed", "stale", "processed"] as statusKey}
-                {@const hits = uncitedSearchHits.filter((u) => u.rangeStatus === statusKey)}
-                {#if hits.length > 0}
-                  <div class="space-y-1">
-                    <div class="text-[11px] font-semibold text-[var(--muted)]">
-                      {statusKey === "unprocessed"
-                        ? "Unprocessed range"
-                        : statusKey === "stale"
-                          ? "Stale range"
-                          : "Processed · not extracted"}
-                    </div>
-                    {#each hits as u}
-                      <div class="flex items-center justify-between gap-2 rounded bg-[var(--surface-subtle)] px-2.5 py-1.5 text-xs">
-                        <span>
-                          <strong>{wb.players[u.playerId]?.displayName ?? "Player"}:</strong>
-                          <UtteranceText duoId={wb.duo.id} utterance={u} editable={false} />
-                        </span>
-                        <button
-                          onclick={() => {
-                            jumpToSession(u.sessionId);
-                            highlightedUtteranceId = u.id;
-                          }}
-                          class="text-[var(--accent)] hover:underline whitespace-nowrap"
-                        >
-                          Timeline →
-                        </button>
-                      </div>
-                    {/each}
-                  </div>
-                {/if}
-              {/each}
-            </section>
-          {/if}
         {:else if mode === "knowledge"}
           <!-- Knowledge bank: Claims by country, with their Evidence, and the Duo's Sources -->
           <div class="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 flex flex-wrap items-center gap-2 text-xs">
@@ -1216,7 +1171,7 @@
             </select>
             {#if selectedCountry}
               <button
-                onclick={() => (selectedCountry = null)}
+                onclick={() => setCountry(null)}
                 class="rounded-lg border border-[var(--accent)] bg-[var(--accent-soft)] px-2.5 py-1.5 font-semibold text-[var(--accent-soft-ink)]"
               >
                 {selectedCountry} ✕
@@ -1779,13 +1734,19 @@
     </div>
   </div>
 
-  {#if claimParam}
+  {#if claimParam && claimDrawer?.id === claimParam}
     <ClaimDrawer
-      claim={wb.claimsById[claimParam] ?? null}
+      claim={claimDrawer.payload?.claim ?? null}
       closeHref={claimCloseHref}
       revealed={Boolean(revealedClaimIds[claimParam])}
       onReveal={() => (revealedClaimIds = { ...revealedClaimIds, [claimParam!]: true })}
-      card={{ wb, duoId: wb.duo.id, revealedLearningIds: revealedIds, onSetEvidence: setClaimEvidence, onSelectLearning: openLearning }}
+      card={{
+        wb: claimDrawer.payload?.wb ?? wb,
+        duoId: wb.duo.id,
+        revealedLearningIds: revealedIds,
+        onSetEvidence: setDrawerClaimEvidence,
+        onSelectLearning: openLearning,
+      }}
     />
   {/if}
 

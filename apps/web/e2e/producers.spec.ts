@@ -16,7 +16,7 @@ test("offset override and delete-speech events reach an open Review, with docume
   await expect(page.getByRole("navigation", { name: "Duo" })).toHaveAttribute("data-stream", "open");
   await page.waitForLoadState("networkidle");
 
-  const refresh = page.waitForRequest((r) => r.url().includes(`/api/duos/${s.duoId}/workbench`));
+  const refresh = page.waitForRequest((r) => r.url().includes(`/api/duos/${s.duoId}/review`));
   const offset = await page.request.post(`/api/recordings/${s.recordingId}/offset-override`, {
     data: { manualOffsetOverrideMs: 0 },
   });
@@ -24,7 +24,7 @@ test("offset override and delete-speech events reach an open Review, with docume
   expect(Object.keys(await offset.json()).sort()).toEqual(["effectiveOffsetMs", "isCalibrated"]);
   await refresh;
 
-  const refresh2 = page.waitForRequest((r) => r.url().includes(`/api/duos/${s.duoId}/workbench`));
+  const refresh2 = page.waitForRequest((r) => r.url().includes(`/api/duos/${s.duoId}/review`));
   const del = await page.request.post(`/api/recordings/${s.recordingId}/delete-speech`, {
     data: { duoId: s.duoId, startUtc: "2000-01-01T00:00:00.000Z", endUtc: "2000-01-01T00:00:01.000Z" },
   });

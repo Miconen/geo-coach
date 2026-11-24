@@ -38,6 +38,10 @@
           : null}
       />
     {/if}
+    {#if learning.claimId}
+      <!-- The Claim chip (#56 3b): opens its drawer on Review; the label carries no answer. -->
+      <EntityChip kind="claim" label="Claim" href={entityHref({ kind: "claim", duoId, id: learning.claimId })} />
+    {/if}
   </div>
   <p class="mt-1 text-sm text-[var(--ink)]" data-answer="learning-text">
     <Masked {revealed} label="Hidden (Recall)">{learning.text}</Masked>

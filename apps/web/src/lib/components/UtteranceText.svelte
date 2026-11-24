@@ -1,6 +1,4 @@
 <script lang="ts">
-  import { invalidateAll } from "$app/navigation";
-
   interface Props {
     duoId: string;
     utterance: { id: string; text: string; rawText: string };
@@ -8,9 +6,11 @@
     countryCode?: string | null;
     /** Shows the fix control. Off for read-only excerpts. */
     editable?: boolean;
+    /** Refreshes the page data after a saved fix (the page's live refresh, never invalidateAll). */
+    onSaved?: () => unknown;
   }
 
-  let { duoId, utterance, countryCode = null, editable = true }: Props = $props();
+  let { duoId, utterance, countryCode = null, editable = true, onSaved }: Props = $props();
 
   let open = $state(false);
   let find = $state("");
@@ -51,7 +51,7 @@
         return;
       }
       open = false;
-      await invalidateAll();
+      await onSaved?.();
     } catch {
       error = "Could not reach the server.";
     } finally {

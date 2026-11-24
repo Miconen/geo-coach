@@ -1,6 +1,7 @@
 import type { DuoSseEvent } from "@geo-coach/shared";
 
 type Listener = (event: DuoSseEvent) => void;
+type ChangedEvent = Extract<DuoSseEvent, { type: "changed" }>;
 
 export interface PlayerLiveStatus {
   playerId: string;
@@ -68,11 +69,13 @@ class DuoEventBus {
     duoId: string,
     entity: Extract<DuoSseEvent, { type: "changed" }>["entity"],
     id?: string,
+    scope: Pick<ChangedEvent, "sessionId" | "recordingId" | "kind"> = {},
   ): void {
     this.publish(duoId, {
       type: "changed",
       entity,
       id,
+      ...scope,
       at: new Date().toISOString(),
     });
   }

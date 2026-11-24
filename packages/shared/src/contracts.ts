@@ -289,8 +289,14 @@ export const duoSseEventSchema = z.discriminatedUnion("type", [
       "claim",
       "source",
       "processing",
+      "replay",
     ]),
     id: z.string().optional(),
+    /** Scope hints (#56 X5): the Session and Recording a change touched, and what kind of Session change it was. */
+    sessionId: z.string().uuid().optional(),
+    recordingId: z.string().uuid().optional(),
+    /** For entity "session"; absent counts as "bounds". */
+    kind: z.enum(["bounds", "chunk", "offset", "transcript"]).optional(),
     at: z.string().datetime(),
   }),
 ]);

@@ -24,6 +24,8 @@
     highlightedUtteranceId?: string | null;
     timelineSearch?: string;
     onSelectUtterance?: (utteranceId: string, roundId: string) => void;
+    /** Passed to UtteranceText: refreshes the page after a transcript fix. */
+    onSaved?: () => unknown;
     onSelectLearning?: (learningId: string) => void;
     onAddLearning?: (opts: { utteranceIds: string[]; roundIds: string[]; country?: string }) => void;
     onDeleteUtterance?: (utterance: WorkbenchUtterance) => void;
@@ -39,6 +41,7 @@
     highlightedUtteranceId = null,
     timelineSearch = "",
     onSelectUtterance,
+    onSaved,
     onSelectLearning,
     onAddLearning,
     onDeleteUtterance,
@@ -117,7 +120,7 @@
                 >
                   {speaker?.displayName ?? "Player"}:
                 </strong>
-                <UtteranceText {duoId} utterance={u} countryCode={round.countryCode} editable={duoId !== ""} />
+                <UtteranceText {duoId} utterance={u} countryCode={round.countryCode} editable={duoId !== ""} {onSaved} />
               </div>
               <div class="flex items-center gap-2 shrink-0">
                 <button

@@ -1,11 +1,9 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { invalidateAll } from "$app/navigation";
   import { page } from "$app/state";
   import {
     getCountryName,
     type ClaimStatus,
-    type DuoSseEvent,
     type EvidenceDirection,
     type LearningKind,
     type ReactionType,
@@ -17,6 +15,9 @@
   import UtteranceText from "$lib/components/UtteranceText.svelte";
   import { formatRelSec } from "$lib/workbench/format.js";
   import { entityHref } from "$lib/links.js";
+  import { getDuoStream } from "$lib/live/context.js";
+  import { heartbeats, needsRefresh } from "$lib/live/dependencies.js";
+  import { singleFlight } from "$lib/live/single-flight.js";
   import EntityChip from "$lib/components/EntityChip.svelte";
   import {
     CLAIM_STATUSES,
@@ -334,7 +335,7 @@
     });
     if (res.ok) {
       manualOpen = false;
-      await invalidateAll();
+      await refreshWorkbench();
     }
   }
 
@@ -344,7 +345,7 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reaction }),
     });
-    await invalidateAll();
+    await refreshWorkbench();
   }
 
   async function setClaimEvidence(claimId: string, direction: EvidenceDirection | null) {
@@ -353,7 +354,7 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ direction }),
     });
-    await invalidateAll();
+    await refreshWorkbench();
   }
 
   function openLearning(learningId: string) {
@@ -373,7 +374,7 @@
         endUtc: u.endedAt,
       }),
     });
-    await invalidateAll();
+    await refreshWorkbench();
   }
 
   function jumpToGame(gameId: string) {
@@ -431,46 +432,49 @@
   /** Every Session selection fetches that Session's run history and clears the selected run. */
   function selectSession(sessionId: string | null) {
     if (sessionId !== selectedSessionId) sessionGeneration += 1;
+    sessionMissing = false;
     selectedSessionId = sessionId;
     selectedRunId = null;
     void refreshWorkbench();
   }
 
-  let refreshingWorkbench = false;
-  let refreshWorkbenchAgain = false;
+  const stream = getDuoStream();
+  // Set when a refresh found the selected Session gone (entity-level 404 with the Duo still accessible).
+  let sessionMissing = $state(false);
 
-  // invalidateAll swaps the page for an error screen if its request is cancelled, which
-  // Firefox does as soon as a reload starts. Live updates fetch separately so they can't.
-  async function refreshWorkbench() {
-    if (refreshingWorkbench) {
-      refreshWorkbenchAgain = true;
-      return;
-    }
-    refreshingWorkbench = true;
+  // Live refresh (X5): fetch-and-overlay through /workbench, never invalidateAll (Firefox cancels its request on
+  // reload and SvelteKit shows the error screen). Single-flight: a burst costs at most two fetches, in order.
+  const refreshWorkbench = singleFlight(async () => {
+    const base = data.workbench;
+    if (!base) return;
+    const generation = sessionGeneration;
+    const params = new URLSearchParams();
+    const sessionId = selectedSessionId ?? activeSession?.id ?? null;
+    if (sessionId) params.set("sessionId", sessionId);
+    if (selectedRunId) params.set("run", selectedRunId);
     try {
-      do {
-        refreshWorkbenchAgain = false;
-        const base = data.workbench;
-        if (!base) return;
-        const generation = sessionGeneration;
-        const params = new URLSearchParams();
-        const sessionId = selectedSessionId ?? activeSession?.id ?? null;
-        if (sessionId) params.set("sessionId", sessionId);
-        if (selectedRunId) params.set("run", selectedRunId);
-        const res = await fetch(`/api/duos/${base.duo.id}/workbench?${params}`);
-        if (res.ok) {
-          const value = (await res.json()) as NonNullable<typeof data.workbench>;
-          // A response for a Session already left is dropped; the loop fetches the new one.
-          if (generation !== sessionGeneration) refreshWorkbenchAgain = true;
-          else if (base === data.workbench) liveWorkbench = { base, value };
+      const res = await fetch(`/api/duos/${base.duo.id}/workbench?${params}`);
+      if (res.status === 401 || res.status === 404) {
+        // 401 or a Duo-level 404 clears the Duo (the layout's probe); with ?sessionId= a 404 may be the Session.
+        const probe = (await stream?.probe()) ?? "unknown";
+        if (probe === "ok" && sessionId && generation === sessionGeneration) {
+          sessionMissing = true;
+          selectedSessionId = null;
+          selectedRunId = null;
+          sessionGeneration += 1;
+          return true;
         }
-      } while (refreshWorkbenchAgain);
+        return;
+      }
+      if (!res.ok) return;
+      const value = (await res.json()) as NonNullable<typeof data.workbench>;
+      // A response for a Session already left is dropped; another pass fetches the new one.
+      if (generation !== sessionGeneration) return true;
+      if (base === data.workbench) liveWorkbench = { base, value };
     } catch {
       // Cancelled or offline: keep showing the current data until the next change.
-    } finally {
-      refreshingWorkbench = false;
     }
-  }
+  });
 
   type SessionWorkRange = NonNullable<typeof wb>["sessions"][number]["workRanges"][number];
 
@@ -524,23 +528,14 @@
 
   onMount(() => {
     if (initialRunId) void scrollToAnchor(`#run-${initialRunId}`);
-    let es: EventSource | null = null;
-    if (wb) {
-      es = new EventSource(`/api/duos/${wb.duo.id}/events`);
-      es.onmessage = (ev) => {
-        try {
-          const parsed = JSON.parse(ev.data) as DuoSseEvent;
-          if (parsed.type === "heartbeat") {
-            const others = liveStatuses.filter((s) => s.playerId !== parsed.playerId);
-            sseLiveStatuses = [...others, parsed];
-          } else if (parsed.type === "changed") {
-            void refreshWorkbench();
-          }
-        } catch {
-          // ignore malformed event
-        }
-      };
-    }
+    // The layout's shared stream: heartbeats update the status pills; any change or (re)connection refreshes once.
+    const offStream = stream?.subscribe((batch) => {
+      for (const hb of heartbeats(batch)) {
+        const others = liveStatuses.filter((s) => s.playerId !== hb.playerId);
+        sseLiveStatuses = [...others, hb];
+      }
+      if (needsRefresh("review", batch)) void refreshWorkbench();
+    });
 
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -584,7 +579,7 @@
 
     window.addEventListener("keydown", onKeyDown);
     return () => {
-      es?.close();
+      offStream?.();
       window.removeEventListener("keydown", onKeyDown);
     };
   });
@@ -657,6 +652,15 @@
         class="mt-3 rounded-xl border border-[var(--warn-border,var(--border))] bg-[var(--warn-bg)] px-4 py-2 text-sm text-[var(--warn)]"
       >
         That Learning no longer exists.
+      </p>
+    {/if}
+    {#if sessionMissing}
+      <p
+        role="status"
+        data-testid="session-missing"
+        class="mt-3 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-2 text-sm text-[var(--warn)]"
+      >
+        That Session no longer exists.
       </p>
     {/if}
 
@@ -1245,6 +1249,7 @@
             </p>
             {#if standaloneGameSlice}
               <GameCard
+                onSaved={refreshWorkbench}
                 game={standaloneGameSlice.game}
                 rounds={standaloneGameSlice.rounds}
                 highlightedRoundIds={selectedRoundId ? [selectedRoundId] : []}
@@ -1383,6 +1388,7 @@
               {@const slice = gameSlice(wb, gId)}
               {#if slice}
                 <GameCard
+                  onSaved={refreshWorkbench}
                   duoId={wb.duo.id}
                   game={slice.game}
                   rounds={slice.rounds}
@@ -1426,7 +1432,7 @@
                       >
                         {speaker?.displayName ?? "Player"}:
                       </strong>
-                      <UtteranceText duoId={wb.duo.id} utterance={u} />
+                      <UtteranceText duoId={wb.duo.id} utterance={u} onSaved={refreshWorkbench} />
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
                       <button
@@ -1485,6 +1491,7 @@
             <div class="space-y-2">
               {#if primaryGameSlice}
                 <GameCard
+                  onSaved={refreshWorkbench}
                   game={primaryGameSlice.game}
                   rounds={primaryGameSlice.rounds}
                   highlightedRoundIds={activeLearning.roundIds}

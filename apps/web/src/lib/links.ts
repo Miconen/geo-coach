@@ -27,6 +27,20 @@ export const links = {
     params instanceof URLSearchParams
       ? withQuery(`/duos/${duoId}/stats`, Object.fromEntries(groupParams(params)))
       : withQuery(`/duos/${duoId}/stats`, params),
+  /** Games index. */
+  games: (duoId: string) => `/duos/${duoId}/games`,
+  /** A Game. */
+  game: (duoId: string, gameId: string) => `/duos/${duoId}/games/${gameId}`,
+  /** A Round by its stored number; null for X7's non-positive numbers (they never link). */
+  round: (duoId: string, gameId: string, roundNumber: number, q: { location?: boolean } = {}) =>
+    roundNumber > 0
+      ? withQuery(`/duos/${duoId}/games/${gameId}/rounds/${roundNumber}`, { location: q.location ? "1" : null }, q.location ? "location" : null)
+      : null,
+  /** Sessions index. */
+  sessions: (duoId: string) => `/duos/${duoId}/sessions`,
+  /** A Session; ?run= pins a run (#run-<id>). */
+  session: (duoId: string, sessionId: string, q: { run?: string | null } = {}) =>
+    withQuery(`/duos/${duoId}/sessions/${sessionId}`, { run: q.run }, q.run ? `run-${q.run}` : null),
   /** Global Settings (not Duo-scoped). */
   settings: () => "/settings",
   /** Sign-in that returns to `next`. */
@@ -48,20 +62,28 @@ export interface EntityRef {
   id: string;
   /** Round number, for Round chips (X7: non-positive numbers never link). */
   roundNumber?: number;
+  /** The Round's Game, for Round chips. */
+  gameId?: string;
   /** The run's Session, for run chips. */
   sessionId?: string;
 }
 
 /**
- * Where an entity chip links, or null while its page has not shipped (the chip then renders plain text).
- * Learning chips pin the Learning on Review; run chips open the run in Review until the Session page ships.
+ * Where an entity chip links, or null while its page has not shipped (the chip then renders plain text) or the
+ * target never links (X7 Round numbers). Learning chips pin the Learning on Review; run chips open their Session.
  */
 export function entityHref(ref: EntityRef): string | null {
   switch (ref.kind) {
     case "learning":
       return links.review(ref.duoId, { learning: ref.id });
     case "run":
-      return links.review(ref.duoId, { run: ref.id });
+      return ref.sessionId ? links.session(ref.duoId, ref.sessionId, { run: ref.id }) : links.review(ref.duoId, { run: ref.id });
+    case "game":
+      return links.game(ref.duoId, ref.id);
+    case "round":
+      return ref.gameId && ref.roundNumber !== undefined ? links.round(ref.duoId, ref.gameId, ref.roundNumber) : null;
+    case "session":
+      return links.session(ref.duoId, ref.id);
     case "country":
       return links.stats(ref.duoId, { country: ref.id });
     default:

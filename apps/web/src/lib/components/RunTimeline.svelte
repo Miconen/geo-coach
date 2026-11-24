@@ -8,10 +8,18 @@
     timeline,
     duoId,
     playerName,
+    hasMore = false,
+    onLoadMore,
+    onRefresh,
   }: {
     timeline: RunTimeline;
     duoId: string;
     playerName: (playerId: string | null) => string;
+    /** Paged history (Session page): another page exists. */
+    hasMore?: boolean;
+    onLoadMore?: () => void;
+    /** "Refresh history": refetches page one. */
+    onRefresh?: () => void;
   } = $props();
 
   let showOlder = $state(false);
@@ -30,7 +38,7 @@
 
   const shortId = (id: string) => id.slice(-6);
   const time = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString() : "");
-  const runLink = (runId: string) => links.review(duoId, { run: runId });
+  const runLink = (runId: string) => links.session(duoId, timeline.sessionId, { run: runId });
 
   const visibleRows = $derived(showOlder ? timeline.rows : timeline.rows.slice(0, VISIBLE));
 
@@ -41,6 +49,11 @@
 </script>
 
 {#snippet row(r: RunTimelineRow, pinnedLabel: string | null)}
+  {#if r.noOpCount}
+  <li class="text-xs text-[var(--muted)]" data-testid="noop-row" data-purpose={r.purpose}>
+    {r.purpose}: {r.noOpCount} request{r.noOpCount === 1 ? "" : "s"} already up to date
+  </li>
+  {:else}
   <li
     id={r.runId ? `run-${r.runId}` : undefined}
     data-testid="run-row"
@@ -93,14 +106,22 @@
       {/each}
     {/if}
   </li>
+  {/if}
 {/snippet}
 
 <section class="space-y-2" data-testid="run-timeline" aria-label="Run history">
   <div class="flex items-center justify-between">
     <h3 class="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Run history</h3>
-    {#if timeline.manualCurrent > 0}
-      <span class="text-xs text-[var(--muted)]" data-testid="manual-row">Manual: {timeline.manualCurrent} current</span>
-    {/if}
+    <span class="flex items-center gap-2">
+      {#if timeline.manualCurrent > 0}
+        <span class="text-xs text-[var(--muted)]" data-testid="manual-row">Manual: {timeline.manualCurrent} current</span>
+      {/if}
+      {#if onRefresh}
+        <button type="button" class="text-xs text-[var(--accent)] underline" data-testid="refresh-history" onclick={onRefresh}
+          >Refresh history</button
+        >
+      {/if}
+    </span>
   </div>
   {#if timeline.pinMissing}
     <div class="rounded-lg border border-dashed border-[var(--border-strong)] px-3 py-1.5 text-xs" role="status">
@@ -125,6 +146,11 @@
       onclick={() => (showOlder = !showOlder)}
     >
       {showOlder ? "Show fewer" : `Show ${timeline.rows.length - VISIBLE} older`}
+    </button>
+  {/if}
+  {#if hasMore && onLoadMore}
+    <button type="button" class="text-xs text-[var(--accent)] underline" data-testid="load-more-runs" onclick={onLoadMore}>
+      Load older runs
     </button>
   {/if}
   {#each timeline.noOps as n}

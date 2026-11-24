@@ -183,7 +183,7 @@ export async function loadSessionRunsPage(
   }
 
   const wanted = [...pinnedRows, ...page];
-  const rows = await buildRows(db, duoId, sessionId, wanted);
+  const rows = await buildRunRows(db, duoId, wanted);
   // A collapsed no-op row stands for its purpose group (identity: purpose + newest no-op job id).
   if (!q.noop) {
     for (const row of rows) {
@@ -205,7 +205,7 @@ export async function loadSessionRunsPage(
       .select({ id: processingRuns.id })
       .from(processingRuns)
       .where(and(runInDuo(duoId), eq(processingRuns.sessionId, sessionId), eq(processingRuns.id, q.runId)));
-    if (pin) pinnedRun = (await buildRows(db, duoId, sessionId, [{ kind: "run", id: pin.id }]))[0] ?? null;
+    if (pin) pinnedRun = (await buildRunRows(db, duoId, [{ kind: "run", id: pin.id }]))[0] ?? null;
   }
 
   const last = page.at(-1);
@@ -217,11 +217,13 @@ export async function loadSessionRunsPage(
   };
 }
 
-/** Full RunTimelineRow objects for the given ids, in the given order (counts from the Duo-wide derivation). */
-async function buildRows(
+/**
+ * Full RunTimelineRow objects for the given run and job ids, in the given order (run-wide counts from the Duo-wide
+ * derivation). A job merges into its run only when Duo, Session and purpose agree, under the earliest such job.
+ */
+export async function buildRunRows(
   db: AppDb,
   duoId: string,
-  sessionId: string,
   wanted: Array<{ kind: string; id: string }>,
 ): Promise<RunTimelineRow[]> {
   if (wanted.length === 0) return [];
@@ -235,7 +237,7 @@ async function buildRows(
       ? db
           .select()
           .from(processingJobs)
-          .where(and(jobInDuo(duoId), eq(processingJobs.sessionId, sessionId), inArray(processingJobs.runId, runIds)))
+          .where(and(jobInDuo(duoId), inArray(processingJobs.runId, runIds)))
           .orderBy(processingJobs.createdAt, processingJobs.id)
       : Promise.resolve([]),
     jobIds.length

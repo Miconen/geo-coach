@@ -10,6 +10,7 @@
   } from "@geo-coach/shared";
   import ClaimCard from "$lib/components/ClaimCard.svelte";
   import Masked from "$lib/components/Masked.svelte";
+  import ManualLearningModal, { type ManualPrefill } from "$lib/components/ManualLearningModal.svelte";
   import { recall, setRecall } from "$lib/recall.svelte.js";
   import GameCard from "$lib/components/GameCard.svelte";
   import RoundCoachingCard from "$lib/components/RoundCoachingCard.svelte";
@@ -17,6 +18,7 @@
   import UtteranceText from "$lib/components/UtteranceText.svelte";
   import { formatRelSec } from "$lib/workbench/format.js";
   import { entityHref } from "$lib/links.js";
+  import { gameTitle, roundLabel, sessionTitle } from "$lib/entity-titles.js";
   import { getDuoStream } from "$lib/live/context.js";
   import { getPendingWork } from "$lib/live/pending-work.svelte.js";
   import { heartbeats, needsRefresh } from "$lib/live/dependencies.js";
@@ -104,13 +106,7 @@
 
   // Manual Learning modal
   let manualOpen = $state(false);
-  let manualKind = $state<LearningKind>("clue");
-  let manualText = $state("");
-  let manualDetail = $state("");
-  let manualCountries = $state("");
-  let manualTopics = $state("");
-  let manualUtteranceIds = $state<string[]>([]);
-  let manualRoundIds = $state<string[]>([]);
+  let manualPrefill = $state<ManualPrefill>({});
   let searchInputEl = $state<HTMLInputElement | null>(null);
 
   const filteredLearnings = $derived.by(() => {
@@ -324,48 +320,9 @@
     });
   });
 
-  function openManualModal(opts: { utteranceIds?: string[]; roundIds?: string[]; country?: string } = {}) {
-    manualKind = "clue";
-    manualText = "";
-    manualDetail = "";
-    manualCountries = opts.country ?? "";
-    manualTopics = "";
-    manualUtteranceIds = opts.utteranceIds ?? [];
-    manualRoundIds = opts.roundIds ?? [];
+  function openManualModal(opts: ManualPrefill = {}) {
+    manualPrefill = opts;
     manualOpen = true;
-  }
-
-  async function submitManualLearning(e: Event) {
-    e.preventDefault();
-    if (!wb || !manualText.trim()) return;
-    const countries = manualCountries
-      .split(/[,\s]+/)
-      .map((c) => c.trim().toUpperCase())
-      .filter((c) => c.length === 2);
-    const topics = manualTopics
-      .split(/[,\s]+/)
-      .map((t) => t.trim().toLowerCase())
-      .filter(Boolean);
-
-    const res = await fetch("/api/learnings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        duoId: wb.duo.id,
-        kind: manualKind,
-        text: manualText.trim(),
-        detail: manualDetail.trim() || null,
-        countries,
-        regions: [],
-        topics,
-        utteranceIds: manualUtteranceIds,
-        roundIds: manualRoundIds,
-      }),
-    });
-    if (res.ok) {
-      manualOpen = false;
-      await refreshWorkbench();
-    }
   }
 
   async function react(learningId: string, reaction: ReactionType) {
@@ -695,6 +652,15 @@
         That Learning no longer exists.
       </p>
     {/if}
+    {#if data.runMissing}
+      <p
+        role="status"
+        data-testid="run-missing"
+        class="mt-3 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-2 text-sm text-[var(--warn)]"
+      >
+        That run no longer exists.
+      </p>
+    {/if}
     {#if sessionMissing}
       <p
         role="status"
@@ -715,18 +681,14 @@
           {#if wb.recentGames.length === 0}
             <span class="text-xs text-[var(--muted)]">No ranked Games synced yet.</span>
           {:else}
-            {#each wb.recentGames.slice(0, 10) as g}
-              <button
-                onclick={() => jumpToGame(g.id)}
-                class="mono inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium hover:border-[var(--accent)] {g.won
-                  ? 'border-[var(--ok-border)] bg-[var(--ok-bg)] text-[var(--ok)]'
-                  : 'border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger)]'}"
-              >
-                <span>{g.won ? "W" : "L"}</span>
-                {#if g.ratingDelta !== null}
-                  <span>{g.ratingDelta >= 0 ? "+" : ""}{g.ratingDelta}</span>
-                {/if}
-              </button>
+            {#each wb.recentGames.slice(0, 10) as g (g.id)}
+              <span data-testid="recent-game">
+                <EntityChip
+                  kind="game"
+                  label={`${g.won ? "W" : "L"}${g.ratingDelta !== null ? ` ${g.ratingDelta >= 0 ? "+" : ""}${g.ratingDelta}` : ""} · ${gameTitle(g)}`}
+                  href={entityHref({ kind: "game", duoId: wb.duo.id, id: g.id })}
+                />
+              </span>
             {/each}
           {/if}
         </div>
@@ -1127,29 +1089,29 @@
                     </Masked>
                   {/if}
 
-                  {#if gameLinks.length > 0 || item.sessionIds.length > 0}
-                    <Masked block revealed={isRevealed} label="">
-                    <!-- Primary relationships inline (1b-shell): Session and Game chips; plain text until their pages ship. -->
-                    <div class="mt-1.5 flex flex-wrap items-center gap-1 text-[11px] text-[var(--muted)]" data-testid="learning-chips">
-                      {#each item.sessionIds as sid (sid)}
-                        {@const ses = wb.sessions.find((x) => x.id === sid)}
-                        <EntityChip
-                          kind="session"
-                          label={ses ? new Date(ses.startedAt).toLocaleDateString() : "Session"}
-                          href={entityHref({ kind: "session", duoId: wb.duo.id, id: sid })}
-                        />
-                      {/each}
-                      {#each gameLinks as gl (gl.game.id)}
-                        <EntityChip
-                          kind="game"
-                          label={`vs ${gl.game.opponentTeamName ?? "Opponents"} · ${gl.rounds.map((r) => `R${r.roundNumber}`).join(", ")}`}
-                          href={entityHref({ kind: "game", duoId: wb.duo.id, id: gl.game.id })}
-                        />
-                      {/each}
-                    </div>
-                    </Masked>
-                  {/if}
                 </button>
+                    {#if gameLinks.length > 0 || item.sessionIds.length > 0}
+                      <Masked block revealed={isRevealed} label="">
+                      <!-- Primary relationships inline (1b-shell): Session and Game chips; plain text until their pages ship. -->
+                      <div class="-mt-2 px-3.5 pb-3 flex flex-wrap items-center gap-1 text-[11px] text-[var(--muted)]" data-testid="learning-chips">
+                        {#each item.sessionIds as sid (sid)}
+                          {@const ses = wb.sessions.find((x) => x.id === sid)}
+                          <EntityChip
+                            kind="session"
+                            label={ses ? new Date(ses.startedAt).toLocaleDateString() : "Session"}
+                            href={entityHref({ kind: "session", duoId: wb.duo.id, id: sid })}
+                          />
+                        {/each}
+                        {#each gameLinks as gl (gl.game.id)}
+                          <EntityChip
+                            kind="game"
+                            label={`vs ${gl.game.opponentTeamName ?? "Opponents"} · ${gl.rounds.map((r) => `R${r.roundNumber}`).join(", ")}`}
+                            href={entityHref({ kind: "game", duoId: wb.duo.id, id: gl.game.id })}
+                          />
+                        {/each}
+                      </div>
+                      </Masked>
+                    {/if}
                 {#if !isRevealed}
                   <!-- Shown only while Recall masks this row (a sibling of the select control, never nested). -->
                   <span class="recall-mask-placeholder">
@@ -1369,14 +1331,17 @@
               {#each activeSession.gameIds as gId, i}
                 {@const g = wb.gamesById[gId]}
                 {#if g}
-                  <button
-                    onclick={() => (selectedGameId = g.id)}
-                    class="mono rounded-md border px-2.5 py-1 {selectedGameId === g.id
-                      ? 'border-[var(--accent)] bg-[var(--accent-soft)] font-semibold text-[var(--accent-soft-ink)]'
-                      : 'border-[var(--border)]'}"
-                  >
-                    Game {i + 1} ({g.won ? "W" : "L"} · {g.micCount} mic{g.micCount === 1 ? "" : "s"})
-                  </button>
+                  <span class="inline-flex items-center gap-1" data-testid="session-game-control">
+                    <button
+                      onclick={() => (selectedGameId = g.id)}
+                      class="mono rounded-md border px-2.5 py-1 {selectedGameId === g.id
+                        ? 'border-[var(--accent)] bg-[var(--accent-soft)] font-semibold text-[var(--accent-soft-ink)]'
+                        : 'border-[var(--border)]'}"
+                    >
+                      Game {i + 1} ({g.won ? "W" : "L"} · {g.micCount} mic{g.micCount === 1 ? "" : "s"})
+                    </button>
+                    <EntityChip kind="game" label={gameTitle(g)} href={entityHref({ kind: "game", duoId: wb.duo.id, id: g.id })} />
+                  </span>
                 {/if}
               {/each}
               <div class="ml-auto flex items-center gap-1">
@@ -1694,7 +1659,20 @@
                 </Masked>
               {/if}
 
-              <!-- Links back to the Games and Rounds -->
+              <!-- Links back to the Sessions, Games and Rounds -->
+              {#if activeLearning.sessionIds.length > 0}
+                <div class="flex flex-wrap items-center gap-1.5 text-xs" data-testid="from-session">
+                  <span class="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">From Session</span>
+                  {#each activeLearning.sessionIds as sid (sid)}
+                    {@const ses = wb.sessions.find((x) => x.id === sid)}
+                    <EntityChip
+                      kind="session"
+                      label={ses ? sessionTitle(ses) : "Session"}
+                      href={entityHref({ kind: "session", duoId: wb.duo.id, id: sid })}
+                    />
+                  {/each}
+                </div>
+              {/if}
               {#if activeLearningGames.length > 0}
                 <Masked block revealed={activeItemRevealed}>
                 <div class="space-y-1">
@@ -1702,23 +1680,14 @@
                     From {activeLearningGames.length === 1 ? "Game" : "Games"}
                   </div>
                   {#each activeLearningGames as { game, rounds } (game.id)}
-                    <div class="flex flex-wrap items-center gap-1.5 rounded-lg bg-[var(--surface-subtle)] p-2 text-xs">
-                      <button
-                        onclick={() => {
-                          selectedRoundId = null;
-                          jumpToGame(game.id);
-                        }}
-                        class="font-medium text-[var(--accent)] hover:underline"
-                      >
-                        vs {game.opponentTeamName ?? "Opponents"} · {new Date(game.startedAt).toLocaleDateString()}
-                      </button>
+                    <div class="flex flex-wrap items-center gap-1.5 rounded-lg bg-[var(--surface-subtle)] p-2 text-xs" data-testid="from-game">
+                      <EntityChip kind="game" label={gameTitle(game)} href={entityHref({ kind: "game", duoId: wb.duo.id, id: game.id })} />
                       {#each rounds as round (round.id)}
-                        <button
-                          onclick={() => openRound(round.id)}
-                          class="mono rounded border border-[var(--border-strong)] px-1.5 py-0.5 hover:bg-[var(--surface-hover)]"
-                        >
-                          R{round.roundNumber}{round.countryCode ? ` ${round.countryCode}` : ""}
-                        </button>
+                        <EntityChip
+                          kind="round"
+                          label={roundLabel(round)}
+                          href={entityHref({ kind: "round", duoId: wb.duo.id, id: round.id, gameId: round.gameId, roundNumber: round.roundNumber })}
+                        />
                       {/each}
                     </div>
                   {/each}
@@ -1790,110 +1759,12 @@
     </div>
   </div>
 
-  <!-- Manual Learning Modal -->
-  {#if manualOpen}
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[2px] p-4">
-      <form
-        onsubmit={submitManualLearning}
-        class="w-full max-w-lg rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 space-y-3 shadow-lg"
-      >
-        <div class="flex items-center justify-between">
-          <h2 class="text-base font-semibold">Add Manual Learning</h2>
-          <button type="button" onclick={() => (manualOpen = false)} class="text-xs text-[var(--muted)]">
-            Close (Esc)
-          </button>
-        </div>
-
-        <label class="block text-xs">
-          Kind
-          <select bind:value={manualKind} class="mt-1 w-full rounded border border-[var(--border-strong)] p-2 text-sm">
-            <option value="clue">Clue</option>
-            <option value="distinguisher">Distinguisher</option>
-            <option value="mistake">Mistake</option>
-            <option value="strategy">Strategy</option>
-            <option value="study">Study item</option>
-            <option value="other">Other</option>
-          </select>
-        </label>
-
-        <label class="block text-xs">
-          One-sentence takeaway
-          <input
-            required
-            bind:value={manualText}
-            placeholder="e.g. Yellow-top bollards with a red reflector point to Bulgaria."
-            class="mt-1 w-full rounded border border-[var(--border-strong)] p-2 text-sm"
-          />
-        </label>
-
-        <label class="block text-xs">
-          Detail (optional)
-          <textarea
-            rows="3"
-            bind:value={manualDetail}
-            class="mt-1 w-full rounded border border-[var(--border-strong)] p-2 text-sm"
-          ></textarea>
-        </label>
-
-        <div class="grid grid-cols-2 gap-2">
-          <label class="block text-xs">
-            ISO Country Codes
-            <input
-              bind:value={manualCountries}
-              placeholder="BG, RO"
-              class="mono mt-1 w-full rounded border border-[var(--border-strong)] p-2 text-sm"
-            />
-          </label>
-          <label class="block text-xs">
-            Topics
-            <input
-              bind:value={manualTopics}
-              placeholder="bollards, meta"
-              class="mt-1 w-full rounded border border-[var(--border-strong)] p-2 text-sm"
-            />
-          </label>
-        </div>
-
-        <label class="block text-xs">
-          Game / Round (optional)
-          <select
-            value={manualRoundIds[0] ?? ""}
-            onchange={(e) => {
-              const roundId = e.currentTarget.value;
-              manualRoundIds = roundId ? [roundId] : [];
-            }}
-            class="mt-1 w-full rounded border border-[var(--border-strong)] p-2 text-sm"
-          >
-            <option value="">Not linked</option>
-            {#each wb.recentGames as g (g.id)}
-              <optgroup label="{new Date(g.startedAt).toLocaleDateString()} vs {g.opponentTeamName ?? 'Opponents'}">
-                {#each g.roundIds as rId (rId)}
-                  {@const r = wb.roundsById[rId]}
-                  {#if r}
-                    <option value={r.id}>R{r.roundNumber}{r.countryCode ? ` · ${r.countryCode}` : ""}</option>
-                  {/if}
-                {/each}
-              </optgroup>
-            {/each}
-          </select>
-        </label>
-
-        <div class="flex justify-end gap-2 pt-2">
-          <button
-            type="button"
-            onclick={() => (manualOpen = false)}
-            class="rounded-lg border border-[var(--border-strong)] bg-[var(--surface-subtle)] px-3 py-1.5 text-xs hover:bg-[var(--surface-hover)]"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            class="rounded-lg bg-[var(--accent)] px-4 py-1.5 text-xs font-semibold text-[var(--accent-ink)] hover:opacity-95"
-          >
-            Save Manual Learning
-          </button>
-        </div>
-      </form>
-    </div>
-  {/if}
+  <ManualLearningModal
+    bind:open={manualOpen}
+    duoId={wb.duo.id}
+    games={wb.recentGames}
+    roundsById={wb.roundsById}
+    prefill={manualPrefill}
+    onSaved={refreshWorkbench}
+  />
 {/if}

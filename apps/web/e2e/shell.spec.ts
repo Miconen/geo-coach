@@ -81,9 +81,10 @@ test("?learning= pins a Learning, and a missing one says so", async ({ page }) =
   await expect(page.getByTestId("learning-missing")).toBeVisible();
 });
 
-test("?run= on Review opens the run, and the chrome's pending-work API answers", async ({ page }) => {
+test("?run= on Review opens the run on its Session page, and the chrome's pending-work API answers", async ({ page }) => {
   await login(page, s.mikoId);
   await page.goto(links(`?run=${s.runId}#run-${s.runId}`));
+  await expect(page).toHaveURL(new RegExp(`/sessions/${s.sessionId}\\?run=${s.runId}#run-${s.runId}$`));
   await expect(page.locator(`#run-${s.runId}`)).toBeVisible();
   const res = await page.request.get(`/api/duos/${s.duoId}/pending-work`);
   expect(res.status()).toBe(200);

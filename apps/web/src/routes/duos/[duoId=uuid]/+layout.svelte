@@ -50,8 +50,12 @@
 
   const SECTIONS = [
     { key: "review", label: "Review", href: (id: string) => links.review(id) },
+    { key: "games", label: "Games", href: (id: string) => links.games(id) },
+    { key: "sessions", label: "Sessions", href: (id: string) => links.sessions(id) },
     { key: "stats", label: "Stats", href: (id: string) => links.stats(id) },
   ] as const;
+  // Entity pages add their own crumbs below the section (the parent first, then the page itself).
+  const crumbs = $derived((page.data.crumbs ?? []) as Array<{ label: string; href?: string }>);
   const current = $derived(SECTIONS.find((s) => page.route.id?.startsWith(`/duos/[duoId=uuid]/${s.key}`)) ?? null);
 
   // Pending extract ranges and worker status, fetched lazily (never part of the layout load).
@@ -91,13 +95,26 @@
         <li class="font-semibold text-[var(--ink)]">{data.duo.name}</li>
         {#if current}
           <li aria-hidden="true" class="text-[var(--muted)]">›</li>
-          <li aria-current="page" class="text-[var(--muted)]">{current.label}</li>
+          {#if crumbs.length > 0}
+            <li><a class="text-[var(--muted)] hover:text-[var(--ink)] hover:underline" href={current.href(duoId)}>{current.label}</a></li>
+          {:else}
+            <li aria-current="page" class="text-[var(--muted)]">{current.label}</li>
+          {/if}
+          {#each crumbs as c, i (i)}
+            <li aria-hidden="true" class="text-[var(--muted)]">›</li>
+            {#if c.href && i < crumbs.length - 1}
+              <li><a class="text-[var(--muted)] hover:text-[var(--ink)] hover:underline" href={c.href}>{c.label}</a></li>
+            {:else}
+              <li aria-current="page" class="text-[var(--muted)]">{c.label}</li>
+            {/if}
+          {/each}
         {/if}
       </ol>
       <div class="flex flex-wrap items-center gap-1.5">
         {#each SECTIONS as s}
           <a
             href={s.href(duoId)}
+            data-testid="section-{s.key}"
             aria-current={current?.key === s.key ? "page" : undefined}
             class="rounded-lg px-2.5 py-1 font-medium {current?.key === s.key
               ? 'bg-[var(--accent-soft)] text-[var(--accent-soft-ink)]'

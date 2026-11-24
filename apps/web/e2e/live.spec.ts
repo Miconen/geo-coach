@@ -53,7 +53,7 @@ test("logging out in another tab clears this tab's Duo data", async ({ page, con
 
 test("losing membership while the stream is open clears the Duo's data", async ({ page }) => {
   await login(page, s.soraId);
-  await page.goto(`${review}?run=${s.runId}`);
+  await page.goto(review);
   const nav = page.getByRole("navigation", { name: "Duo" });
   await expect(nav).toHaveAttribute("data-stream", "open");
   await withSql((sql) => sql`DELETE FROM duo_memberships WHERE player_id = ${s.soraId} AND duo_id = ${s.duoId}`);

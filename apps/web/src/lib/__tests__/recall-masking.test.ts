@@ -13,8 +13,8 @@ const ANSWER_FIELDS: Array<{ file: string; fields: string[] }> = [
     fields: [
       "{item.text}",
       "item.topics as topic",
-      "kind=\"session\"",
-      "kind=\"game\"",
+      "data-testid=\"learning-chips\"",
+      "data-testid=\"from-game\"",
       "{activeLearning.text}",
       "{activeLearning.detail}",
       "{activeLearning.agentNote}",
@@ -22,7 +22,6 @@ const ANSWER_FIELDS: Array<{ file: string; fields: string[] }> = [
       "<ClaimCard {claim} {wb} compact",
       "View replacement",
       "View earlier",
-      "vs {game.opponentTeamName",
       "onSelectUtterance={openUtterance}\n",
       "Cited Speech",
       "<GameCard\n                  onSaved={refreshWorkbench}\n                  duoId={wb.duo.id}",
@@ -31,6 +30,17 @@ const ANSWER_FIELDS: Array<{ file: string; fields: string[] }> = [
   },
   { file: "lib/components/ClaimCard.svelte", fields: ["{l.text}"] },
   { file: "lib/components/GameCard.svelte", fields: ["{l.text}"] },
+  { file: "lib/components/LearningRow.svelte", fields: ["{learning.text}"] },
+  { file: "lib/components/ClaimRow.svelte", fields: ["{claim.text}"] },
+  { file: "lib/components/TranscriptTimeline.svelte", fields: ["<GameCard", "betweenGame as u"] },
+  {
+    file: "routes/duos/[duoId=uuid]/games/[gameId=uuid]/rounds/[n=roundnumber]/+page.svelte",
+    fields: [
+      "<RoundCoachingCard round={slice.round} utterances={slice.utterances} players={slice.players} />",
+      "slice.utterances as u",
+      "p.round.lat.toFixed",
+    ],
+  },
 ];
 
 function insideMasked(src: string, at: number): boolean {

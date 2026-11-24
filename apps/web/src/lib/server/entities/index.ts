@@ -12,8 +12,10 @@ import {
   type WorkbenchUtterance,
 } from "../workbench/view-model.js";
 import { loadSessionRunsPage, type SessionRunsPage } from "./session-runs.js";
+import { loadGameRuns, type GameRun } from "./game-runs.js";
 
 export * from "./session-runs.js";
+export * from "./game-runs.js";
 
 /**
  * Entity payloads for the Game, Round and Session pages and their /refresh endpoints (#56 2a). Each is a slice of
@@ -49,6 +51,8 @@ export interface GamePayload {
   sessions: SessionChip[];
   /** Sessions related only by citation (a Learning of that Session cites one of this Game's Rounds). */
   relatedSessions: SessionChip[];
+  /** Runs listed on the Game page, with run-wide and Game-scoped counts. */
+  runs: GameRun[];
   wb: EntityWorkbench;
 }
 
@@ -177,6 +181,7 @@ export async function loadGamePayload(
     game,
     sessions: overlap.flatMap((id) => sessionChip(full, id) ?? []),
     relatedSessions: [...cited].flatMap((id) => sessionChip(full, id) ?? []),
+    runs: await loadGameRuns(db, duoId, game, full),
     wb: slice(full, { gameIds: new Set([gameId]), sessionIds: new Set(overlap) }),
   };
 }

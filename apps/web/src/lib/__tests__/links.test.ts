@@ -26,6 +26,13 @@ describe("links", () => {
     );
   });
 
+  it("builds Games, Rounds and Sessions", () => {
+    expect(links.games(D)).toBe(`/duos/${D}/games`);
+    expect(links.sessions(D)).toBe(`/duos/${D}/sessions`);
+    expect(links.round(D, "G", 3, { location: true })).toBe(`/duos/${D}/games/G/rounds/3?location=1#location`);
+    expect(links.session(D, "S", { run: R })).toBe(`/duos/${D}/sessions/S?run=${R}#run-${R}`);
+  });
+
   it("builds Settings and login", () => {
     expect(links.settings()).toBe("/settings");
     expect(links.login()).toBe("/login");
@@ -36,8 +43,15 @@ describe("links", () => {
   it("links only entities whose page has shipped", () => {
     expect(entityHref({ kind: "learning", duoId: D, id: "L1" })).toBe(links.review(D, { learning: "L1" }));
     expect(entityHref({ kind: "run", duoId: D, id: R })).toBe(links.review(D, { run: R }));
+    expect(entityHref({ kind: "run", duoId: D, id: R, sessionId: "S" })).toBe(`/duos/${D}/sessions/S?run=${R}#run-${R}`);
     expect(entityHref({ kind: "country", duoId: D, id: "ES" })).toBe(links.stats(D, { country: "ES" }));
-    for (const kind of ["game", "round", "session", "claim", "source"] as const) {
+    expect(entityHref({ kind: "game", duoId: D, id: "G" })).toBe(`/duos/${D}/games/G`);
+    expect(entityHref({ kind: "session", duoId: D, id: "S" })).toBe(`/duos/${D}/sessions/S`);
+    expect(entityHref({ kind: "round", duoId: D, id: "r", gameId: "G", roundNumber: 2 })).toBe(`/duos/${D}/games/G/rounds/2`);
+    // X7: Round 0 and negative numbers never link.
+    expect(entityHref({ kind: "round", duoId: D, id: "r", gameId: "G", roundNumber: 0 })).toBeNull();
+    expect(entityHref({ kind: "round", duoId: D, id: "r", gameId: "G", roundNumber: -1 })).toBeNull();
+    for (const kind of ["claim", "source"] as const) {
       expect(entityHref({ kind, duoId: D, id: "x" })).toBeNull();
     }
   });

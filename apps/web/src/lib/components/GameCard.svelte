@@ -2,6 +2,7 @@
   import RoundCoachingCard from "$lib/components/RoundCoachingCard.svelte";
   import UtteranceText from "$lib/components/UtteranceText.svelte";
   import Masked from "./Masked.svelte";
+  import { DELETE_SPEECH_LABEL } from "$lib/delete-speech.js";
   import Inspect from "$lib/inspect/Inspect.svelte";
   import { formatRelSec } from "$lib/workbench/format.js";
   import type { RoundSlice } from "$lib/workbench/slices.js";
@@ -136,9 +137,10 @@
                 {#if speaker?.isCurrentPlayer}
                   <button
                     onclick={() => onDeleteUtterance?.(u)}
+                    title={DELETE_SPEECH_LABEL}
                     class="text-[var(--danger)] hover:underline"
                   >
-                    Delete
+                    Delete speech
                   </button>
                 {/if}
               </div>

@@ -16,9 +16,9 @@ test("a ?run= deep link opens its Session with the run pinned", async ({ page })
   await expect(row.getByTestId("run-counts")).toContainText("Learnings: 2 current of 2 surviving");
 });
 
-test("a bare ?run= resolves its owning Duo; / drops a bad ?run=, Review 404s it", async ({ page }) => {
+test("a bare ?run= resolves its owning Duo and Session; / drops a bad ?run=, Review says it is gone", async ({ page }) => {
   await page.goto(`/?run=${s.run2Id}`);
-  await expect(page).toHaveURL(new RegExp(`/duos/${s.duoId}/review\\?run=${s.run2Id}`));
+  await expect(page).toHaveURL(new RegExp(`/duos/${s.duoId}/sessions/${s.session2Id}\\?run=${s.run2Id}`));
   await expect(page.locator(`#run-${s.run2Id}`)).toBeVisible();
   // At the root a malformed or unresolvable ?run= is dropped, never a 404 (X1).
   for (const q of ["run=not-a-uuid", `run=${s.otherRunId}`, `duo=${s.otherDuoId}&run=${s.otherRunId}`]) {
@@ -26,16 +26,18 @@ test("a bare ?run= resolves its owning Duo; / drops a bad ?run=, Review 404s it"
     expect(res!.status()).toBe(200);
     await expect(page).toHaveURL(new RegExp(`/duos/${s.duoId}/review$`));
   }
-  // On the Duo page it is a 404 (X2).
+  // On Review, from 2a(ii), a malformed, missing or cross-Duo ?run= says "no longer exists" (X2), not 404.
   const review = `/duos/${s.duoId}/review`;
-  expect((await page.goto(`${review}?run=not-a-uuid`))!.status()).toBe(404);
-  expect((await page.goto(`${review}?run=${s.otherRunId}`))!.status()).toBe(404);
+  for (const bad of ["not-a-uuid", s.otherRunId]) {
+    expect((await page.goto(`${review}?run=${bad}`))!.status()).toBe(200);
+    await expect(page.getByTestId("run-missing")).toBeVisible();
+  }
+  // Another Duo's Review is still a 404 for a non-member.
   expect((await page.goto(`/duos/${s.otherDuoId}/review?run=${s.runId}`))!.status()).toBe(404);
 });
 
 test("selecting a Session fetches its history; rapid switches show the last Session's rows", async ({ page }) => {
-  await page.goto(`/?duo=${s.duoId}&run=${s.runId}`);
-  await expect(page.locator(`#run-${s.runId}`)).toBeVisible();
+  await page.goto(`/duos/${s.duoId}/review`);
   await page.waitForLoadState("networkidle");
   const one = page.locator(`[data-testid="session-button"][data-session-id="${s.sessionId}"]`);
   const two = page.locator(`[data-testid="session-button"][data-session-id="${s.session2Id}"]`);

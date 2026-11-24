@@ -66,7 +66,7 @@ export interface RatingPoint {
   position: number | null;
   won: boolean | null;
   opponentRatingBefore: number | null;
-  sessionId: string | null;
+  sessionIds: string[];
 }
 
 /** One point per Game, in start order, for the rating line. */
@@ -80,7 +80,7 @@ export function ratingSeries(games: readonly StatsGame[]): RatingPoint[] {
     position: g.positionAfter,
     won: g.won,
     opponentRatingBefore: g.opponentRatingBefore,
-    sessionId: g.sessionId,
+    sessionIds: g.sessionIds,
   }));
 }
 

@@ -844,7 +844,10 @@
                     title={ses.status}
                   ></span>
                 </div>
-                <div class="mt-0.5 mono text-[11px] text-[var(--muted)]">
+                <div
+                  class="mt-0.5 mono text-[11px] text-[var(--muted)]"
+                  title="Games played in this Session. The rating change counts each Game once, toward the Session it overlaps most (a Game can belong to several Sessions)."
+                >
                   {ses.gameIds.length}G · {ses.micCount} mic{ses.micCount === 1 ? "" : "s"} · {ses.ratingDelta >= 0 ? "+" : ""}{ses.ratingDelta}
                 </div>
               </button>

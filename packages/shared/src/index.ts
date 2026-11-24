@@ -6,6 +6,7 @@ export * from "./country-sizes.js";
 export * from "./clock.js";
 export * from "./geoguessr.js";
 export * from "./linking.js";
+export * from "./game-bounds.js";
 export * from "./contracts.js";
 export * from "./themes.js";
 export * from "./transcript-corrections.js";

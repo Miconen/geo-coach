@@ -1,6 +1,10 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import {
+  gameBounds,
+  gameRatingSessionId,
+  gameSessionIds,
   panoViewsByRound,
+  type SessionSpan,
   type PanoView,
   type RawDuelPayload,
   type StatsCall,
@@ -65,11 +69,21 @@ export async function buildStatsPayload(db: AppDb, duoId: string): Promise<Stats
     }
   }
   const sessions = [...boundsBySession.values()].sort((a, b) => a.startedAtMs - b.startedAtMs);
+  // Recording overlap on relationship bounds, 0..N Sessions per Game, shared with the workbench (#56 1a-derivation).
+  const sessionSpans: SessionSpan[] = sessions.map((s) => ({
+    id: s.id,
+    startedAt: new Date(s.startedAtMs),
+    endedAt: new Date(s.endedAtMs),
+    recordings: allRecordings
+      .filter((rec) => rec.sessionId === s.id)
+      .map((rec) => ({ startedAt: rec.startedAt, endedAt: rec.stoppedAt ?? new Date(nowMs) })),
+  }));
+  const roundsByGame = new Map<string, (typeof allRounds)[number][]>();
+  for (const r of allRounds) roundsByGame.set(r.gameId, [...(roundsByGame.get(r.gameId) ?? []), r]);
 
   const statsGames: StatsGame[] = allGames.map((g) => {
     const startMs = g.startedAt.getTime();
-    const endMs = g.endedAt.getTime();
-    const session = sessions.find((s) => s.startedAtMs < endMs && startMs < s.endedAtMs);
+    const relationship = gameBounds(roundsByGame.get(g.id) ?? []).relationship;
     return {
       id: g.id,
       startedAtMs: startMs,
@@ -81,7 +95,8 @@ export async function buildStatsPayload(db: AppDb, duoId: string): Promise<Stats
       opponentRatingBefore: g.opponentRatingBefore,
       positionBefore: g.duoPositionBefore,
       positionAfter: g.duoPositionAfter,
-      sessionId: session?.id ?? null,
+      sessionIds: gameSessionIds(relationship, sessionSpans),
+      ratingSessionId: gameRatingSessionId(relationship, sessionSpans),
     };
   });
 

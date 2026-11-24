@@ -395,6 +395,41 @@ export async function getCurrentTranscriptVersionId(
   return newestComplete ? newestComplete.id : versions[0]!.id;
 }
 
+/**
+ * getCurrentTranscriptVersionId for many Recordings in one query (#56 1a-derivation), same election on the
+ * verified chain. Recordings without a version are absent from the map.
+ */
+export async function getCurrentTranscriptVersionIds(
+  db: AppDb,
+  recordingIds: readonly string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (recordingIds.length === 0) return out;
+  const versions = await db
+    .select({
+      id: transcriptVersions.id,
+      recordingId: transcriptVersions.recordingId,
+      isComplete: transcriptVersions.isComplete,
+    })
+    .from(transcriptVersions)
+    .where(
+      and(
+        inArray(transcriptVersions.recordingId, [...recordingIds]),
+        sql`exists (select 1 from ${recordings} r join ${sessions} s on s.id = r.session_id
+          where r.id = ${transcriptVersions.recordingId} and r.duo_id = ${transcriptVersions.duoId}
+            and s.duo_id = ${transcriptVersions.duoId})`,
+      ),
+    )
+    .orderBy(desc(transcriptVersions.createdAt), desc(transcriptVersions.id));
+  const newest = new Map<string, string>();
+  for (const v of versions) {
+    if (!newest.has(v.recordingId)) newest.set(v.recordingId, v.id);
+    if (v.isComplete && !out.has(v.recordingId)) out.set(v.recordingId, v.id);
+  }
+  for (const [rec, id] of newest) if (!out.has(rec)) out.set(rec, id);
+  return out;
+}
+
 async function recomputeRecordingOffsetAndUtterances(
   db: AppDb,
   recordingId: string,

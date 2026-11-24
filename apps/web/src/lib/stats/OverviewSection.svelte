@@ -73,7 +73,8 @@
         : [{ x1: new Date(first.startedAtMs), x2: new Date(last.startedAtMs) }];
     };
     const sessionBands: Band[] = payload.sessions.flatMap((s): Band[] => {
-      const inSession = series.filter((p) => p.sessionId === s.id);
+      // A Game spanning Sessions draws once in each.
+      const inSession = series.filter((p) => p.sessionIds.includes(s.id));
       if (inSession.length === 0) return [];
       return xAxis === "game"
         ? [{ x1: inSession[0]!.gameNumber - 0.5, x2: inSession.at(-1)!.gameNumber + 0.5 }]

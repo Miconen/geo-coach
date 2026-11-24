@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   PLAIN_COUNTRY,
   SESSION_GAP_MS,
@@ -7,6 +7,15 @@ import {
   getCountryName,
   regionName,
   intervalsOverlap,
+  gameBounds,
+  gameOverlaps,
+  gameRatingSessionId,
+  gameSessionIds,
+  rangeStatus,
+  roundWindowsById,
+  type SessionSpan,
+  type TimeInterval,
+  type WordTiming,
   undirectedConfusionPairs,
   type ClaimStatus,
   type Continent,
@@ -38,7 +47,7 @@ import {
   deriveClaims,
   deriveLearningsWithStatus,
   deriveSessionWorkRanges,
-  getCurrentTranscriptVersionId,
+  getCurrentTranscriptVersionIds,
   listCitedSections,
   listSources,
   loadTranscriptCorrector,
@@ -81,6 +90,8 @@ export interface WorkbenchUtterance {
   avgLogprob: number | null;
   noSpeechProb: number | null;
   citedByLearningIds: string[];
+  /** Cited speech from a Transcript version that is no longer current: read-only, outside the timeline. */
+  historical: boolean;
   rangeStatus: "processed" | "stale" | "unprocessed";
   rangeStatusByPurpose: {
     extract: "processed" | "stale" | "unprocessed";
@@ -172,7 +183,8 @@ const DEBRIEF_LINK_WINDOW_MS = 2 * 60_000;
 export interface WorkbenchLearning {
   id: string;
   runId: string | null;
-  sessionId: string | null;
+  /** The run's Session, or every Session a Manual Learning's citations imply (0..N; uncited: none). */
+  sessionIds: string[];
   authorPlayerId: string | null;
   purpose: ProcessingRunPurpose | null;
   kind: LearningKind;
@@ -405,12 +417,23 @@ export async function buildWorkbenchData(
         orderBy: [desc(sessions.createdAt)],
       }),
       db.select().from(recordings).where(recordingInDuo(duoId)).orderBy(asc(recordings.startedAt)),
+      // Review never ships games.rawDuel.
       db.query.games.findMany({
         where: eq(games.duoId, duoId),
         orderBy: [desc(games.startedAt)],
+        columns: { rawDuel: false },
       }),
       db.select().from(rounds).where(roundInDuo(duoId)).orderBy(asc(rounds.startTime)),
-      db.query.replays.findMany({ where: eq(replays.duoId, duoId) }),
+      // Replay availability as counts per stored Round (every Player's Replay row).
+      db
+        .select({
+          gameId: replays.gameId,
+          roundNumber: replays.roundNumber,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(replays)
+        .where(and(eq(replays.duoId, duoId), eq(replays.hasEvents, true)))
+        .groupBy(replays.gameId, replays.roundNumber),
       deriveLearningsWithStatus(db, duoId),
       deriveClaims(db, duoId),
       listSources(db, duoId),
@@ -435,8 +458,7 @@ export async function buildWorkbenchData(
     };
   }
 
-  // Load current Transcript version Utterances for every Recording
-  const currentVersionIds: string[] = [];
+  // Load current Transcript version Utterances for every Recording (versions elected in one query)
   const recSessionById = new Map<string, string>();
   const recsBySession = new Map<string, typeof allRecordings>();
   for (const rec of allRecordings) {
@@ -444,18 +466,52 @@ export async function buildWorkbenchData(
     const list = recsBySession.get(rec.sessionId) ?? [];
     list.push(rec);
     recsBySession.set(rec.sessionId, list);
-
-    const tvId = await getCurrentTranscriptVersionId(db, rec.id);
-    if (tvId) currentVersionIds.push(tvId);
   }
+  const currentVersionIds = [
+    ...(
+      await getCurrentTranscriptVersionIds(
+        db,
+        allRecordings.map((r) => r.id),
+      )
+    ).values(),
+  ];
 
+  // words only as first/last bounds (all speechSpanMs needs), never the full timing array.
+  const utteranceColumns = {
+    id: utterances.id,
+    recordingId: utterances.recordingId,
+    transcriptVersionId: utterances.transcriptVersionId,
+    playerId: utterances.playerId,
+    text: utterances.text,
+    startedAt: utterances.startedAt,
+    endedAt: utterances.endedAt,
+    startSampleMs: utterances.startSampleMs,
+    avgLogprob: utterances.avgLogprob,
+    noSpeechProb: utterances.noSpeechProb,
+    words: sql<WordTiming[]>`case when jsonb_array_length(${utterances.words}) > 0
+      then jsonb_build_array(${utterances.words}->0, ${utterances.words}->-1) else '[]'::jsonb end`,
+  };
   const rawUtterances =
     currentVersionIds.length > 0
       ? await db
-          .select()
+          .select(utteranceColumns)
           .from(utterances)
           .where(and(inArray(utterances.transcriptVersionId, currentVersionIds), speechInDuo(duoId)))
           .orderBy(asc(utterances.startedAt), asc(utterances.id))
+      : [];
+
+  // Historical citations: speech a Learning cites from a version that is no longer current, read through the
+  // speech check and resolved against its own version (rules apply; one-off fixes belong to current versions).
+  const currentUtteranceIds = new Set(rawUtterances.map((u) => u.id));
+  const historicalIds = [
+    ...new Set(derivedLearnings.flatMap((l) => l.utteranceIds).filter((id) => !currentUtteranceIds.has(id))),
+  ];
+  const historicalUtterances =
+    historicalIds.length > 0
+      ? await db
+          .select(utteranceColumns)
+          .from(utterances)
+          .where(and(inArray(utterances.id, historicalIds), speechInDuo(duoId)))
       : [];
 
   // Derive work ranges per Session for both purposes
@@ -488,26 +544,18 @@ export async function buildWorkbenchData(
     }
   }
 
-  // Map Utterances with derived range status per purpose (ADR 0002)
+  // Range status per purpose (ADR 0002): any overlapping stale range wins over an unprocessed one.
   const derivePurposeRangeStatus = (
     u: (typeof rawUtterances)[number],
     ranges: Array<{ startUtc: Date; endUtc: Date; reason: "unprocessed" | "stale" }>,
-  ): "processed" | "stale" | "unprocessed" => {
-    for (const w of ranges) {
-      if (
-        intervalsOverlap(
-          { startedAt: u.startedAt, endedAt: u.endedAt },
-          { startedAt: w.startUtc, endedAt: w.endUtc },
-        )
-      ) {
-        return w.reason;
-      }
-    }
-    return "processed";
-  };
+  ) =>
+    rangeStatus(
+      { startedAt: u.startedAt, endedAt: u.endedAt },
+      ranges.map((w) => ({ startedAt: w.startUtc, endedAt: w.endUtc, reason: w.reason })),
+    );
 
   const correctTranscript = await loadTranscriptCorrector(db, duoId);
-  const wbUtterances: WorkbenchUtterance[] = rawUtterances.map((u) => {
+  const toWorkbenchUtterance = (u: (typeof rawUtterances)[number], historical: boolean): WorkbenchUtterance => {
     const sesId = recSessionById.get(u.recordingId) ?? "";
     const sessionWork = workRangesBySession.get(sesId);
     const extractStatus = derivePurposeRangeStatus(u, sessionWork?.extract ?? []);
@@ -524,24 +572,23 @@ export async function buildWorkbenchData(
       avgLogprob: u.avgLogprob,
       noSpeechProb: u.noSpeechProb,
       citedByLearningIds: citedByUtterance.get(u.id) ?? [],
+      historical,
       rangeStatus: extractStatus,
       rangeStatusByPurpose: {
         extract: extractStatus,
         tips: tipsStatus,
       },
     };
-  });
+  };
 
+  const wbUtterances: WorkbenchUtterance[] = rawUtterances.map((u) => toWorkbenchUtterance(u, false));
   const utterancesById: Record<string, WorkbenchUtterance> = {};
   for (const u of wbUtterances) utterancesById[u.id] = u;
+  for (const u of historicalUtterances) utterancesById[u.id] = toWorkbenchUtterance(u, true);
 
-  // Replay availability count per (gameId, roundNumber)
+  // Replay availability count per (gameId, roundNumber), matched on the stored Round's number
   const replayPlayersByRoundKey = new Map<string, number>();
-  for (const rep of allReplays) {
-    if (!rep.hasEvents) continue;
-    const key = `${rep.gameId}:${rep.roundNumber}`;
-    replayPlayersByRoundKey.set(key, (replayPlayersByRoundKey.get(key) ?? 0) + 1);
-  }
+  for (const rep of allReplays) replayPlayersByRoundKey.set(`${rep.gameId}:${rep.roundNumber}`, rep.count);
 
   // Build Sessions with derived start/end/ended/players
   const nowMs = Date.now();
@@ -608,25 +655,25 @@ export async function buildWorkbenchData(
   const roundsByGame = new Map<string, string[]>();
   const roundsById: Record<string, WorkbenchRound> = {};
   const roundDateBounds = new Map<string, { start: Date; end: Date }>();
+  // Full windows (#56 1a-derivation): a Round with a missing start links nothing, and a window stops at its own
+  // end when the successor's start is missing.
+  const windowsByRound = roundWindowsById(allRounds);
 
   for (const r of allRounds) {
     const list = roundsByGame.get(r.gameId) ?? [];
     list.push(r.id);
     roundsByGame.set(r.gameId, list);
 
+    const window = windowsByRound.get(r.id) ?? null;
     const matchingUIds: string[] = [];
-    for (const u of rawUtterances) {
-      if (
-        intervalsOverlap(
-          { startedAt: u.startedAt, endedAt: u.endedAt },
-          { startedAt: r.startTime, endedAt: r.resultsEndTime },
-        )
-      ) {
-        matchingUIds.push(u.id);
+    if (window) {
+      for (const u of rawUtterances) {
+        if (intervalsOverlap({ startedAt: u.startedAt, endedAt: u.endedAt }, window.full)) {
+          matchingUIds.push(u.id);
+        }
       }
+      roundDateBounds.set(r.id, { start: window.full.startedAt, end: window.full.endedAt });
     }
-
-    roundDateBounds.set(r.id, { start: r.startTime, end: r.resultsEndTime });
     roundsById[r.id] = {
       id: r.id,
       gameId: r.gameId,
@@ -659,37 +706,39 @@ export async function buildWorkbenchData(
     };
   }
 
-  // Build Games and link overlapping Sessions + mic coverage
+  // Build Games: Sessions by recording overlap on relationship bounds (0..N, shared with Stats), the rating
+  // delta to one Session (ADR 0008), mic coverage on the same bounds.
   const gamesById: Record<string, WorkbenchGame> = {};
   const recentGames: WorkbenchGame[] = [];
+  const roundRowsByGame = new Map<string, (typeof allRounds)[number][]>();
+  for (const r of allRounds) roundRowsByGame.set(r.gameId, [...(roundRowsByGame.get(r.gameId) ?? []), r]);
+  const sessionSpans: SessionSpan[] = wbSessions.map((ses) => ({
+    id: ses.id,
+    startedAt: sessionBoundsById.get(ses.id)!.startedAt,
+    endedAt: sessionBoundsById.get(ses.id)!.endedAt,
+    recordings: (recsBySession.get(ses.id) ?? []).map((rec) => ({
+      startedAt: rec.startedAt,
+      endedAt: rec.stoppedAt ?? new Date(nowMs),
+    })),
+  }));
+  const relationshipByGame = new Map<string, TimeInterval | null>();
   for (const g of allGames) {
-    const overlappingSessionIds: string[] = [];
+    const relationship = gameBounds(roundRowsByGame.get(g.id) ?? []).relationship;
+    relationshipByGame.set(g.id, relationship);
+    const overlappingSessionIds = gameSessionIds(relationship, sessionSpans);
+    const ratingSessionId = gameRatingSessionId(relationship, sessionSpans);
     for (const ses of wbSessions) {
-      const b = sessionBoundsById.get(ses.id);
-      if (
-        b &&
-        intervalsOverlap(
-          { startedAt: g.startedAt, endedAt: g.endedAt },
-          { startedAt: b.startedAt, endedAt: b.endedAt },
-        )
-      ) {
-        overlappingSessionIds.push(ses.id);
-        ses.gameIds.push(g.id);
-        if (g.duoRatingBefore !== null && g.duoRatingAfter !== null) {
-          ses.ratingDelta += g.duoRatingAfter - g.duoRatingBefore;
-        }
+      if (!overlappingSessionIds.includes(ses.id)) continue;
+      ses.gameIds.push(g.id);
+      if (ses.id === ratingSessionId && g.duoRatingBefore !== null && g.duoRatingAfter !== null) {
+        ses.ratingDelta += g.duoRatingAfter - g.duoRatingBefore;
       }
     }
 
     const activePlayersDuringGame = new Set<string>();
     for (const rec of allRecordings) {
       const recEnd = rec.stoppedAt ?? new Date(nowMs);
-      if (
-        intervalsOverlap(
-          { startedAt: g.startedAt, endedAt: g.endedAt },
-          { startedAt: rec.startedAt, endedAt: recEnd },
-        )
-      ) {
+      if (gameOverlaps(relationship, { startedAt: rec.startedAt, endedAt: recEnd })) {
         activePlayersDuringGame.add(rec.playerId);
       }
     }
@@ -741,6 +790,32 @@ export async function buildWorkbenchData(
     }
   }
 
+  /**
+   * Debrief fallback: speech outside every Round counts toward the Round that just ended, from the earliest
+   * cited speech: the final Round of a Game overlapping that speech's Session, within 2 minutes of its results
+   * end and before that Session's next Game starts. Speech in a missing-start successor's gap never takes it.
+   */
+  const debriefRoundFor = (u: WorkbenchUtterance): string | null => {
+    const spokenAt = Date.parse(u.startedAt);
+    const sessionGames = allGames
+      .filter((g) => gamesById[g.id]?.sessionIds.includes(u.sessionId))
+      .map((g) => ({ id: g.id, start: relationshipByGame.get(g.id)?.startedAt.getTime() ?? null }));
+    let nearest: { id: string; endedAt: number } | null = null;
+    for (const g of sessionGames) {
+      const gameRounds = [...(roundRowsByGame.get(g.id) ?? [])].sort((a, b) => a.roundNumber - b.roundNumber);
+      const finalRound = gameRounds[gameRounds.length - 1];
+      if (!finalRound || !windowsByRound.get(finalRound.id)) continue;
+      const endedAt = finalRound.resultsEndTime.getTime();
+      if (endedAt > spokenAt || spokenAt - endedAt > DEBRIEF_LINK_WINDOW_MS) continue;
+      const nextGameStarted = sessionGames.some(
+        (other) => other.start !== null && other.start > finalRound.endTime.getTime() && other.start <= spokenAt,
+      );
+      if (nextGameStarted) continue;
+      if (!nearest || endedAt > nearest.endedAt) nearest = { id: finalRound.id, endedAt };
+    }
+    return nearest?.id ?? null;
+  };
+
   const allTopicsSet = new Set<string>();
   const wbLearnings: WorkbenchLearning[] = derivedLearnings
     .filter((l) => l.status !== "draft")
@@ -763,38 +838,31 @@ export async function buildWorkbenchData(
       const explicitRoundIds = l.explicitRoundIds;
       const debriefRoundIds = explicitRoundIds.filter((rId) => !derivedRoundSet.has(rId));
       if (derivedRoundSet.size === 0 && explicitRoundIds.length === 0) {
-        // Speech outside every Round is a debrief of the Round that just ended
-        const spokenAt = Math.min(
-          ...l.utteranceIds.flatMap((uId) => {
-            const u = utterancesById[uId];
-            return u ? [Date.parse(u.startedAt)] : [];
-          }),
-        );
-        let nearest: { id: string; endedAt: number } | null = null;
-        for (const [rId, b] of roundDateBounds.entries()) {
-          const endedAt = b.end.getTime();
-          if (
-            endedAt <= spokenAt &&
-            spokenAt - endedAt <= DEBRIEF_LINK_WINDOW_MS &&
-            (!nearest || endedAt > nearest.endedAt)
-          ) {
-            nearest = { id: rId, endedAt };
-          }
-        }
-        if (nearest) debriefRoundIds.push(nearest.id);
+        const earliest = l.utteranceIds
+          .flatMap((uId) => (utterancesById[uId] ? [utterancesById[uId]!] : []))
+          .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))[0];
+        const fallback = earliest ? debriefRoundFor(earliest) : null;
+        if (fallback) debriefRoundIds.push(fallback);
       }
       const allRoundIds = [...new Set([...derivedRoundSet, ...explicitRoundIds, ...debriefRoundIds])];
       const isDebrief = debriefRoundIds.length > 0;
 
-      // Derive Session for Manual Learnings via Utterance -> Recording -> Session OR Round -> Game -> Session
-      let sessionId = l.sessionId;
-      if (!sessionId && l.utteranceIds.length > 0) {
-        sessionId = utterancesById[l.utteranceIds[0]!]?.sessionId ?? null;
-      }
-      if (!sessionId && allRoundIds.length > 0) {
-        const round = roundsById[allRoundIds[0]!];
-        const game = round ? gamesById[round.gameId] : null;
-        sessionId = game?.sessionIds[0] ?? null;
+      // A run's Learning belongs to the run's Session; a Manual one to every Session its cited speech and cited
+      // Rounds' Games imply (uncited: none).
+      let sessionIds: string[];
+      if (l.sessionId) {
+        sessionIds = [l.sessionId];
+      } else {
+        const implied = new Set<string>();
+        for (const uId of l.utteranceIds) {
+          const sesId = utterancesById[uId]?.sessionId;
+          if (sesId) implied.add(sesId);
+        }
+        for (const rId of explicitRoundIds) {
+          const game = roundsById[rId] ? gamesById[roundsById[rId]!.gameId] : null;
+          for (const sesId of game?.sessionIds ?? []) implied.add(sesId);
+        }
+        sessionIds = [...implied];
       }
 
       // Compute worst HP delta across linked Rounds (for HP-leak sort)
@@ -830,7 +898,7 @@ export async function buildWorkbenchData(
       return {
         id: l.id,
         runId: l.runId,
-        sessionId,
+        sessionIds,
         authorPlayerId: l.authorPlayerId,
         purpose: l.purpose,
         kind: l.kind,
@@ -1073,7 +1141,7 @@ export async function buildWorkbenchData(
       (l) =>
         l.origin === "manual" &&
         l.status === "current" &&
-        l.sessionId === selectedSession.id &&
+        l.sessionIds.includes(selectedSession.id) &&
         (l.utteranceIds.length > 0 || l.roundIds.length > 0),
     ).length;
     runTimeline = await buildRunTimeline(db, duoId, selectedSession.id, {

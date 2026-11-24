@@ -26,7 +26,18 @@ import {
 } from "../db/schema.js";
 import { commonEnglishWords } from "./common-english-words.js";
 import { DomainError } from "./recordings.js";
-import { recordingInDuo, roundInDuo, speechInDuo, versionInDuo } from "./scope.js";
+import { recordingInDuo, speechInDuo, versionInDuo } from "./scope.js";
+import { loadAllWindowedRounds, loadRoundsInSpan, type WindowedRound } from "./rounds.js";
+
+/** Rounds for the corrector's index: the Full window's effective end stands in for the stored results end. */
+function indexRows(windowed: WindowedRound[]) {
+  return windowed.map(({ round, window }) => ({
+    startTime: window.full.startedAt,
+    resultsEndTime: window.full.endedAt,
+    countryCode: round.countryCode,
+    guesses: round.guesses,
+  }));
+}
 
 const SUGGESTION_RECORDING_LIMIT = 50;
 const SUGGESTION_UTTERANCE_LIMIT = 5000;
@@ -295,15 +306,7 @@ export async function loadTranscriptCorrector(
   let calibrated = new Set<string>();
   if (activeRules.some((r) => r.countryCode)) {
     const [roundRows, recordingRows] = await Promise.all([
-      db
-        .select({
-          startTime: rounds.startTime,
-          resultsEndTime: rounds.resultsEndTime,
-          countryCode: rounds.countryCode,
-          guesses: rounds.guesses,
-        })
-        .from(rounds)
-        .where(roundInDuo(duoId)),
+      loadAllWindowedRounds(db, duoId).then(indexRows),
       db
         .select({ id: recordings.id })
         .from(recordings)
@@ -553,21 +556,17 @@ async function utteranceRoundCountries(
     .where(and(eq(recordings.id, u.recordingId), recordingInDuo(duoId)))
     .limit(1);
   if (!recording?.isCalibrated) return [];
-  const roundRows = await db
-    .select({
-      startTime: rounds.startTime,
-      resultsEndTime: rounds.resultsEndTime,
-      countryCode: rounds.countryCode,
-      guesses: rounds.guesses,
-    })
-    .from(rounds)
-    .where(
-      and(
-        roundInDuo(duoId),
-        lt(rounds.startTime, new Date(span.lastMs + ROUND_BOUNDARY_MARGIN_MS)),
-        gt(rounds.resultsEndTime, new Date(span.firstMs - ROUND_BOUNDARY_MARGIN_MS)),
-      ),
-    );
+  const roundRows = indexRows(
+    await loadRoundsInSpan(
+      db,
+      duoId,
+      {
+        startedAt: new Date(span.firstMs - ROUND_BOUNDARY_MARGIN_MS),
+        endedAt: new Date(span.lastMs + ROUND_BOUNDARY_MARGIN_MS),
+      },
+      "full",
+    ),
+  );
   return soleRound(buildRoundIndex(roundRows), span.firstMs, span.lastMs)?.countryCodes ?? [];
 }
 
@@ -771,21 +770,15 @@ export async function listTranscriptSuggestions(
   }
 
   const [roundRows, dismissed, correct] = await Promise.all([
-    db
-      .select({
-        startTime: rounds.startTime,
-        resultsEndTime: rounds.resultsEndTime,
-        countryCode: rounds.countryCode,
-        guesses: rounds.guesses,
-      })
-      .from(rounds)
-      .where(
-        and(
-          roundInDuo(duoId),
-          lt(rounds.startTime, new Date(latest + ROUND_BOUNDARY_MARGIN_MS)),
-          gt(rounds.resultsEndTime, new Date(earliest - ROUND_BOUNDARY_MARGIN_MS)),
-        ),
-      ),
+    loadRoundsInSpan(
+      db,
+      duoId,
+      {
+        startedAt: new Date(earliest - ROUND_BOUNDARY_MARGIN_MS),
+        endedAt: new Date(latest + ROUND_BOUNDARY_MARGIN_MS),
+      },
+      "full",
+    ).then(indexRows),
     db.query.transcriptSuggestionDismissals.findMany({
       where: eq(transcriptSuggestionDismissals.duoId, duoId),
     }),

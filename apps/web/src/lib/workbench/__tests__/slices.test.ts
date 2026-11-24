@@ -34,6 +34,7 @@ function utterance(id: string, playerId: string): WorkbenchUtterance {
     avgLogprob: null,
     noSpeechProb: null,
     citedByLearningIds: [],
+    historical: false,
     rangeStatus: "processed",
     rangeStatusByPurpose: { extract: "processed", tips: "processed" },
   };

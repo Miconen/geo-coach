@@ -1,5 +1,5 @@
 import { and, eq, inArray } from "drizzle-orm";
-import { hedgeKind, intervalsOverlap, isCallableHedge, uuidv7, type DerivedGuess } from "@geo-coach/shared";
+import { hedgeKind, intervalsOverlap, isCallableHedge, isMissingTime, uuidv7, type DerivedGuess } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
 import { callLabelUtterances, callLabels, processingRuns, rounds, utterances } from "../db/schema.js";
 import { roundInDuo, runInDuo, speechInDuo } from "./scope.js";
@@ -125,7 +125,7 @@ export async function deriveCallLabelHistory(db: AppDb, duoId: string): Promise<
     let supersededByRunId: string | null = null;
     if (run.status !== "finished" || !run.finishedAt) {
       status = "draft";
-    } else {
+    } else if (!isMissingTime(round.startTime)) {
       const guessing = roundGuessingInterval(round);
       const replacer = callRuns
         .filter(

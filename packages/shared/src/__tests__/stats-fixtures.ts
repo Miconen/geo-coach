@@ -14,7 +14,8 @@ export function makeGame(id: string, overrides: Partial<StatsGame> = {}): StatsG
     opponentRatingBefore: 1200,
     positionBefore: null,
     positionAfter: null,
-    sessionId: null,
+    sessionIds: [],
+    ratingSessionId: null,
     ...overrides,
   };
 }

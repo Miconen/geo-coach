@@ -38,8 +38,10 @@ export interface StatsGame {
   /** The Duo's place within its GeoGuessr bucket before and after the Game. */
   positionBefore: number | null;
   positionAfter: number | null;
-  /** The Session the Game was played in, if any Recording covered it. */
-  sessionId: string | null;
+  /** Every Session whose Recordings overlap the Game's relationship bounds (0..N; #56 1a-derivation). */
+  sessionIds: string[];
+  /** The one Session the Game's rating delta counts toward (ADR 0008), or null when none overlaps. */
+  ratingSessionId: string | null;
 }
 
 export interface StatsRound {

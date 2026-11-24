@@ -124,7 +124,7 @@ export function effectConditions(players: readonly (PlayerRef & { displayName?: 
       const prev = c.previousGameOf.get(r.gameId);
       return prev?.won == null ? null : !prev.won;
     } },
-    { id: "in-session", label: "Played in a recorded Session", test: (r, c) => c.gameOf.get(r.gameId)?.sessionId != null },
+    { id: "in-session", label: "Played in a recorded Session", test: (r, c) => (c.gameOf.get(r.gameId)?.sessionIds.length ?? 0) > 0 },
   ];
 }
 

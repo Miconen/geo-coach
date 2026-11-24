@@ -78,7 +78,7 @@ describe("duoRoute wrapper", () => {
     await handle.close();
   });
 
-  const handler = vi.fn(async () => new Response("ok"));
+  const handler = vi.fn(async (_event: unknown, _ctx: unknown) => new Response("ok"));
   const route = (stream = false) => duoRoute(handler, { db: () => handle.db, stream });
 
   it("checks auth availability, then sign-in, then membership, before the handler", async () => {

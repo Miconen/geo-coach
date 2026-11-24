@@ -163,7 +163,8 @@ describe("buildStatsPayload", () => {
       opponentRatingBefore: 1240,
       positionBefore: 412,
       positionAfter: 398,
-      sessionId,
+      sessionIds: [sessionId],
+      ratingSessionId: sessionId,
     });
 
     const [round] = payload.rounds;

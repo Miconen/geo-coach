@@ -27,6 +27,7 @@ import {
   DomainError,
   assertPlayerInDuo,
   getCurrentTranscriptVersionId,
+  getCurrentTranscriptVersionIds,
 } from "./recordings.js";
 import { recordingInDuo, roundInDuo, runInDuo, speechInDuo } from "./scope.js";
 import { isUuid } from "../../uuid.js";
@@ -140,17 +141,26 @@ async function getSessionRecordingStates(
     orderBy: [asc(recordings.startedAt)],
   });
 
+  // Versions elected and chunks counted in one query each (#56 1a-derivation).
+  const versionByRecording = await getCurrentTranscriptVersionIds(
+    db,
+    recs.map((r) => r.id),
+  );
+  const versionIds = [...versionByRecording.values()];
+  const chunkRows =
+    versionIds.length > 0
+      ? await db
+          .select({ transcriptVersionId: transcriptChunks.transcriptVersionId, recordingId: transcriptChunks.recordingId })
+          .from(transcriptChunks)
+          .where(inArray(transcriptChunks.transcriptVersionId, versionIds))
+      : [];
+
   const states: RecordingCurrentState[] = [];
   for (const rec of recs) {
-    const currentVersionId = await getCurrentTranscriptVersionId(db, rec.id);
+    const currentVersionId = versionByRecording.get(rec.id) ?? null;
     // A chunk counts only when it belongs to the version's own Recording.
     const chunks = currentVersionId
-      ? await db.query.transcriptChunks.findMany({
-          where: and(
-            eq(transcriptChunks.transcriptVersionId, currentVersionId),
-            eq(transcriptChunks.recordingId, rec.id),
-          ),
-        })
+      ? chunkRows.filter((c) => c.transcriptVersionId === currentVersionId && c.recordingId === rec.id)
       : [];
 
     // Derive endMs from stoppedAt or latest utterance or startedAt + 1s

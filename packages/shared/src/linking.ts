@@ -12,13 +12,15 @@ export interface UtteranceRoundLink {
 
 /**
  * Half-open overlap check [a.start, a.end) vs [b.start, b.end), treating zero-length intervals
- * as point containment inside [b.start, b.end).
+ * as point containment inside [b.start, b.end). An inverted interval (end before start) overlaps nothing.
  */
 export function intervalsOverlap(a: TimeInterval, b: TimeInterval): boolean {
   const aStart = a.startedAt.getTime();
   const aEnd = a.endedAt.getTime();
   const bStart = b.startedAt.getTime();
   const bEnd = b.endedAt.getTime();
+
+  if (aEnd < aStart || bEnd < bStart) return false;
 
   if (aStart === aEnd) {
     return aStart >= bStart && aStart < bEnd;

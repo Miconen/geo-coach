@@ -290,7 +290,7 @@ describe("Seam 6: A3 Atlas + Command Deck coaching workbench view-model", () => 
 
     // Manual Learning without cited Utterances derives Session via Round -> Game -> Session
     const manual = wb.learnings.find((l) => l.origin === "manual")!;
-    expect(manual.sessionId).toBe(started.sessionId);
+    expect(manual.sessionIds).toEqual([started.sessionId]);
 
     // Round 1 shows replay count > 0
     const r1Card = wb.roundsById[r1.id]!;

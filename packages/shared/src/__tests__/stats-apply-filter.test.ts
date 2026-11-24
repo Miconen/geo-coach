@@ -26,7 +26,8 @@ function game(id: string, overrides: Partial<StatsGame>): StatsGame {
     opponentRatingBefore: 1200,
     positionBefore: null,
     positionAfter: null,
-    sessionId: null,
+    sessionIds: [],
+    ratingSessionId: null,
     ...overrides,
   };
 }
@@ -59,7 +60,7 @@ const payload: StatsPayload = {
   sessions: [],
   learnings: [],
   games: [
-    game("g_base", { sessionId: "ses_1" }),
+    game("g_base", { sessionIds: ["ses_1"], ratingSessionId: "ses_1" }),
     game("g_late", { startedAtMs: day("2026-11-20T23:30:00Z") }),
     game("g_nmpz", { mode: "nmpz", mapName: "A Community World" }),
     game("g_strong", { opponentRatingBefore: 1500 }),

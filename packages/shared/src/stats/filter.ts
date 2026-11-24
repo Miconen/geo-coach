@@ -108,7 +108,8 @@ function localMidnightMs(day: string, offsetDays = 0): number {
 function gamePasses(game: StatsGame, filter: StatsFilter): boolean {
   if (filter.from && game.startedAtMs < localMidnightMs(filter.from)) return false;
   if (filter.to && game.startedAtMs >= localMidnightMs(filter.to, 1)) return false;
-  if (filter.sessionIds.length > 0 && !filter.sessionIds.includes(game.sessionId ?? "")) {
+  // A Game spanning several Sessions matches any of them.
+  if (filter.sessionIds.length > 0 && !game.sessionIds.some((id) => filter.sessionIds.includes(id))) {
     return false;
   }
   if (filter.mapNames.length > 0 && !filter.mapNames.includes(game.mapName ?? "")) return false;

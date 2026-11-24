@@ -4,8 +4,12 @@ import {
   claimDeleteInputSchema,
   claimEditItemInputSchema,
   claimItemInputSchema,
+  gameBounds,
+  gameOverlaps,
   hedgeKind,
   intervalsOverlap,
+  isMissingTime,
+  roundWindowsById,
   learningItemInputSchema,
   regionName,
   roundHedge,
@@ -33,6 +37,7 @@ import {
 import {
   DomainError,
   findScopedRun,
+  loadRoundsInSpan,
   recordingInDuo,
   roundInDuo,
   speechInDuo,
@@ -54,7 +59,7 @@ import {
   updateClaim,
   deriveSessionWorkRanges,
   finishProcessingRun,
-  getCurrentTranscriptVersionId,
+  getCurrentTranscriptVersionIds,
   insertRunCallLabels,
   insertRunLearnings,
   isCallableRound,
@@ -129,11 +134,14 @@ async function loadCurrentSessionUtterances(
     .select()
     .from(recordings)
     .where(and(recordingInDuo(duoId), eq(recordings.sessionId, sessionId)));
-  const currentVersionIds: string[] = [];
-  for (const r of recs) {
-    const tvId = await getCurrentTranscriptVersionId(db, r.id);
-    if (tvId) currentVersionIds.push(tvId);
-  }
+  const currentVersionIds = [
+    ...(
+      await getCurrentTranscriptVersionIds(
+        db,
+        recs.map((r) => r.id),
+      )
+    ).values(),
+  ];
   if (currentVersionIds.length === 0) return [];
 
   return db.query.utterances.findMany({
@@ -166,10 +174,16 @@ export async function mcpListWork(
     orderBy: [asc(sessions.createdAt)],
   });
 
-  const duoGames = await db.query.games.findMany({
-    where: eq(games.duoId, duo.id),
-    orderBy: [asc(games.startedAt)],
-  });
+  // Work splitting uses relationship bounds (#56 1a-derivation): a recovered Game keeps its cut points.
+  const duoRoundRows = await db.select().from(rounds).where(roundInDuo(duo.id));
+  const roundsOfGame = new Map<string, (typeof duoRoundRows)[number][]>();
+  for (const r of duoRoundRows) roundsOfGame.set(r.gameId, [...(roundsOfGame.get(r.gameId) ?? []), r]);
+  const duoGames = [...roundsOfGame.values()]
+    .flatMap((rs) => {
+      const rel = gameBounds(rs).relationship;
+      return rel && !isMissingTime(rel.startedAt) ? [{ startedAt: rel.startedAt, endedAt: rel.endedAt }] : [];
+    })
+    .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
 
   const ranges: Array<{
     sessionId: string;
@@ -200,10 +214,7 @@ export async function mcpListWork(
 
       // Split at between-Game gaps so each chunk stays <= ~25k tokens
       const overlappingGames = duoGames.filter((g) =>
-        intervalsOverlap(
-          { startedAt: g.startedAt, endedAt: g.endedAt },
-          { startedAt: w.startUtc, endedAt: w.endUtc },
-        ),
+        gameOverlaps(g, { startedAt: w.startUtc, endedAt: w.endUtc }),
       );
       const cutPoints: number[] = [];
       for (let i = 0; i < overlappingGames.length - 1; i++) {
@@ -338,13 +349,13 @@ export async function mcpReadRange(db: AppDb, playerId: string, runId: string) {
       getRunInRangeUtterances(db, run),
       loadCurrentSessionUtterances(db, run.duoId, run.sessionId, padStart, padEnd),
       db.query.players.findMany(),
-      db.query.games.findMany({
-        where: and(
-          eq(games.duoId, run.duoId),
-          lt(games.startedAt, padEnd),
-          gt(games.endedAt, padStart),
-        ),
-        orderBy: [asc(games.startedAt)],
+      // A Game is admitted through its valid Rounds' Full windows, never a startedAt/endedAt prefilter (an epoch
+      // start would wrongly admit or miss it); Session attribution and rating are unchanged.
+      loadRoundsInSpan(db, run.duoId, { startedAt: padStart, endedAt: padEnd }, "full").then(async (rs) => {
+        const ids = [...new Set(rs.map((x) => x.round.gameId))];
+        return ids.length > 0
+          ? db.query.games.findMany({ where: inArray(games.id, ids), orderBy: [asc(games.startedAt)] })
+          : [];
       }),
       deriveLearningsWithStatus(db, run.duoId),
       deriveClaims(db, run.duoId),
@@ -360,6 +371,9 @@ export async function mcpReadRange(db: AppDb, playerId: string, runId: string) {
         })
       : [];
 
+  const roundsByGameIdForMarkers = new Map<string, typeof gameRounds>();
+  for (const r of gameRounds) roundsByGameIdForMarkers.set(r.gameId, [...(roundsByGameIdForMarkers.get(r.gameId) ?? []), r]);
+
   // Build chronological timeline mixing Round markers and Utterances
   type LineEvent = { ts: number; order: number; line: string };
   const timeline: LineEvent[] = [];
@@ -370,8 +384,9 @@ export async function mcpReadRange(db: AppDb, playerId: string, runId: string) {
         ? ` | Rating ${g.duoRatingBefore}→${g.duoRatingAfter}`
         : "";
     const outcome = g.won === true ? "WIN" : g.won === false ? "LOSS" : "FINISHED";
+    const gameStart = gameBounds(roundsByGameIdForMarkers.get(g.id) ?? []).relationship?.startedAt ?? g.startedAt;
     timeline.push({
-      ts: g.startedAt.getTime(),
+      ts: gameStart.getTime(),
       order: 0,
       line: `=== GAME ${g.geoguessrGameId} (${outcome}${ratingStr}, HP ${g.duoFinalHealth ?? "?"} vs ${g.opponentFinalHealth ?? "?"}) ===`,
     });
@@ -409,6 +424,8 @@ export async function mcpReadRange(db: AppDb, playerId: string, runId: string) {
         .join(", ");
       const region = regionName(r.regionCode);
       const regionPart = region ? ` / ${region}` : "";
+      // HP accumulates over every Round from the Game's start; a Round with no start time has no marker.
+      if (isMissingTime(r.startTime)) continue;
       timeline.push({
         ts: r.startTime.getTime(),
         order: 1,
@@ -461,8 +478,10 @@ export async function mcpReadRange(db: AppDb, playerId: string, runId: string) {
 
   // The Duo's Claims about every country the range's Rounds were in or guessed in
   const rangeCountries = new Set<string>();
+  const fullWindows = roundWindowsById(gameRounds);
   for (const r of gameRounds) {
-    if (!intervalsOverlap(roundFullInterval(r), { startedAt: run.rangeStart, endedAt: run.rangeEnd })) {
+    const full = fullWindows.get(r.id)?.full;
+    if (!full || !intervalsOverlap(full, { startedAt: run.rangeStart, endedAt: run.rangeEnd })) {
       continue;
     }
     if (r.countryCode) rangeCountries.add(r.countryCode.toUpperCase());
@@ -492,11 +511,6 @@ export async function mcpReadRange(db: AppDb, playerId: string, runId: string) {
     claimCountries: [...rangeCountries].sort(),
     claims: rangeClaims,
   };
-}
-
-/** A Round's whole span, from its start through its results screen. */
-function roundFullInterval(round: Pick<RoundRow, "startTime" | "resultsEndTime">) {
-  return { startedAt: round.startTime, endedAt: round.resultsEndTime };
 }
 
 /** A Claim as agents see it: derived status and an Evidence tally, never just the text. */
@@ -887,29 +901,14 @@ type RoundRow = typeof rounds.$inferSelect;
 
 /** The Duo's Rounds any part of which (guessing or results) overlaps a run's range. */
 async function loadRunRounds(db: AppDb, run: RunRow): Promise<RoundRow[]> {
-  return db.query.rounds.findMany({
-    where: and(
-      roundInDuo(run.duoId),
-      lt(rounds.startTime, run.rangeEnd),
-      gt(rounds.resultsEndTime, run.rangeStart),
-    ),
-    orderBy: [asc(rounds.startTime)],
-  });
+  const span = { startedAt: run.rangeStart, endedAt: run.rangeEnd };
+  return (await loadRoundsInSpan(db, run.duoId, span, "full")).map((x) => x.round);
 }
 
 /** The Duo's Rounds whose guessing phase overlaps a run's range. */
 async function loadRunRangeRounds(db: AppDb, run: RunRow): Promise<RoundRow[]> {
-  const candidates = await db.query.rounds.findMany({
-    where: and(
-      roundInDuo(run.duoId),
-      lt(rounds.startTime, run.rangeEnd),
-      gt(rounds.endTime, run.rangeStart),
-    ),
-    orderBy: [asc(rounds.startTime)],
-  });
-  return candidates.filter((r) =>
-    intervalsOverlap(roundGuessingInterval(r), { startedAt: run.rangeStart, endedAt: run.rangeEnd }),
-  );
+  const span = { startedAt: run.rangeStart, endedAt: run.rangeEnd };
+  return (await loadRoundsInSpan(db, run.duoId, span, "guessing")).map((x) => x.round);
 }
 
 /**

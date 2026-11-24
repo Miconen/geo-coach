@@ -1,6 +1,7 @@
 import { json } from "@sveltejs/kit";
 import { eq } from "drizzle-orm";
 import type { RequestHandler } from "./$types";
+import { assertAuthAvailable } from "$lib/server/auth/guards.js";
 import { reactionTypeSchema } from "@geo-coach/shared";
 import { getDb } from "$lib/server/db/index.js";
 import { learnings } from "$lib/server/db/schema.js";
@@ -8,6 +9,7 @@ import { assertPlayerInDuo, toggleReaction, DomainError } from "$lib/server/serv
 import { duoEventBus } from "$lib/server/events/bus.js";
 
 export const POST: RequestHandler = async ({ locals, params, request }) => {
+  assertAuthAvailable(locals);
   if (!locals.player) return json({ error: "Unauthorized" }, { status: 401 });
   try {
     const body = (await request.json()) as { reaction?: unknown };

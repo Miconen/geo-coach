@@ -1,11 +1,13 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
+import { assertAuthAvailable } from "$lib/server/auth/guards.js";
 import { manualLearningInputSchema } from "@geo-coach/shared";
 import { getDb } from "$lib/server/db/index.js";
 import { createManualLearning, DomainError } from "$lib/server/services/index.js";
 import { duoEventBus } from "$lib/server/events/bus.js";
 
 export const POST: RequestHandler = async ({ locals, request }) => {
+  assertAuthAvailable(locals);
   if (!locals.player) return json({ error: "Unauthorized" }, { status: 401 });
   try {
     const body = await request.json();

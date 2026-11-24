@@ -7,6 +7,7 @@ import {
   findPlayerByDiscordIdInAnyDuo,
   getDiscordClient,
 } from "$lib/server/auth/index.js";
+import { safeNext } from "$lib/server/auth/guards.js";
 
 export const GET: RequestHandler = async ({ url, cookies }) => {
   const discord = getDiscordClient();
@@ -18,6 +19,8 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
   const state = url.searchParams.get("state");
   const storedState = cookies.get("discord_oauth_state");
   cookies.delete("discord_oauth_state", { path: "/" });
+  const next = safeNext(cookies.get("login_next"));
+  cookies.delete("login_next", { path: "/" });
 
   if (!code || !state || !storedState || state !== storedState) {
     return new Response("Invalid OAuth state", { status: 400 });
@@ -49,5 +52,5 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
     expires: expiresAt,
   });
 
-  redirect(302, "/");
+  redirect(302, next);
 };

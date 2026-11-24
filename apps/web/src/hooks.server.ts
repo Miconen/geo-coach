@@ -5,6 +5,7 @@ import { SESSION_COOKIE_NAME, verifyAuthSession } from "$lib/server/auth/index.j
 export const handle: Handle = async ({ event, resolve }) => {
   event.locals.player = null;
   event.locals.sessionId = null;
+  event.locals.authUnavailable = false;
 
   const rawSession = event.cookies.get(SESSION_COOKIE_NAME);
   if (rawSession) {
@@ -15,7 +16,8 @@ export const handle: Handle = async ({ event, resolve }) => {
         event.locals.sessionId = verified.sessionId;
       }
     } catch {
-      // Ignore DB lookup errors on non-authenticated paths such as /healthz
+      // Unknown, not signed out: cookie routes answer 503 (assertAuthAvailable); /healthz and others ignore it.
+      event.locals.authUnavailable = true;
     }
   }
 

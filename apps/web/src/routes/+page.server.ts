@@ -1,6 +1,7 @@
 import { error, redirect } from "@sveltejs/kit";
 import { eq, inArray } from "drizzle-orm";
 import type { PageServerLoad } from "./$types";
+import { assertAuthAvailable, loginUrlFor } from "$lib/server/auth/guards.js";
 import { getDb } from "$lib/server/db/index.js";
 import { duoMemberships, duos } from "$lib/server/db/schema.js";
 import { findScopedRun } from "$lib/server/services/index.js";
@@ -8,8 +9,9 @@ import { buildWorkbenchData } from "$lib/server/workbench/view-model.js";
 import { isUuid } from "$lib/uuid.js";
 
 export const load: PageServerLoad = async ({ locals, url }) => {
+  assertAuthAvailable(locals);
   if (!locals.player) {
-    redirect(302, "/login");
+    redirect(302, loginUrlFor(url));
   }
   const db = getDb();
   const memberships = await db.query.duoMemberships.findMany({

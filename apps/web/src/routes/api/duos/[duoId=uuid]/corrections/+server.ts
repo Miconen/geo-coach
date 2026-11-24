@@ -1,10 +1,8 @@
 import { json } from "@sveltejs/kit";
 import { z } from "zod";
 import type { RequestHandler } from "./$types";
-import { getDb } from "$lib/server/db/index.js";
 import {
   applySuggestionOnce,
-  assertPlayerInDuo,
   deleteTranscriptRule,
   deleteUtteranceEdit,
   dismissSuggestion,
@@ -16,6 +14,7 @@ import {
   saveTranscriptRule,
 } from "$lib/server/services/index.js";
 import { duoEventBus } from "$lib/server/events/bus.js";
+import { duoRoute } from "$lib/server/auth/guards.js";
 
 const phrase = z.string().trim().min(1).max(120);
 const country = z.string().trim().length(2).nullish();
@@ -68,19 +67,16 @@ function failure(err: unknown) {
   throw err;
 }
 
-export const GET: RequestHandler = async ({ locals, params, url }) => {
-  if (!locals.player) return json({ error: "Unauthorized" }, { status: 401 });
+export const GET: RequestHandler = duoRoute(async ({ url }, { db, duoId }) => {
   try {
-    const db = getDb();
-    await assertPlayerInDuo(db, locals.player.id, params.duoId);
     const query = querySchema.parse({
       suggestions: url.searchParams.get("suggestions") ?? undefined,
       edits: url.searchParams.get("edits") ?? undefined,
     });
     const [rules, suggestions, editPage] = await Promise.all([
-      listTranscriptRules(db, params.duoId),
-      query.suggestions === "1" ? listTranscriptSuggestions(db, params.duoId) : null,
-      listUtteranceEdits(db, params.duoId, query.edits),
+      listTranscriptRules(db, duoId),
+      query.suggestions === "1" ? listTranscriptSuggestions(db, duoId) : null,
+      listUtteranceEdits(db, duoId, query.edits),
     ]);
     return json({
       rules,
@@ -91,16 +87,12 @@ export const GET: RequestHandler = async ({ locals, params, url }) => {
   } catch (err) {
     return failure(err);
   }
-};
+});
 
-export const POST: RequestHandler = async ({ locals, params, request }) => {
-  if (!locals.player) return json({ error: "Unauthorized" }, { status: 401 });
+export const POST: RequestHandler = duoRoute(async ({ request }, { db, player, duoId }) => {
   try {
-    const db = getDb();
-    await assertPlayerInDuo(db, locals.player.id, params.duoId);
     const input = actionSchema.parse(await request.json());
-    const duoId = params.duoId;
-    const playerId = locals.player.id;
+    const playerId = player.id;
     let applied: number | undefined;
     if (input.action === "saveRule") await saveTranscriptRule(db, { ...input, duoId, playerId });
     if (input.action === "deleteRule") {
@@ -119,4 +111,4 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
   } catch (err) {
     return failure(err);
   }
-};
+});

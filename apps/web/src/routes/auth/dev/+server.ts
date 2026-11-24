@@ -8,6 +8,7 @@ import {
   createAuthSession,
   isDevLoginEnabled,
 } from "$lib/server/auth/index.js";
+import { safeNext } from "$lib/server/auth/guards.js";
 
 export const POST: RequestHandler = async ({ request, cookies }) => {
   if (!isDevLoginEnabled()) {
@@ -34,5 +35,5 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
     expires: expiresAt,
   });
 
-  redirect(302, "/");
+  redirect(302, safeNext(form.get("next")?.toString()));
 };

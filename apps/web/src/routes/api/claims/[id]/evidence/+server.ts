@@ -1,5 +1,6 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
+import { assertAuthAvailable } from "$lib/server/auth/guards.js";
 import { playerEvidenceInputSchema } from "@geo-coach/shared";
 import { getDb } from "$lib/server/db/index.js";
 import { DomainError, setPlayerEvidence } from "$lib/server/services/index.js";
@@ -10,6 +11,7 @@ import { duoEventBus } from "$lib/server/events/bus.js";
  * withdraws it with `direction: null`. Never touches another Player's Evidence.
  */
 export const POST: RequestHandler = async ({ locals, params, request }) => {
+  assertAuthAvailable(locals);
   if (!locals.player) return json({ error: "Unauthorized" }, { status: 401 });
   try {
     const { direction } = playerEvidenceInputSchema.parse(await request.json());

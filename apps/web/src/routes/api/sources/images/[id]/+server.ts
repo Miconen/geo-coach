@@ -1,10 +1,12 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
+import { assertAuthAvailable } from "$lib/server/auth/guards.js";
 import { getDb } from "$lib/server/db/index.js";
 import { DomainError, readSourceImageForPlayer } from "$lib/server/services/index.js";
 
 /** A Source image, served only to signed-in Players of the Duo that owns it. */
 export const GET: RequestHandler = async ({ locals, params, request }) => {
+  assertAuthAvailable(locals);
   if (!locals.player) return json({ error: "Unauthorized" }, { status: 401 });
   try {
     const image = await readSourceImageForPlayer(getDb(), locals.player.id, params.id);

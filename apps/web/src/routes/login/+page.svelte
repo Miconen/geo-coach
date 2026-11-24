@@ -18,7 +18,7 @@
 
     <div class="mt-5">
       <a
-        href="/auth/discord"
+        href={data.next === "/" ? "/auth/discord" : `/auth/discord?next=${encodeURIComponent(data.next)}`}
         class="inline-flex w-full items-center justify-center rounded-lg bg-[#5865F2] px-4 py-2.5 text-sm font-semibold text-white hover:opacity-95"
       >
         Sign in with Discord
@@ -43,6 +43,7 @@
           <div class="mt-2 grid gap-2">
             {#each data.seededPlayers as p}
               <form method="POST" action="/auth/dev">
+                <input type="hidden" name="next" value={data.next} />
                 <input type="hidden" name="playerId" value={p.id} />
                 <button
                   type="submit"

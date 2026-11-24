@@ -1,6 +1,7 @@
 import { json } from "@sveltejs/kit";
 import { z } from "zod";
 import type { RequestHandler } from "./$types";
+import { assertAuthAvailable } from "$lib/server/auth/guards.js";
 import { getDb } from "$lib/server/db/index.js";
 import { deleteOwnSpeechRange, DomainError } from "$lib/server/services/index.js";
 import { duoEventBus } from "$lib/server/events/bus.js";
@@ -12,6 +13,7 @@ const deleteSchema = z.object({
 });
 
 export const POST: RequestHandler = async ({ locals, params, request }) => {
+  assertAuthAvailable(locals);
   if (!locals.player) return json({ error: "Unauthorized" }, { status: 401 });
   try {
     const parsed = deleteSchema.parse(await request.json());

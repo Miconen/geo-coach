@@ -1,17 +1,14 @@
 import { json } from "@sveltejs/kit";
 import { and, eq } from "drizzle-orm";
 import type { RequestHandler } from "./$types";
-import { getDb } from "$lib/server/db/index.js";
 import { sessions } from "$lib/server/db/schema.js";
-import { assertPlayerInDuo, DomainError } from "$lib/server/services/index.js";
+import { DomainError } from "$lib/server/services/index.js";
+import { duoRoute } from "$lib/server/auth/guards.js";
 import { buildWorkbenchData } from "$lib/server/workbench/view-model.js";
 import { assertUuid } from "$lib/uuid.js";
 
-export const GET: RequestHandler = async ({ locals, params, url }) => {
-  if (!locals.player) return json({ error: "Unauthorized" }, { status: 401 });
+export const GET: RequestHandler = duoRoute(async ({ url }, { db, player, duoId }) => {
   try {
-    const db = getDb();
-    await assertPlayerInDuo(db, locals.player.id, params.duoId);
     // ?sessionId= selects the run history's Session: malformed 400, outside the Duo 404. ?run= is a pin, never
     // an error: a malformed, missing or foreign one is dropped with 200 and the pane shows "no longer exists".
     const sessionParam = url.searchParams.get("sessionId");
@@ -19,13 +16,13 @@ export const GET: RequestHandler = async ({ locals, params, url }) => {
     if (sessionParam !== null) {
       sessionId = assertUuid(sessionParam, "sessionId");
       const session = await db.query.sessions.findFirst({
-        where: and(eq(sessions.id, sessionId), eq(sessions.duoId, params.duoId)),
+        where: and(eq(sessions.id, sessionId), eq(sessions.duoId, duoId)),
         columns: { id: true },
       });
       if (!session) return json({ error: "Session not found" }, { status: 404 });
     }
     return json(
-      await buildWorkbenchData(db, params.duoId, locals.player.id, {
+      await buildWorkbenchData(db, duoId, player.id, {
         sessionId,
         runId: url.searchParams.get("run"),
       }),
@@ -36,4 +33,4 @@ export const GET: RequestHandler = async ({ locals, params, url }) => {
     }
     throw err;
   }
-};
+});

@@ -1,6 +1,7 @@
 import { json } from "@sveltejs/kit";
 import { z } from "zod";
 import type { RequestHandler } from "./$types";
+import { assertAuthAvailable } from "$lib/server/auth/guards.js";
 import { tokenScopeSchema } from "@geo-coach/shared";
 import { getDb } from "$lib/server/db/index.js";
 import { issueApiToken, revokeApiToken } from "$lib/server/auth/index.js";
@@ -12,6 +13,7 @@ const createTokenSchema = z.object({
 });
 
 export const POST: RequestHandler = async ({ locals, request }) => {
+  assertAuthAvailable(locals);
   if (!locals.player) return json({ error: "Unauthorized" }, { status: 401 });
   const parsed = createTokenSchema.safeParse(await request.json());
   if (!parsed.success) {
@@ -28,6 +30,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 };
 
 export const DELETE: RequestHandler = async ({ locals, url }) => {
+  assertAuthAvailable(locals);
   if (!locals.player) return json({ error: "Unauthorized" }, { status: 401 });
   const id = url.searchParams.get("id");
   if (!id) return json({ error: "Missing token id" }, { status: 400 });

@@ -1,8 +1,8 @@
 import { json } from "@sveltejs/kit";
 import { z } from "zod";
 import type { RequestHandler } from "./$types";
-import { getDb } from "$lib/server/db/index.js";
 import { DomainError } from "$lib/server/services/index.js";
+import { duoRoute } from "$lib/server/auth/guards.js";
 import { enqueueProcessingJobs, isProcessorOnline } from "$lib/server/mcp/processing-jobs.js";
 
 const enqueueSchema = z
@@ -16,16 +16,15 @@ const enqueueSchema = z
     message: "endUtc must be after startUtc",
   });
 
-export const POST: RequestHandler = async ({ locals, params, request }) => {
-  if (!locals.player) return json({ error: "Unauthorized" }, { status: 401 });
+export const POST: RequestHandler = duoRoute(async ({ request }, { db, player, duoId }) => {
   const parsed = enqueueSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return json({ error: "Invalid processing request" }, { status: 400 });
   if (!isProcessorOnline()) {
     return json({ error: "The processing worker is offline." }, { status: 503 });
   }
   try {
-    const result = await enqueueProcessingJobs(getDb(), locals.player.id, {
-      duoId: params.duoId,
+    const result = await enqueueProcessingJobs(db, player.id, {
+      duoId,
       sessionId: parsed.data.sessionId,
       purpose: parsed.data.purpose,
       startUtc: new Date(parsed.data.startUtc),
@@ -38,4 +37,4 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
     }
     throw err;
   }
-};
+});

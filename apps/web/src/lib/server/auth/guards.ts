@@ -1,4 +1,4 @@
-import { error, json, type RequestEvent } from "@sveltejs/kit";
+import { error, json, redirect, type RequestEvent } from "@sveltejs/kit";
 import { and, eq } from "drizzle-orm";
 import { getDb, type AppDb } from "../db/index.js";
 import { duoMemberships } from "../db/schema.js";
@@ -88,3 +88,24 @@ export function loginUrlFor(url: URL): string {
   const next = `${url.pathname}${url.search}`;
   return next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`;
 }
+
+/**
+ * Top of every Duo page and child layout load (#56 1b-shell): loads run concurrently and `await parent()`
+ * skips the layout on in-Duo navigation, so each load checks for itself. Signed out: back to /login with this
+ * URL as next (the only read of `url`, so signed-in loads never depend on it). Not a member: 404.
+ */
+export async function assertDuoAccess(
+  locals: App.Locals,
+  duoId: string,
+  url: URL,
+  db: AppDb = getDb(),
+): Promise<Player> {
+  assertAuthAvailable(locals);
+  const player = locals.player;
+  if (!player) redirect(302, loginUrlFor(url));
+  if (!(await isPlayerInDuo(db, player.id, duoId))) error(404, "Not found");
+  return player;
+}
+
+/** The last Duo a Player opened (X1): / sends them back to it. */
+export const LAST_DUO_COOKIE = "last_duo";

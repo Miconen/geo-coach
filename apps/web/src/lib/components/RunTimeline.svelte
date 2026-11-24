@@ -2,6 +2,7 @@
   // A Session's run history (#56 0b): what each Processing run wrote, in surviving counts. Run ids and counts
   // only, never Learning text, so it sits outside the Recall gate.
   import type { RunTimeline, RunTimelineRow } from "$lib/server/workbench/run-timeline.js";
+  import { links } from "$lib/links.js";
 
   let {
     timeline,
@@ -29,7 +30,7 @@
 
   const shortId = (id: string) => id.slice(-6);
   const time = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString() : "");
-  const runLink = (runId: string) => `/?duo=${duoId}&run=${runId}#run-${runId}`;
+  const runLink = (runId: string) => links.review(duoId, { run: runId });
 
   const visibleRows = $derived(showOlder ? timeline.rows : timeline.rows.slice(0, VISIBLE));
 

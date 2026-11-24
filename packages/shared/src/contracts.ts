@@ -295,3 +295,15 @@ export const duoSseEventSchema = z.discriminatedUnion("type", [
   }),
 ]);
 export type DuoSseEvent = z.infer<typeof duoSseEventSchema>;
+
+/** GET /api/duos/[duoId]/pending-work: pending work ranges per Session and purpose (#56 1b-shell). */
+export const pendingWorkSchema = z.object({
+  ranges: z.array(
+    z.object({
+      sessionId: z.string().uuid(),
+      purpose: z.enum(["extract", "tips", "calls"]),
+      count: z.number().int().min(0),
+    }),
+  ),
+});
+export type PendingWork = z.infer<typeof pendingWorkSchema>;

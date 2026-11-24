@@ -6,7 +6,7 @@ import { isHttpError, type RequestEvent } from "@sveltejs/kit";
 import { uuidv7 } from "@geo-coach/shared";
 import { createTestDb, type TestDbHandle } from "../../db/test-db.js";
 import { duoMemberships, duos, players } from "../../db/schema.js";
-import { assertAuthAvailable, duoRoute, loginUrlFor, safeNext } from "../guards.js";
+import { assertAuthAvailable, assertDuoAccess, duoRoute, loginUrlFor, safeNext } from "../guards.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const routesDir = path.resolve(__dirname, "../../../../routes");
@@ -111,6 +111,73 @@ describe("duoRoute wrapper", () => {
       expect(res.status).toBe(status);
       expect(res.headers.get("content-type")).toMatch(/^text\/plain/);
     }
+  });
+});
+
+describe("assertDuoAccess (Duo layout and page loads)", () => {
+  let handle: TestDbHandle;
+  let duoId: string;
+  let memberId: string;
+  let outsiderId: string;
+
+  beforeEach(async () => {
+    handle = await createTestDb();
+    duoId = uuidv7();
+    memberId = uuidv7();
+    outsiderId = uuidv7();
+    await handle.db.insert(duos).values({ id: duoId, name: "D", geoguessrTeamId: "t" });
+    await handle.db.insert(players).values([
+      { id: memberId, discordId: "m", displayName: "M" },
+      { id: outsiderId, discordId: "o", displayName: "O" },
+    ]);
+    await handle.db.insert(duoMemberships).values({ duoId, playerId: memberId });
+  });
+
+  afterEach(async () => {
+    await handle.close();
+  });
+
+  const locals = (l: Partial<Locals>) => ({ player: null, sessionId: null, authUnavailable: false, ...l }) as Locals;
+  const url = new URL("http://x/duos/d/stats?country=ES");
+  const status = async (p: Promise<unknown>) => {
+    try {
+      await p;
+      return 200;
+    } catch (e) {
+      if (isHttpError(e)) return e.status;
+      if (e && typeof e === "object" && "location" in e) return `redirect ${(e as { location: string }).location}`;
+      throw e;
+    }
+  };
+
+  it("503s when auth is unavailable, redirects signed-out to login with next, 404s non-members", async () => {
+    expect(await status(assertDuoAccess(locals({ authUnavailable: true }), duoId, url, handle.db))).toBe(503);
+    expect(await status(assertDuoAccess(locals({}), duoId, url, handle.db))).toBe(
+      `redirect /login?next=${encodeURIComponent("/duos/d/stats?country=ES")}`,
+    );
+    expect(await status(assertDuoAccess(locals({ player: player(outsiderId) }), duoId, url, handle.db))).toBe(404);
+    expect(await assertDuoAccess(locals({ player: player(memberId) }), duoId, url, handle.db)).toMatchObject({ id: memberId });
+  });
+});
+
+describe("every Duo page and layout load calls assertDuoAccess first", () => {
+  const walk = (dir: string): string[] =>
+    readdirSync(dir).flatMap((name) => {
+      const full = path.join(dir, name);
+      if (statSync(full).isDirectory()) return walk(full);
+      return /^\+(page|layout)\.server\.ts$/.test(name) ? [full] : [];
+    });
+  const files = walk(path.join(routesDir, "duos"));
+
+  it("finds the loads", () => {
+    expect(files.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it.each(files.map((f) => [path.relative(routesDir, f), f]))("%s", (_rel, file) => {
+    const src = readFileSync(file, "utf8");
+    const body = src.slice(src.indexOf("export const load"));
+    const firstAwait = body.match(/await\s+([A-Za-z_]+)/);
+    expect(firstAwait?.[1]).toBe("assertDuoAccess");
   });
 });
 

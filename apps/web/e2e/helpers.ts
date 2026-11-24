@@ -30,3 +30,14 @@ export async function login(page: Page, playerId: string) {
   const res = await page.request.post("/auth/dev", { form: { playerId }, maxRedirects: 0 });
   if (res.status() !== 302) throw new Error(`dev login failed: ${res.status()}`);
 }
+
+/** Runs SQL against the e2e database (for state changes no page can make, e.g. a membership removed mid-session). */
+export async function withSql<T>(fn: (sql: import("postgres").Sql) => Promise<T>): Promise<T> {
+  const { default: postgres } = await import("postgres");
+  const sql = postgres(process.env.E2E_DATABASE_URL ?? "postgres://geocoach:geocoach@localhost:5432/geocoach_e2e", { max: 1 });
+  try {
+    return await fn(sql);
+  } finally {
+    await sql.end();
+  }
+}

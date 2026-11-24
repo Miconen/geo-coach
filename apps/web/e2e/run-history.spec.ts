@@ -16,12 +16,21 @@ test("a ?run= deep link opens its Session with the run pinned", async ({ page })
   await expect(row.getByTestId("run-counts")).toContainText("Learnings: 2 current of 2 surviving");
 });
 
-test("a bare ?run= resolves its owning Duo, and malformed or foreign runs are 404", async ({ page }) => {
+test("a bare ?run= resolves its owning Duo; / drops a bad ?run=, Review 404s it", async ({ page }) => {
   await page.goto(`/?run=${s.run2Id}`);
+  await expect(page).toHaveURL(new RegExp(`/duos/${s.duoId}/review\\?run=${s.run2Id}`));
   await expect(page.locator(`#run-${s.run2Id}`)).toBeVisible();
-  expect((await page.goto(`/?run=not-a-uuid`))!.status()).toBe(404);
-  expect((await page.goto(`/?run=${s.otherRunId}`))!.status()).toBe(404);
-  expect((await page.goto(`/?duo=${s.otherDuoId}&run=${s.runId}`))!.status()).toBe(404);
+  // At the root a malformed or unresolvable ?run= is dropped, never a 404 (X1).
+  for (const q of ["run=not-a-uuid", `run=${s.otherRunId}`, `duo=${s.otherDuoId}&run=${s.otherRunId}`]) {
+    const res = await page.goto(`/?${q}`);
+    expect(res!.status()).toBe(200);
+    await expect(page).toHaveURL(new RegExp(`/duos/${s.duoId}/review$`));
+  }
+  // On the Duo page it is a 404 (X2).
+  const review = `/duos/${s.duoId}/review`;
+  expect((await page.goto(`${review}?run=not-a-uuid`))!.status()).toBe(404);
+  expect((await page.goto(`${review}?run=${s.otherRunId}`))!.status()).toBe(404);
+  expect((await page.goto(`/duos/${s.otherDuoId}/review?run=${s.runId}`))!.status()).toBe(404);
 });
 
 test("selecting a Session fetches its history; rapid switches show the last Session's rows", async ({ page }) => {

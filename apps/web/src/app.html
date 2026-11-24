@@ -23,6 +23,26 @@
         }
       })();
     </script>
+    <script>
+      // Recall (#56 X4): one preference per Player and Duo, applied before first paint. data-player-id comes
+      // from hooks.server.ts; answers stay masked ("pending") until both ids resolve; a storage throw means off.
+      (function () {
+        var root = document.documentElement;
+        var m = /^\/duos\/([0-9a-f-]{36})(?:\/|$)/i.exec(location.pathname);
+        if (!m) return;
+        var playerId = root.getAttribute("data-player-id");
+        if (!playerId) {
+          root.setAttribute("data-recall", "pending");
+          return;
+        }
+        try {
+          var key = "recall:v1:" + playerId + ":" + m[1].toLowerCase();
+          root.setAttribute("data-recall", localStorage.getItem(key) === "1" ? "on" : "off");
+        } catch (e) {
+          root.setAttribute("data-recall", "off");
+        }
+      })();
+    </script>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="off">

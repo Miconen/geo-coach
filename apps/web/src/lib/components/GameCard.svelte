@@ -1,6 +1,7 @@
 <script lang="ts">
   import RoundCoachingCard from "$lib/components/RoundCoachingCard.svelte";
   import UtteranceText from "$lib/components/UtteranceText.svelte";
+  import Masked from "./Masked.svelte";
   import Inspect from "$lib/inspect/Inspect.svelte";
   import { formatRelSec } from "$lib/workbench/format.js";
   import type { RoundSlice } from "$lib/workbench/slices.js";
@@ -27,6 +28,8 @@
     /** Passed to UtteranceText: refreshes the page after a transcript fix. */
     onSaved?: () => unknown;
     onSelectLearning?: (learningId: string) => void;
+    /** Per-item Recall reveals for the Learning pills (X4): others stay masked while Recall is on. */
+    revealedLearningIds?: Record<string, boolean>;
     onAddLearning?: (opts: { utteranceIds: string[]; roundIds: string[]; country?: string }) => void;
     onDeleteUtterance?: (utterance: WorkbenchUtterance) => void;
   }
@@ -43,6 +46,7 @@
     onSelectUtterance,
     onSaved,
     onSelectLearning,
+    revealedLearningIds = {},
     onAddLearning,
     onDeleteUtterance,
   }: Props = $props();
@@ -92,7 +96,7 @@
                       ? 'bg-[var(--debrief-bg)] text-[var(--debrief)]'
                       : 'bg-[var(--accent-soft)] text-[var(--accent-soft-ink)]'}"
                   >
-                    {isDebrief ? "Debrief: " : `${l.kind}: `}{l.text}
+                    {isDebrief ? "Debrief: " : `${l.kind}: `}<Masked revealed={Boolean(revealedLearningIds[l.id])} label="hidden">{l.text}</Masked>
                   </button>
                 {/if}
               {/each}

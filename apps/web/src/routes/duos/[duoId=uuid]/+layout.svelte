@@ -9,9 +9,13 @@
   import { setDuoStream } from "$lib/live/context.js";
   import { needsRefresh } from "$lib/live/dependencies.js";
   import { browserStreamDeps, DuoStream, type StreamStatus } from "$lib/live/duo-stream.js";
+  import { clearRecallAttribute, syncRecall } from "$lib/recall.svelte.js";
 
   let { data, children } = $props();
   const duoId = $derived(data.duo.id);
+
+  // Recall (X4): the stored preference for this Player and Duo, applied before the keyed children render.
+  $effect.pre(() => syncRecall(data.player.id, duoId));
 
   // One event stream per tab (X5), shared by every Duo page through context; it follows Duo switches.
   const stream = new DuoStream(untrack(() => data.duo.id), browserStreamDeps());
@@ -38,6 +42,7 @@
       offStatus();
       offBatch();
       stream.dispose();
+      clearRecallAttribute();
     };
   });
 

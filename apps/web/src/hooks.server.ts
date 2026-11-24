@@ -21,5 +21,10 @@ export const handle: Handle = async ({ event, resolve }) => {
     }
   }
 
-  return resolve(event);
+  // The Player id on <html> lets app.html apply the Recall preference before first paint (X4).
+  const playerId = event.locals.player?.id;
+  if (!playerId) return resolve(event);
+  return resolve(event, {
+    transformPageChunk: ({ html }) => html.replace("<html", `<html data-player-id="${playerId}"`),
+  });
 };

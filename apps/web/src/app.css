@@ -66,3 +66,15 @@
 .tabular {
   font-variant-numeric: tabular-nums;
 }
+
+/* Recall (#56 X4): Masked content hides while Recall is on, or still resolving, until its item is revealed. */
+.recall-mask {
+  display: contents;
+}
+html[data-recall="on"] .recall-mask-content,
+html[data-recall="pending"] .recall-mask-content {
+  display: none !important;
+}
+html:not([data-recall="on"]):not([data-recall="pending"]) .recall-mask-placeholder {
+  display: none !important;
+}

@@ -9,6 +9,8 @@
     type ReactionType,
   } from "@geo-coach/shared";
   import ClaimCard from "$lib/components/ClaimCard.svelte";
+  import Masked from "$lib/components/Masked.svelte";
+  import { recall, setRecall } from "$lib/recall.svelte.js";
   import GameCard from "$lib/components/GameCard.svelte";
   import RoundCoachingCard from "$lib/components/RoundCoachingCard.svelte";
   import RunTimeline from "$lib/components/RunTimeline.svelte";
@@ -61,8 +63,29 @@
   let showDismissed = $state(false);
   let showSuperseded = $state(false);
   let searchQuery = $state("");
-  let recallMode = $state(false);
+  const recallMode = $derived(recall.on);
   let revealedIds = $state<Record<string, boolean>>({});
+  // Standalone reveals (X4): a Session's timeline speech, a dossier Claim, a bridge Round's speech.
+  let revealedSessionIds = $state<Record<string, boolean>>({});
+  let revealedClaimIds = $state<Record<string, boolean>>({});
+  let revealedRoundIds = $state<Record<string, boolean>>({});
+
+  function toggleRecall() {
+    setRecall(data.player.id, data.duo.id, !recall.on);
+    revealedIds = {};
+    revealedSessionIds = {};
+    revealedClaimIds = {};
+    revealedRoundIds = {};
+  }
+
+  function revealLearning(id: string) {
+    revealedIds = { ...revealedIds, [id]: true };
+  }
+
+  /** The Space handler leaves focused controls alone, so Space on a button never reveals (X4). */
+  function isInteractive(el: HTMLElement | null): boolean {
+    return Boolean(el?.closest("button, a[href], input, textarea, select, summary, [contenteditable], [role='button']"));
+  }
   let inspectorTab = $state<"provenance" | "game">("provenance");
   // A ?learning= deep link pins that Learning, even when the current filters hide it.
   const pinnedLearningId = (() => page.url.searchParams.get("learning"))();
@@ -110,14 +133,12 @@
       }
 
       if (q) {
+        const answers = recallMode && !revealedIds[l.id] ? [] : [l.text, l.detail ?? "", l.agentNote ?? "", ...l.topics];
         const hay = [
-          l.text,
-          l.detail ?? "",
-          l.agentNote ?? "",
+          ...answers,
           ...l.countries,
           ...l.countries.map(getCountryName),
           ...l.regions.map((r) => r.name),
-          ...l.topics,
         ]
           .join(" ")
           .toLowerCase();
@@ -136,7 +157,10 @@
     if (!wb || !searchQuery.trim()) return [] as WorkbenchUtterance[];
     const q = searchQuery.trim().toLowerCase();
     return wb.utterances.filter(
-      (u) => u.citedByLearningIds.length === 0 && u.text.toLowerCase().includes(q),
+      (u) =>
+        u.citedByLearningIds.length === 0 &&
+        (!recallMode || revealedSessionIds[u.sessionId]) &&
+        u.text.toLowerCase().includes(q),
     );
   });
 
@@ -181,6 +205,9 @@
   const activeLearning = $derived(
     wb?.learnings.find((l) => l.id === selectedLearningId) ?? filteredLearnings[0] ?? null,
   );
+
+  /** The per-item reveal of the selected Learning (Masked's prop; Recall itself is on <html>). */
+  const activeItemRevealed = $derived(activeLearning ? Boolean(revealedIds[activeLearning.id]) : false);
 
   const activeLearningRevealed = $derived(
     !recallMode || (activeLearning ? Boolean(revealedIds[activeLearning.id]) : false),
@@ -553,11 +580,10 @@
         e.preventDefault();
         searchInputEl?.focus();
       } else if (e.key === "r") {
-        recallMode = !recallMode;
-        revealedIds = {};
-      } else if (e.key === " " && recallMode && activeLearning) {
+        toggleRecall();
+      } else if (e.key === " " && recallMode && activeLearning && !isInteractive(target)) {
         e.preventDefault();
-        revealedIds = { ...revealedIds, [activeLearning.id]: true };
+        revealLearning(activeLearning.id);
       } else if (e.key === "s" && activeLearning) {
         void react(activeLearning.id, "star");
       } else if ((e.key === "j" || e.key === "k") && mode === "learnings" && filteredLearnings.length > 0) {
@@ -894,8 +920,7 @@
             </label>
             <button
               onclick={() => {
-                recallMode = !recallMode;
-                revealedIds = {};
+                toggleRecall();
               }}
               class="rounded-lg border px-2.5 py-1.5 font-semibold {recallMode
                 ? 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-ink)]'
@@ -935,7 +960,19 @@
                     </button>
                   </div>
                   {#each activeCountryClaims as claim (claim.id)}
-                    <ClaimCard {claim} {wb} compact onSetEvidence={setClaimEvidence} />
+                    <Masked block revealed={Boolean(revealedClaimIds[claim.id])}>
+                      {#snippet placeholder()}
+                        <button
+                          type="button"
+                          data-testid="claim-reveal"
+                          onclick={() => (revealedClaimIds = { ...revealedClaimIds, [claim.id]: true })}
+                          class="w-full rounded-lg border border-dashed border-[var(--border-strong)] px-2.5 py-1.5 text-left text-xs text-[var(--muted)]"
+                        >
+                          Claim hidden (Recall) · Reveal
+                        </button>
+                      {/snippet}
+                      <ClaimCard {claim} {wb} compact revealedLearningIds={revealedIds} onSetEvidence={setClaimEvidence} />
+                    </Masked>
                   {/each}
                 </div>
               {/if}
@@ -948,11 +985,20 @@
                   {#each activeCountryDossier.roundIds as rId}
                     {@const slice = roundSlice(wb, rId)}
                     {#if slice}
-                      <RoundCoachingCard
-                        round={slice.round}
-                        utterances={slice.utterances}
-                        players={slice.players}
-                      />
+                      <Masked block revealed={Boolean(revealedRoundIds[rId])}>
+                        {#snippet placeholder()}
+                          <RoundCoachingCard round={slice.round} utterances={slice.utterances} players={slice.players} recallHidden />
+                          <button
+                            type="button"
+                            data-testid="round-reveal"
+                            onclick={() => (revealedRoundIds = { ...revealedRoundIds, [rId]: true })}
+                            class="mt-1 text-xs font-medium text-[var(--accent)] hover:underline"
+                          >
+                            Reveal this Round's speech
+                          </button>
+                        {/snippet}
+                        <RoundCoachingCard round={slice.round} utterances={slice.utterances} players={slice.players} />
+                      </Masked>
                     {/if}
                   {/each}
                 </div>
@@ -988,17 +1034,20 @@
 
                   {#each group.items as item}
                 {@const isSelected = activeLearning?.id === item.id}
-                {@const isRevealed = !recallMode || Boolean(revealedIds[item.id])}
+                {@const isRevealed = Boolean(revealedIds[item.id])}
                 {@const gameLinks = learningGameLinks(wb, item.roundIds)}
-                <button
-                  type="button"
-                  onclick={() => {
-                    selectedLearningId = item.id;
-                    if (recallMode) revealedIds = { ...revealedIds, [item.id]: true };
-                  }}
-                  class="w-full text-left cursor-pointer rounded-xl border bg-[var(--surface)] p-3.5 transition-colors {isSelected
+                <div
+                  data-learning-row={item.id}
+                  data-selected={isSelected ? "1" : undefined}
+                  class="relative rounded-xl border bg-[var(--surface)] transition-colors {isSelected
                     ? 'border-[var(--accent)] ring-1 ring-[var(--accent)]/30'
                     : 'border-[var(--border)] hover:border-[var(--border-strong)]'}"
+                >
+                <button
+                  type="button"
+                  data-testid="learning-select"
+                  onclick={() => (selectedLearningId = item.id)}
+                  class="w-full cursor-pointer p-3.5 text-left"
                 >
                   <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]">
                     <div class="flex flex-wrap items-center gap-1.5">
@@ -1047,17 +1096,12 @@
                     </div>
                   </div>
 
-                  <p class="mt-2 text-sm font-medium text-[var(--ink)]">
-                    {#if isRevealed}
-                      {item.text}
-                    {:else}
-                      <span class="rounded bg-[var(--badge-bg)] px-2 py-0.5 text-xs text-[var(--muted)]">
-                        Click or press Space to reveal takeaway
-                      </span>
-                    {/if}
+                  <p class="mt-2 text-sm font-medium text-[var(--ink)]" data-answer="learning-text">
+                    <Masked revealed={isRevealed} label="Reveal or press Space to show the takeaway">{item.text}</Masked>
                   </p>
 
-                  {#if item.topics.length > 0 && isRevealed}
+                  {#if item.topics.length > 0}
+                    <Masked block revealed={isRevealed} label="">
                     <div class="mt-1.5 flex flex-wrap gap-1">
                       {#each item.topics as topic}
                         <span class="rounded-full bg-[var(--surface-subtle)] px-2 py-0.5 text-[11px] text-[var(--muted)]">
@@ -1065,9 +1109,11 @@
                         </span>
                       {/each}
                     </div>
+                    </Masked>
                   {/if}
 
-                  {#if (gameLinks.length > 0 || item.sessionIds.length > 0) && isRevealed}
+                  {#if gameLinks.length > 0 || item.sessionIds.length > 0}
+                    <Masked block revealed={isRevealed} label="">
                     <!-- Primary relationships inline (1b-shell): Session and Game chips; plain text until their pages ship. -->
                     <div class="mt-1.5 flex flex-wrap items-center gap-1 text-[11px] text-[var(--muted)]" data-testid="learning-chips">
                       {#each item.sessionIds as sid (sid)}
@@ -1086,8 +1132,26 @@
                         />
                       {/each}
                     </div>
+                    </Masked>
                   {/if}
                 </button>
+                {#if !isRevealed}
+                  <!-- Shown only while Recall masks this row (a sibling of the select control, never nested). -->
+                  <span class="recall-mask-placeholder">
+                    <button
+                      type="button"
+                      data-testid="learning-reveal"
+                      onclick={() => {
+                        selectedLearningId = item.id;
+                        revealLearning(item.id);
+                      }}
+                      class="absolute right-3 bottom-3 rounded-md border border-[var(--accent)] px-2 py-0.5 text-[11px] font-semibold text-[var(--accent)]"
+                    >
+                      Reveal
+                    </button>
+                  </span>
+                {/if}
+                </div>
                   {/each}
                 </div>
               {/each}
@@ -1192,7 +1256,7 @@
                     <span class="mono ml-1 font-normal text-[var(--muted)]">{group.claims.length}</span>
                   </div>
                   {#each group.claims as claim (claim.id)}
-                    <ClaimCard {claim} {wb} onSetEvidence={setClaimEvidence} onSelectLearning={openLearning} />
+                    <ClaimCard {claim} {wb} revealedLearningIds={revealedIds} onSetEvidence={setClaimEvidence} onSelectLearning={openLearning} />
                   {/each}
                 </div>
               {/each}
@@ -1383,6 +1447,17 @@
               </div>
             {/each}
 
+            <Masked block revealed={Boolean(revealedSessionIds[activeSession.id])}>
+            {#snippet placeholder()}
+              <button
+                type="button"
+                data-testid="session-reveal"
+                onclick={() => (revealedSessionIds = { ...revealedSessionIds, [activeSession.id]: true })}
+                class="w-full rounded-lg border border-dashed border-[var(--border-strong)] py-3 text-xs font-semibold text-[var(--accent)]"
+              >
+                Recall is on: reveal this Session's Games and speech
+              </button>
+            {/snippet}
             <!-- Rounds with interleaved Utterances & inline Learning pills -->
             {#each (selectedGameId ? [selectedGameId] : activeSession.gameIds) as gId}
               {@const slice = gameSlice(wb, gId)}
@@ -1399,6 +1474,7 @@
                   {timelineSearch}
                   onSelectUtterance={focusUtterance}
                   onSelectLearning={(id) => (selectedLearningId = id)}
+                  revealedLearningIds={revealedIds}
                   onAddLearning={openManualModal}
                   onDeleteUtterance={deleteUtterance}
                 />
@@ -1454,6 +1530,7 @@
                 {/each}
               </div>
             {/if}
+            </Masked>
           </div>
         {/if}
       </main>
@@ -1490,19 +1567,31 @@
           {#if inspectorTab === "game" && primaryGame && activeLearningRevealed}
             <div class="space-y-2">
               {#if primaryGameSlice}
-                <GameCard
-                  onSaved={refreshWorkbench}
-                  game={primaryGameSlice.game}
-                  rounds={primaryGameSlice.rounds}
-                  highlightedRoundIds={activeLearning.roundIds}
-                  onSelectUtterance={openUtterance}
-                />
+                <Masked block revealed={activeItemRevealed}>
+                  <GameCard
+                    onSaved={refreshWorkbench}
+                    game={primaryGameSlice.game}
+                    rounds={primaryGameSlice.rounds}
+                    highlightedRoundIds={activeLearning.roundIds}
+                    revealedLearningIds={revealedIds}
+                    onSelectUtterance={openUtterance}
+                  />
+                </Masked>
               {/if}
             </div>
           {:else}
             <div class="space-y-3" data-testid="active-learning" data-learning-id={activeLearning.id}>
-              {#if activeLearningRevealed}
-                <h3 class="text-sm font-semibold text-[var(--ink)]">{activeLearning.text}</h3>
+              <Masked block revealed={activeItemRevealed}>
+                {#snippet placeholder()}
+                  <button
+                    data-testid="inspector-reveal"
+                    onclick={() => revealLearning(activeLearning.id)}
+                    class="w-full rounded-lg bg-[var(--accent)] py-2 text-xs font-semibold text-[var(--accent-ink)]"
+                  >
+                    Reveal Takeaway (Space)
+                  </button>
+                {/snippet}
+                <h3 class="text-sm font-semibold text-[var(--ink)]" data-answer="inspector-text">{activeLearning.text}</h3>
                 {#if activeLearning.detail}
                   <p class="text-xs text-[var(--muted)]">{activeLearning.detail}</p>
                 {/if}
@@ -1511,14 +1600,7 @@
                     <strong>Agent note:</strong> {activeLearning.agentNote}
                   </div>
                 {/if}
-              {:else}
-                <button
-                  onclick={() => (revealedIds = { ...revealedIds, [activeLearning.id]: true })}
-                  class="w-full rounded-lg bg-[var(--accent)] py-2 text-xs font-semibold text-[var(--accent-ink)]"
-                >
-                  Reveal Takeaway (Space)
-                </button>
-              {/if}
+              </Masked>
 
               <!-- Reactions -->
               <div class="flex flex-wrap gap-1.5 text-xs">
@@ -1550,17 +1632,20 @@
                 </button>
               </div>
 
-              {#if activeLearningClaim && activeLearningRevealed}
+              {#if activeLearningClaim}
+                <Masked block revealed={activeItemRevealed}>
                 <div class="space-y-1">
                   <div class="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
                     Rests on Claim
                   </div>
-                  <ClaimCard claim={activeLearningClaim} {wb} onSetEvidence={setClaimEvidence} />
+                  <ClaimCard claim={activeLearningClaim} {wb} revealedLearningIds={revealedIds} onSetEvidence={setClaimEvidence} />
                 </div>
+                </Masked>
               {/if}
 
               <!-- Two-way supersession links -->
-              {#if activeLearning.supersededByLearningIds.length > 0 && activeLearningRevealed}
+              {#if activeLearning.supersededByLearningIds.length > 0}
+                <Masked block revealed={activeItemRevealed}>
                 <div class="rounded-lg bg-[var(--surface-subtle)] p-2 text-xs">
                   Superseded by newer run:
                   {#each activeLearning.supersededByLearningIds as repId}
@@ -1572,8 +1657,10 @@
                     </button>
                   {/each}
                 </div>
+                </Masked>
               {/if}
-              {#if activeLearning.supersedesLearningIds.length > 0 && activeLearningRevealed}
+              {#if activeLearning.supersedesLearningIds.length > 0}
+                <Masked block revealed={activeItemRevealed}>
                 <div class="rounded-lg bg-[var(--surface-subtle)] p-2 text-xs">
                   Replaces:
                   {#each activeLearning.supersedesLearningIds as oldId}
@@ -1588,10 +1675,12 @@
                     </button>
                   {/each}
                 </div>
+                </Masked>
               {/if}
 
               <!-- Links back to the Games and Rounds -->
-              {#if activeLearningGames.length > 0 && activeLearningRevealed}
+              {#if activeLearningGames.length > 0}
+                <Masked block revealed={activeItemRevealed}>
                 <div class="space-y-1">
                   <div class="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
                     From {activeLearningGames.length === 1 ? "Game" : "Games"}
@@ -1618,24 +1707,30 @@
                     </div>
                   {/each}
                 </div>
+                </Masked>
               {/if}
 
               <!-- Linked Round Coaching Cards -->
               {#each activeLearning.roundIds as rId}
                 {@const slice = roundSlice(wb, rId)}
                 {#if slice}
-                  <RoundCoachingCard
-                    round={slice.round}
-                    utterances={slice.utterances}
-                    players={slice.players}
-                    recallHidden={!activeLearningRevealed}
-                    onSelectUtterance={activeLearningRevealed ? openUtterance : undefined}
-                  />
+                  <Masked block revealed={activeItemRevealed}>
+                    {#snippet placeholder()}
+                      <RoundCoachingCard round={slice.round} utterances={slice.utterances} players={slice.players} recallHidden />
+                    {/snippet}
+                    <RoundCoachingCard
+                      round={slice.round}
+                      utterances={slice.utterances}
+                      players={slice.players}
+                      onSelectUtterance={openUtterance}
+                    />
+                  </Masked>
                 {/if}
               {/each}
 
               <!-- Cited Transcript Excerpt -->
-              {#if activeLearning.utteranceIds.length > 0 && activeLearningRevealed}
+              {#if activeLearning.utteranceIds.length > 0}
+                <Masked block revealed={activeItemRevealed}>
                 <div class="space-y-1">
                   <div class="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
                     Cited Speech
@@ -1658,6 +1753,7 @@
                     {/if}
                   {/each}
                 </div>
+                </Masked>
               {/if}
 
               <!-- Provenance Footer -->

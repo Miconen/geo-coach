@@ -2,6 +2,7 @@
   import type { EvidenceDirection } from "@geo-coach/shared";
   import type { WorkbenchClaim, WorkbenchData } from "$lib/server/workbench/view-model.js";
   import { CLAIM_STATUS_META, describeEvidence } from "$lib/workbench/knowledge.js";
+  import Masked from "./Masked.svelte";
 
   interface Props {
     claim: WorkbenchClaim;
@@ -10,9 +11,11 @@
     compact?: boolean;
     onSetEvidence?: (claimId: string, direction: EvidenceDirection | null) => void;
     onSelectLearning?: (learningId: string) => void;
+    /** Per-item Recall reveals: a sibling Learning not in it stays masked while Recall is on (X4). */
+    revealedLearningIds?: Record<string, boolean>;
   }
 
-  let { claim, wb, compact = false, onSetEvidence, onSelectLearning }: Props = $props();
+  let { claim, wb, compact = false, onSetEvidence, onSelectLearning, revealedLearningIds = {} }: Props = $props();
 
   const meta = $derived(CLAIM_STATUS_META[claim.status]);
   const linkedLearnings = $derived(
@@ -132,7 +135,7 @@
             onclick={() => onSelectLearning?.(l.id)}
             class="block w-full truncate text-left text-[11px] text-[var(--accent)] hover:underline"
           >
-            {l.origin === "agent" ? "Tip" : "Learning"}: {l.text}
+            {l.origin === "agent" ? "Tip" : "Learning"}: <Masked revealed={Boolean(revealedLearningIds[l.id])}>{l.text}</Masked>
           </button>
         {/each}
       </div>

@@ -22,8 +22,8 @@ test("an off-site next falls back to home", async ({ page }) => {
 });
 
 test("a non-member gets 404 from Duo APIs, a signed-out request 401", async ({ page }) => {
-  expect((await page.request.get(`/api/duos/${s.duoId}/workbench`)).status()).toBe(401);
+  expect((await page.request.get(`/api/duos/${s.duoId}/review`)).status()).toBe(401);
   await login(page, s.outsiderId);
-  expect((await page.request.get(`/api/duos/${s.duoId}/workbench`)).status()).toBe(404);
-  expect((await page.request.get(`/api/duos/not-a-uuid/workbench`)).status()).toBe(404);
+  expect((await page.request.get(`/api/duos/${s.duoId}/review`)).status()).toBe(404);
+  expect((await page.request.get(`/api/duos/not-a-uuid/review`)).status()).toBe(404);
 });

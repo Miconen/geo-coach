@@ -9,11 +9,9 @@ test.beforeEach(async ({ page }) => {
   await login(page, s.mikoId);
 });
 
-test("GET /review validates its query like the shared schema; GET /claims/[id] is Duo-scoped", async ({ page }) => {
+test("GET /review answers Review's payload; GET /claims/[id] is Duo-scoped", async ({ page }) => {
   const api = (path: string) => page.request.get(`/api/duos/${s.duoId}${path}`);
-  expect((await api("/review?sessionId=nope")).status()).toBe(400);
-  expect((await api(`/review?sessionId=${s.otherRunId}`)).status()).toBe(404);
-  const body = (await (await api(`/review?sessionId=${s.sessionId}`)).json()) as { duo: { id: string }; learnings: unknown[] };
+  const body = (await (await api("/review")).json()) as { duo: { id: string }; learnings: unknown[] };
   expect(body.duo.id).toBe(s.duoId);
   expect(body.learnings.length).toBeGreaterThan(0);
 

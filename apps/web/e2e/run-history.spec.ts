@@ -36,30 +36,29 @@ test("a bare ?run= resolves its owning Duo and Session; / drops a bad ?run=, Rev
   expect((await page.goto(`/duos/${s.otherDuoId}/review?run=${s.runId}`))!.status()).toBe(404);
 });
 
-test("selecting a Session fetches its history; rapid switches show the last Session's rows", async ({ page }) => {
+test("Review's Session links open Session pages; rapid switches show the last Session's rows", async ({ page }) => {
   await page.goto(`/duos/${s.duoId}/review`);
   await page.waitForLoadState("networkidle");
-  const one = page.locator(`[data-testid="session-button"][data-session-id="${s.sessionId}"]`);
-  const two = page.locator(`[data-testid="session-button"][data-session-id="${s.session2Id}"]`);
+  const one = page.locator(`[data-testid="session-link"][data-session-id="${s.sessionId}"]`);
+  const two = page.locator(`[data-testid="session-link"][data-session-id="${s.session2Id}"]`);
+  for (const [link, id] of [[two, s.session2Id], [one, s.sessionId]] as const) {
+    await link.click();
+    await expect(page).toHaveURL(new RegExp(`/sessions/${id}$`));
+    await page.goBack();
+    await expect(page).toHaveURL(/\/review$/);
+  }
   await two.click();
-  await one.click();
-  await two.click();
+  await expect(page).toHaveURL(new RegExp(`/sessions/${s.session2Id}$`));
   const timeline = page.getByTestId("run-timeline");
   await expect(timeline.locator(`[data-run-id="${s.run2Id}"]`)).toBeVisible();
   await expect(timeline.locator(`[data-run-id="${s.runId}"]`)).toHaveCount(0);
-  // The pin was cleared by the switch.
   await expect(timeline.locator("[data-selected=\"1\"]")).toHaveCount(0);
-  await one.click();
-  await expect(timeline.locator(`[data-run-id="${s.runId}"]`)).toBeVisible();
-  await expect(timeline.locator(`[data-run-id="${s.run2Id}"]`)).toHaveCount(0);
 });
 
-test("the workbench refresh validates ?sessionId= and drops a foreign ?run= with 200", async ({ page }) => {
-  const api = (q: string) => page.request.get(`/api/duos/${s.duoId}/workbench${q}`);
-  expect((await api("?sessionId=nope")).status()).toBe(400);
-  expect((await api(`?sessionId=${s.otherDuoId}`)).status()).toBe(404);
-  const res = await api(`?sessionId=${s.sessionId}&run=${s.run2Id}`);
+test("4 retired /workbench; Review's /review takes no Session params", async ({ page }) => {
+  expect((await page.request.get(`/api/duos/${s.duoId}/workbench`)).status()).toBe(404);
+  const res = await page.request.get(`/api/duos/${s.duoId}/review?sessionId=nope&run=${s.run2Id}`);
   expect(res.status()).toBe(200);
-  const body = (await res.json()) as { runTimeline: { pinMissing: boolean; sessionId: string } };
-  expect(body.runTimeline).toMatchObject({ pinMissing: true, sessionId: s.sessionId });
+  const body = (await res.json()) as { duo: { id: string } };
+  expect(body.duo.id).toBe(s.duoId);
 });

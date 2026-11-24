@@ -24,8 +24,6 @@ const ANSWER_FIELDS: Array<{ file: string; fields: string[] }> = [
       "View earlier",
       "onSelectUtterance={openUtterance}\n",
       "Cited Speech",
-      "<GameCard\n                  onSaved={refreshWorkbench}\n                  duoId={wb.duo.id}",
-      "betweenGameUtterances as u",
     ],
   },
   { file: "lib/components/ClaimCard.svelte", fields: ["{l.text}"] },

@@ -317,12 +317,9 @@ export const pendingWorkSchema = z.object({
 export type PendingWork = z.infer<typeof pendingWorkSchema>;
 
 /**
- * GET /api/duos/[duoId]/review (#56 3b): Review's refresh, the same payload as its page load. Until 4 retires the
- * legacy Session pane, ?sessionId= picks its Session (malformed 400, outside the Duo 404) and ?run= pins a run
- * (never an error: a stale pin is dropped).
+ * GET /api/duos/[duoId]/review (#56 3b): Review's refresh, the same payload as its page load. It takes no
+ * parameters since 4 retired the legacy Session pane (its ?sessionId= and ?run= moved to the Session page); unknown
+ * params are ignored.
  */
-export const reviewQuerySchema = z.object({
-  sessionId: z.string().uuid().optional(),
-  run: z.string().max(64).optional(),
-});
+export const reviewQuerySchema = z.object({});
 export type ReviewQuery = z.infer<typeof reviewQuerySchema>;

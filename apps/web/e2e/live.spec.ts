@@ -58,8 +58,9 @@ test("losing membership while the stream is open clears the Duo's data", async (
   await expect(nav).toHaveAttribute("data-stream", "open");
   await withSql((sql) => sql`DELETE FROM duo_memberships WHERE player_id = ${s.soraId} AND duo_id = ${s.duoId}`);
   try {
-    // No periodic revocation check (S): the next refresh answering 404 runs the probe.
-    await page.locator(`[data-testid="session-button"][data-session-id="${s.session2Id}"]`).click();
+    // No periodic revocation check (S): the next refresh answering 404 runs the probe (here after starring).
+    await page.getByTestId("learning-select").first().click();
+    await page.keyboard.press("s");
     await expect(page.getByTestId("duo-revoked")).toContainText("no longer have access");
   } finally {
     await withSql(

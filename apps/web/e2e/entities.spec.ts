@@ -54,12 +54,12 @@ test.describe("entity pages", () => {
   });
 
   test("traversal from the Session Game control and the Learning inspector", async ({ page }) => {
+    // From 4 the Session Game control lives on the Session page (Review's Session pane is retired).
     await page.goto(`${duo}/review`);
     await page.waitForLoadState("networkidle");
-    await page.locator(`[data-testid="session-button"][data-session-id="${s.sessionId}"]`).click();
-    const control = page.getByTestId("session-game-control").first();
-    await expect(control.getByRole("button")).toBeVisible();
-    await control.getByRole("link").click();
+    await page.locator(`[data-testid="session-link"][data-session-id="${s.sessionId}"]`).click();
+    await expect(page).toHaveURL(new RegExp(`/sessions/${s.sessionId}$`));
+    await page.getByTestId("session-games").getByRole("link", { name: /vs / }).first().click();
     await expect(page).toHaveURL(/\/games\/[0-9a-f-]{36}$/);
 
     await page.goto(`${duo}/review?learning=${s.learningIds[0]}`);

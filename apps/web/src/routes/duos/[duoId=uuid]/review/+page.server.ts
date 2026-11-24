@@ -19,7 +19,6 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
   }
   return {
     workbench: await buildWorkbenchData(db, params.duoId, player.id),
-    selectedRunId: null as string | null,
     runMissing: runId !== null,
   };
 };

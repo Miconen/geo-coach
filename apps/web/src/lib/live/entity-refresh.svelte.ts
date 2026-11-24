@@ -9,7 +9,7 @@ import { singleFlight } from "./single-flight.js";
  * authorization probe: 401/404 there clears the Duo (layout); 200 means this entity is gone ("no longer exists",
  * with the Duo UI and stream kept). Call during component init.
  */
-export function useEntityRefresh<T>(opts: { base: () => T; url: () => string; consumer: Consumer }) {
+export function useEntityRefresh<T>(opts: { base: () => T; url: () => string; consumer: Consumer; debounceMs?: number }) {
   const stream = getDuoStream();
   let live = $state.raw<{ base: T; value: T } | null>(null);
   let missing = $state(false);
@@ -33,11 +33,25 @@ export function useEntityRefresh<T>(opts: { base: () => T; url: () => string; co
     }
   });
 
+  // An optional short debounce folds a burst of events into one fetch (Stats: each refresh reparses every rawDuel).
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const schedule = () => {
+    if (!opts.debounceMs) return void refresh();
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      void refresh();
+    }, opts.debounceMs);
+  };
+
   onMount(() => {
     const off = stream?.subscribe((batch) => {
-      if (needsRefresh(opts.consumer, batch)) void refresh();
+      if (needsRefresh(opts.consumer, batch)) schedule();
     });
-    return () => off?.();
+    return () => {
+      off?.();
+      if (timer) clearTimeout(timer);
+    };
   });
 
   return {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { replaceState } from "$app/navigation";
+  import type { Snapshot } from "./$types";
   import {
     EMPTY_STATS_FILTER,
     DEFAULT_SMOOTHING,
@@ -24,16 +24,39 @@
   import EffectsSection from "$lib/stats/EffectsSection.svelte";
   import VersusSection from "$lib/stats/VersusSection.svelte";
   import MapViewSection from "$lib/stats/map/MapViewSection.svelte";
+  import { updateQuery } from "$lib/stats/url-query.js";
+  import { useEntityRefresh } from "$lib/live/entity-refresh.svelte.js";
+  import type { StatsPayload } from "@geo-coach/shared";
 
   let { data } = $props();
 
+  // Live refresh (#56 2b): the server load is the Back baseline; X5 Stats events refetch the same payload,
+  // single-flight with a short debounce, and a response for a replaced load is dropped.
+  const live = useEntityRefresh<StatsPayload>({
+    base: () => data.stats,
+    url: () => `/api/duos/${data.duo.id}/stats`,
+    consumer: "stats",
+    debounceMs: 300,
+  });
+  const stats = $derived(live.current);
+
   let mapView = $state<MapViewSection>();
+  let rankingSelected = $state<string | null>(null);
+
+  // Back restores the open Round card and the selected Rankings row (filters come back from the URL).
+  export const snapshot: Snapshot<{ round: string | null; country: string | null }> = {
+    capture: () => ({ round: mapView?.openRoundId() ?? null, country: rankingSelected }),
+    restore: (s) => {
+      rankingSelected = s.country;
+      if (s.round) mapView?.showRound(s.round, { scroll: false });
+    },
+  };
 
   // The filter lives in the URL so a view can be bookmarked; changing it never reloads
   // the payload, since every panel is computed here in the browser (ADR 0003).
   let filter = $state<StatsFilter>(parseStatsFilter(page.url.searchParams));
 
-  const filtered = $derived(applyFilter(data.stats, filter));
+  const filtered = $derived(applyFilter(stats, filter));
 
   // How much the time-series charts are smoothed. Not part of the filter (it never
   // narrows the Rounds), but kept in the URL next to it so a view can be bookmarked.
@@ -48,37 +71,37 @@
 
   function setSmoothing(next: SmoothingLevel) {
     smoothing = next;
-    const params = new URLSearchParams(page.url.searchParams);
-    if (next === DEFAULT_SMOOTHING) params.delete(SMOOTHING_PARAM);
-    else params.set(SMOOTHING_PARAM, next);
-    replaceState(`?${params}`, {});
+    updateQuery((params) => {
+      if (next === DEFAULT_SMOOTHING) params.delete(SMOOTHING_PARAM);
+      else params.set(SMOOTHING_PARAM, next);
+    });
   }
 
   const MODE_LABELS: Record<GameMode, string> = { moving: "Moving", nm: "NM", nmpz: "NMPZ" };
 
   const mapNames = $derived(
-    [...new Set(data.stats.games.map((g) => g.mapName).filter((n): n is string => !!n))].sort(),
+    [...new Set(stats.games.map((g) => g.mapName).filter((n): n is string => !!n))].sort(),
   );
   // Most-played first, so the countries worth filtering on are at the top.
   const countries = $derived.by(() => {
     const counts = new Map<string, number>();
-    for (const r of data.stats.rounds) {
+    for (const r of stats.rounds) {
       if (r.countryCode) counts.set(r.countryCode, (counts.get(r.countryCode) ?? 0) + 1);
     }
     return [...counts]
       .map(([code, rounds]) => ({ code, rounds }))
       .sort((a, b) => b.rounds - a.rounds || getCountryName(a.code).localeCompare(getCountryName(b.code)));
   });
-  const sessionsNewestFirst = $derived([...data.stats.sessions].reverse());
+  const sessionsNewestFirst = $derived([...stats.sessions].reverse());
 
   const isFiltered = $derived(serializeStatsFilter(filter).toString() !== "");
 
   function setFilter(next: StatsFilter) {
     filter = next;
-    const params = new URLSearchParams(page.url.searchParams);
-    for (const key of STATS_FILTER_PARAMS) params.delete(key);
-    for (const [key, value] of serializeStatsFilter(next)) params.append(key, value);
-    replaceState(`?${params}`, {});
+    updateQuery((params) => {
+      for (const key of STATS_FILTER_PARAMS) params.delete(key);
+      for (const [key, value] of serializeStatsFilter(next)) params.append(key, value);
+    });
   }
 
   function toggle<T>(list: T[], value: T): T[] {
@@ -273,30 +296,30 @@
       </div>
       {#if section.id === "overview"}
         <div class="mt-3">
-          <OverviewSection payload={data.stats} {filter} {smoothing} />
+          <OverviewSection payload={stats} {filter} {smoothing} />
         </div>
       {:else if section.id === "rankings"}
         <div class="mt-3">
-          <RankingsSection payload={data.stats} {filter} />
+          <RankingsSection duoId={data.duo.id} payload={stats} {filter} bind:selected={rankingSelected} />
         </div>
       {:else if section.id === "versus"}
         <div class="mt-3">
-          <VersusSection payload={data.stats} {filter} {smoothing} />
+          <VersusSection payload={stats} {filter} {smoothing} />
         </div>
       {:else if section.id === "speed"}
         <div class="mt-3">
-          <SpeedSection payload={data.stats} {filter} {smoothing} />
+          <SpeedSection payload={stats} {filter} {smoothing} />
         </div>
       {:else if section.id === "effects"}
         <div class="mt-3">
-          <EffectsSection payload={data.stats} {filter} />
+          <EffectsSection payload={stats} {filter} />
         </div>
       {:else if section.id === "players"}
         <div class="mt-3">
-          <PlayersSection payload={data.stats} {filter} {smoothing} onOpenRound={(id) => mapView?.showRound(id)} />
+          <PlayersSection payload={stats} {filter} {smoothing} onOpenRound={(id) => mapView?.showRound(id)} />
         </div>
       {:else if section.id === "map-view"}
-        <div class="mt-3"><MapViewSection bind:this={mapView} payload={data.stats} rounds={filtered.rounds} /></div>
+        <div class="mt-3"><MapViewSection bind:this={mapView} duoId={data.duo.id} payload={stats} rounds={filtered.rounds} /></div>
       {/if}
     </section>
   {/each}

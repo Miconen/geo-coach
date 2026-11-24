@@ -31,8 +31,14 @@
   import PlotChart from "./PlotChart.svelte";
   import { formatNumber, formatPercent, formatSigned, unitLabel } from "./overview-text.js";
   import { gapTakeaway, placeName, rowCountryOf } from "./rankings-text.js";
+  import { links } from "$lib/links.js";
 
-  let { payload, filter }: { payload: StatsPayload; filter: StatsFilter } = $props();
+  let {
+    duoId,
+    payload,
+    filter,
+    selected = $bindable(null),
+  }: { duoId: string; payload: StatsPayload; filter: StatsFilter; selected?: string | null } = $props();
 
   // --- Ranking method (other methods only in Developer mode) -------------------
 
@@ -129,7 +135,6 @@
 
   // --- Selection: a row or a confusion pair opens the detail pane ----------------
 
-  let selected = $state<string | null>(null);
   const selectedRow = $derived(rows.find((r) => r.countryCode === selected) ?? null);
 
   const pairs = $derived(confusionPairs(filtered.rounds));
@@ -282,7 +287,11 @@
                 ? 'bg-[var(--surface-subtle)]'
                 : ''} {isGreyedOut(r, greyOutRounds) ? 'opacity-45' : ''}"
               aria-selected={r.countryCode === selected}
-              onclick={() => toggleRow(r.countryCode)}
+              onclick={(e) => {
+                // A link inside the row (the Learnings count) navigates; the selection stays as it was.
+                if ((e.target as Element).closest("a")) return;
+                toggleRow(r.countryCode);
+              }}
             >
               <td class="px-2 py-1 font-medium text-[var(--ink)]">
                 <button type="button" class="text-left" onclick={(e) => { e.stopPropagation(); toggleRow(r.countryCode); }}>
@@ -297,7 +306,13 @@
               <td class={cell}>{r.far || ""}</td>
               <td class={cell}>{r.slow || ""}</td>
               <td class={cell}>{r.splits ? `${r.splitsCaught}/${r.splits}` : ""}</td>
-              <td class={cell}>{r.learnings || ""}</td>
+              <td class={cell}>
+                {#if r.learnings}<a
+                    href={links.review(duoId, { country: r.countryCode })}
+                    data-testid="country-learnings"
+                    class="font-semibold text-[var(--accent)] hover:underline">{r.learnings}</a
+                  >{/if}
+              </td>
               {#if !selectedRow}
                 {#each payload.players as p (p.id)}
                   <td class={cell}>{formatPercent(r.bestGuessShare[p.id] ?? 0)}</td>

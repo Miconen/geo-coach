@@ -4,7 +4,7 @@
   // country, Mode or Map, plus an automatic scan for strong patterns. The choice
   // lives in the URL so a finding can be bookmarked and shared.
   import { page } from "$app/state";
-  import { replaceState } from "$app/navigation";
+  import { updateQuery } from "./url-query.js";
   import {
     MIN_EFFECT_ROUNDS,
     SCAN_MIN_Z,
@@ -55,12 +55,12 @@
     if (next.when !== undefined) whenId = next.when;
     if (next.outcome !== undefined) outcomeId = next.outcome;
     if (next.by !== undefined) by = next.by;
-    const params = new URLSearchParams(page.url.searchParams);
-    params.set(PARAM.when, condition.id);
-    params.set(PARAM.outcome, outcome.id);
-    if (by) params.set(PARAM.by, by);
-    else params.delete(PARAM.by);
-    replaceState(`?${params}`, {});
+    updateQuery((params) => {
+      params.set(PARAM.when, condition.id);
+      params.set(PARAM.outcome, outcome.id);
+      if (by) params.set(PARAM.by, by);
+      else params.delete(PARAM.by);
+    });
   }
 
   function value(v: number | null, format: EffectFormat): string {

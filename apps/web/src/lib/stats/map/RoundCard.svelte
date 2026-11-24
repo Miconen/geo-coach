@@ -22,8 +22,10 @@
   import Flag from "./Flag.svelte";
   import type { PlacedRound } from "./geo.js";
   import { nearestOfficialPano } from "./streetview.js";
+  import { links } from "$lib/links.js";
 
   let {
+    duoId,
     round,
     payload,
     colors,
@@ -33,6 +35,7 @@
     ontogglegame,
     onopenround,
   }: {
+    duoId: string;
     round: PlacedRound;
     payload: StatsPayload;
     colors: readonly string[];
@@ -48,6 +51,8 @@
 
   const cls = $derived(mapRoundClass(round));
   const game = $derived(payload.games.find((g) => g.id === round.gameId) ?? null);
+  // The Round page (#56 2b); X7's non-positive numbers stay plain text.
+  const roundHref = $derived(links.round(duoId, round.gameId, round.roundNumber));
   const gameState = $derived(roundGameState(payload.rounds, round));
   const slower = $derived(slowerDuoGuess(round));
   const guesses = $derived(
@@ -115,7 +120,8 @@
   <button type="button" class="ml-auto text-white/60 hover:text-white" onclick={onclose} title="Close (Esc)" aria-label="Close">✕</button>
 </div>
 <div class="mt-0.5 text-xs text-white/60">
-  {new Date(round.startedAtMs).toLocaleDateString(undefined, { dateStyle: "medium" })} · Round {round.roundNumber} ·
+  {new Date(round.startedAtMs).toLocaleDateString(undefined, { dateStyle: "medium" })} ·
+  {#if roundHref}<a href={roundHref} data-testid="round-card-link" class="font-semibold text-sky-300 underline hover:text-sky-200">Round {round.roundNumber}</a>{:else}<span data-testid="round-card-plain">Round {round.roundNumber}</span>{/if} ·
   <span style="color: {classColor(cls)}">{cls ? CLASS_LABEL[cls] : "Unclassified"}</span>
 </div>
 
@@ -231,7 +237,6 @@
   <a class="flex-1 rounded-full bg-white/10 py-1.5 text-center hover:bg-white/20" href={googleMapsPointUrl(round.lat, round.lng)} target="_blank" rel="noreferrer">Answer on map ↗</a>
 </div>
 {#if note}<p class="mt-2 text-xs text-sky-200">{note}</p>{/if}
-<p class="mt-2 text-[11px] text-white/40">Stand-in until the Round view exists (#33 covers side-by-side Google Maps).</p>
 
 <style>
   .stat-label {

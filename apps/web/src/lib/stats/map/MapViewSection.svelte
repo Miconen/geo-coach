@@ -68,7 +68,7 @@
     type ExplorerView,
   } from "./view-state.js";
 
-  let { payload, rounds }: { payload: StatsPayload; rounds: StatsRound[] } = $props();
+  let { duoId, payload, rounds }: { duoId: string; payload: StatsPayload; rounds: StatsRound[] } = $props();
 
   type Overlay = "areas" | "fill" | "plain";
   type WorldRounds = "none" | "lost" | "all";
@@ -250,7 +250,13 @@
     const r = allPlaced.find((x) => x.id === roundId);
     if (!r) return;
     const gameId = view.gameId === r.gameId ? view.gameId : null;
+    // The card derives from view.roundId at once (#56 2b); only the camera waits for the map.
     setView({ ...view, roundId, gameId });
+    if (ready && map) fitRound(r);
+    else pendingRoundId = roundId;
+  }
+
+  function fitRound(r: PlacedRound) {
     // Frame the answer and every guess, clear of the card (and the area drawer).
     map?.fitBounds(roundBounds(r), {
       padding: { top: 90, bottom: 60, left: 330, right: hits ? 760 : 380 },
@@ -268,17 +274,21 @@
     if (cam) map?.flyTo({ ...cam, pitch: 0, padding: { top: 60, bottom: 40, left: 0, right: 360 }, duration: 1000 });
   }
 
-  /** A Round to open once the map is ready (asked for before it loaded). */
+  /** A Round whose camera fit waits for the map (opened before it loaded). */
   let pendingRoundId: string | null = null;
 
   /**
    * Scrolls the Map view into sight and opens a Round's card, for other sections
    * (the Players' best guesses). Works for a Round the page filter hides.
    */
-  export function showRound(roundId: string) {
-    wrapper?.scrollIntoView({ behavior: "smooth", block: "end" });
-    if (ready && map) openRoundById(roundId);
-    else pendingRoundId = roundId;
+  export function showRound(roundId: string, opts: { scroll?: boolean } = {}) {
+    if (opts.scroll !== false) wrapper?.scrollIntoView({ behavior: "smooth", block: "end" });
+    openRoundById(roundId);
+  }
+
+  /** The open Round, for the page's Back snapshot. */
+  export function openRoundId(): string | null {
+    return view.roundId;
   }
 
   function setTool(tool: DrawTool) {
@@ -353,7 +363,8 @@
       );
       ready = true;
       if (pendingRoundId) {
-        openRoundById(pendingRoundId);
+        const r = view.roundId === pendingRoundId ? allPlaced.find((x) => x.id === pendingRoundId) : undefined;
+        if (r) fitRound(r);
         pendingRoundId = null;
       }
     });
@@ -536,6 +547,7 @@
       style="top: {dockTop}px; max-height: calc(100% - {dockTop + 12}px)"
     >
       <RoundCard
+        {duoId}
         round={openRound}
         {payload}
         {colors}

@@ -41,11 +41,11 @@ const day = "2026-11-20";
 const at = (hms: string) => `${day}T${hms}.000Z`;
 
 function duel(gameId: string, teamId: string, startHms: [string, string, string], extraRound0 = false) {
-  const guess = (n: number, lat: number, lng: number, created: string) => ({
+  const guess = (n: number, lat: number, lng: number, created: string, distance = 100_000) => ({
     roundNumber: n,
     lat,
     lng,
-    distance: 100_000,
+    distance,
     score: 4000,
     created: at(created),
   });
@@ -82,12 +82,23 @@ function duel(gameId: string, teamId: string, startHms: [string, string, string]
           {
             playerId: "gg_e2e_p1",
             nick: "MikoGeo",
-            guesses: [guess(1, 40.42, -3.7, plus(s1, 30)), guess(2, 40.42, -3.7, plus(s2, 30)), guess(3, 40.42, -3.7, plus(s3, 30))],
+            guesses: [
+              ...(extraRound0 ? [guess(0, 40.42, -3.7, plus(s1, -35))] : []),
+              guess(1, 40.42, -3.7, plus(s1, 30)),
+              guess(2, 40.42, -3.7, plus(s2, 30)),
+              guess(3, 40.42, -3.7, plus(s3, 30)),
+            ],
           },
           {
             playerId: "gg_e2e_p2",
             nick: "SoraMaps",
-            guesses: [guess(1, 38.72, -9.14, plus(s1, 31)), guess(2, 39.86, -4.02, plus(s2, 31)), guess(3, 40.42, -3.7, plus(s3, 31))],
+            // Sora's closest-of-all guesses give Stats best-guess entries (#56 2b), Round 0 included.
+            guesses: [
+              ...(extraRound0 ? [guess(0, 39.86, -4.02, plus(s1, -34), 5_000)] : []),
+              guess(1, 38.72, -9.14, plus(s1, 31)),
+              guess(2, 39.86, -4.02, plus(s2, 31), 20_000),
+              guess(3, 40.42, -3.7, plus(s3, 31)),
+            ],
           },
         ],
       },

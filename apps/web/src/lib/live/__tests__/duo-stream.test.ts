@@ -211,6 +211,19 @@ describe("refresh dependencies", () => {
     expect(hits.sort()).toEqual(["run", "session"]);
   });
 
+  it("Stats refreshes on game, run, learning, reaction and Session bounds; never on replay, chunk, offset or transcript", () => {
+    const hits = entities.filter((entity) => needsRefresh("stats", { events: [changed(entity as never)], reopened: false }));
+    expect(hits.sort()).toEqual(["game", "learning", "reaction", "run", "session"]);
+    const session = (kind?: "bounds" | "chunk" | "offset" | "transcript"): DuoSseEvent => ({ ...changed("session"), ...(kind ? { kind } : {}) }) as DuoSseEvent;
+    const one = (ev: DuoSseEvent) => needsRefresh("stats", { events: [ev], reopened: false });
+    expect(one(changed("replay"))).toBe(false);
+    for (const kind of ["chunk", "offset", "transcript"] as const) expect(one(session(kind)), kind).toBe(false);
+    expect(one(session("bounds"))).toBe(true);
+    // Delete-speech that removes a Learning also emits a learning event, which rebuilds Stats; one without stays offset-free.
+    expect(needsRefresh("stats", { events: [session("chunk"), changed("learning")], reopened: false })).toBe(true);
+    expect(needsRefresh("stats", { events: [], reopened: true })).toBe(true);
+  });
+
   it("heartbeats never trigger a refresh on their own", () => {
     const hb: DuoSseEvent = {
       type: "heartbeat",
@@ -261,6 +274,28 @@ describe("singleFlight", () => {
     await new Promise((r) => setTimeout(r, 30));
     expect(calls).toEqual([1, 2]);
     expect(maxConcurrent).toBe(1);
+  });
+
+  it("responses arriving in reverse order never leave the older payload showing", async () => {
+    // Two refreshes: the first fetch answers last. Single-flight starts the second only after the first lands.
+    const answers: Array<(v: string) => void> = [];
+    let shown = "load";
+    let version = 0;
+    const fetchStats = () => new Promise<string>((resolve) => answers.push(resolve));
+    const refresh = singleFlight(async () => {
+      shown = await fetchStats();
+    });
+    const first = refresh();
+    void refresh();
+    expect(answers).toHaveLength(1);
+    // The server has the newer payload by the time the queued refresh asks.
+    answers[0]!(`v${++version}`);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(shown).toBe("v1");
+    expect(answers).toHaveLength(2);
+    answers[1]!(`v${++version}`);
+    await first;
+    expect(shown).toBe("v2");
   });
 
   it("runs again when the task asks for it", async () => {

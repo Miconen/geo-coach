@@ -405,6 +405,8 @@
                     type="button"
                     class="{rowClass} cursor-pointer hover:bg-[var(--surface-hover)]"
                     title={bestGuessTitle(b)}
+                    data-testid="best-guess"
+                    data-round-id={b.roundId}
                     onclick={() => onOpenRound(b.roundId)}
                   >
                     {@render bestGuessRow(b, i)}

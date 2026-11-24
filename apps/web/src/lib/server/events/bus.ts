@@ -17,6 +17,13 @@ export interface PlayerLiveStatus {
 
 class DuoEventBus {
   private listeners = new Map<string, Set<Listener>>();
+  /** When each Duo last had a changed event in this process; before any, the process start. */
+  private lastChanged = new Map<string, number>();
+  private readonly startedAt = Date.now();
+
+  changedAt(duoId: string): number {
+    return this.lastChanged.get(duoId) ?? this.startedAt;
+  }
   private heartbeats = new Map<string, Map<string, PlayerLiveStatus>>();
 
   subscribe(duoId: string, listener: Listener): () => void {
@@ -53,6 +60,8 @@ class DuoEventBus {
         seenAt: event.seenAt,
       });
     }
+
+    if (event.type === "changed") this.lastChanged.set(duoId, Date.now());
 
     const set = this.listeners.get(duoId);
     if (!set) return;

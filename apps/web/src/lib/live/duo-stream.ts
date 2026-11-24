@@ -5,7 +5,9 @@ import type { DuoSseEvent } from "@geo-coach/shared";
  *
  * Pages subscribe for batches: one event at a time normally, or every event received while a navigation was in
  * flight, delivered once after it commits (so the destination reconciles against its own dependencies). `reopened`
- * marks a (re)connection: listeners fetch once to catch up, since the stream never replays missed events.
+ * marks a (re)connection: listeners fetch once to catch up, since the stream never replays missed events. On the
+ * first open after a page load the server's sync event says when the Duo last changed: when that is not after the
+ * page data was served (servedAt), there is nothing to catch up on and no refetch happens.
  */
 export interface StreamBatch {
   events: DuoSseEvent[];
@@ -50,23 +52,27 @@ export class DuoStream {
   private retryTimer: unknown = null;
   private probing: Promise<ProbeResult> | null = null;
   private started = false;
+  /** The page data's server time, until the first open's sync event decides whether to catch up. */
+  private servedAt: number | null = null;
 
   constructor(
     private duoId: string,
     private deps: DuoStreamDeps,
   ) {}
 
-  /** Connects (browser only). Idempotent. */
-  start(): void {
+  /** Connects (browser only). Idempotent. servedAt: when the page data was served (server clock, ms). */
+  start(servedAt: number | null = null): void {
     if (this.started) return;
     this.started = true;
+    this.servedAt = servedAt;
     this.connect();
   }
 
   /** Points the stream at another Duo: closes the old connection and drops anything held for it. */
-  switchDuo(duoId: string): void {
+  switchDuo(duoId: string, servedAt: number | null = null): void {
     if (duoId === this.duoId) return;
     this.duoId = duoId;
+    this.servedAt = servedAt;
     this.held = null;
     this.revokedBy = null;
     this.teardown();
@@ -108,7 +114,7 @@ export class DuoStream {
     if (this.probing) return this.probing;
     const duoId = this.duoId;
     this.probing = this.deps
-      .fetch(`/api/duos/${duoId}/pending-work`)
+      .fetch(`/api/duos/${duoId}/pending-work?probe=1`)
       .then((res): ProbeResult => (res.status === 401 ? "signed-out" : res.status === 404 ? "not-member" : res.status === 200 ? "ok" : "unknown"))
       .catch((): ProbeResult => "unknown")
       .then((result) => {
@@ -153,7 +159,8 @@ export class DuoStream {
       if (es !== this.es) return;
       this.attempt = 0;
       this.setStatus("open");
-      this.deliver({ events: [], reopened: true });
+      // The first open after a page load waits for the sync event; every other open catches up at once.
+      if (this.servedAt === null) this.deliver({ events: [], reopened: true });
     };
     es.onmessage = (ev) => {
       if (es !== this.es) return;
@@ -163,10 +170,18 @@ export class DuoStream {
       } catch {
         return;
       }
+      if (parsed.type === "sync") {
+        const servedAt = this.servedAt;
+        this.servedAt = null;
+        if (servedAt !== null && Date.parse(parsed.changedAt) > servedAt) this.deliver({ events: [], reopened: true });
+        return;
+      }
       this.deliver({ events: [parsed], reopened: false });
     };
     es.onerror = () => {
       if (es !== this.es) return;
+      // A lost first connection catches up in full on the next open.
+      this.servedAt = null;
       void this.probe();
       // EventSource retries by itself unless the response was an HTTP error; then it is closed for good.
       if (es.readyState === CLOSED) {

@@ -20,6 +20,7 @@ function fakeBus() {
       return () => listeners.delete(l);
     }),
     getLiveStatuses: vi.fn(() => []),
+    changedAt: vi.fn(() => Date.parse("2026-11-20T00:00:00Z")),
     emit(e: DuoSseEvent) {
       for (const l of listeners) l(e);
     },
@@ -79,6 +80,8 @@ describe("Duo event stream", () => {
     const { bus, stream } = open();
     const first = await readAll(stream);
     expect(first.text.startsWith(": ready\n\n")).toBe(true);
+    // Then when the Duo last changed, so a fresh page can skip its catch-up refetch.
+    expect(first.text).toContain(`"type":"sync","changedAt":"2026-11-20T00:00:00.000Z"`);
     expect(registeredStreamCount(sessionId)).toBe(1);
     bus.emit(changed());
     const second = await readAll(stream);

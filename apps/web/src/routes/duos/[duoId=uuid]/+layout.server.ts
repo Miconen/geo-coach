@@ -30,5 +30,6 @@ export const load: LayoutServerLoad = async ({ locals, params, url, cookies }) =
     secure: process.env.NODE_ENV === "production",
     maxAge: ONE_YEAR_S,
   });
-  return { player, duo, duos: memberDuos };
+  // The server time the page data was served: the stream's first open skips its catch-up unless the Duo changed since.
+  return { player, duo, duos: memberDuos, servedAt: Date.now() };
 };

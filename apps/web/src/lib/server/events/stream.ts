@@ -21,7 +21,7 @@ export function registeredStreamCount(sessionId?: string): number {
   return n;
 }
 
-type Bus = Pick<typeof duoEventBus, "subscribe" | "getLiveStatuses">;
+type Bus = Pick<typeof duoEventBus, "subscribe" | "getLiveStatuses" | "changedAt">;
 
 export interface DuoEventStreamOptions {
   db: AppDb;
@@ -100,6 +100,7 @@ export function createDuoEventStream(opts: DuoEventStreamOptions): ReadableStrea
       }
       write(": ready\n\n");
       if (closed) return;
+      send({ type: "sync", changedAt: new Date(bus.changedAt(duoId)).toISOString() });
       for (const st of bus.getLiveStatuses(duoId)) send({ type: "heartbeat", ...st });
       unsubscribe = bus.subscribe(duoId, send);
       pingTimer = setInterval(() => write(": keepalive\n\n"), pingMs);

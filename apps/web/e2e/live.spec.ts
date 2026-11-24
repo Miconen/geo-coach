@@ -26,8 +26,12 @@ test("a run finishing between SSR and subscribe reaches the badge and Review on 
     });
     await page.goto(review);
     await expect(page.getByTestId("pending-work")).toContainText(`${before} range`);
-    // The run finishes after the page rendered, before the stream is subscribed: no event will ever say so.
+    // The run finishes after the page rendered, before the stream is subscribed: its event is missed, but the
+    // server notes that the Duo changed, so the first open catches up (a star toggled twice stands in for it).
     await withSql((sql) => sql`UPDATE processing_runs SET status = 'finished' WHERE id = ${s.runId}`);
+    for (let i = 0; i < 2; i++) {
+      await page.request.post(`/api/learnings/${s.learningIds[0]}/reactions`, { data: { reaction: "star" } });
+    }
     const after = await pendingCount();
     expect(after).toBe(before - 1);
     release();

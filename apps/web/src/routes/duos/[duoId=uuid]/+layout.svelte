@@ -22,7 +22,7 @@
   const stream = new DuoStream(untrack(() => data.duo.id), browserStreamDeps());
   setDuoStream(stream);
   let streamStatus = $state<StreamStatus>("idle");
-  $effect(() => stream.switchDuo(duoId));
+  $effect(() => stream.switchDuo(duoId, untrack(() => data.servedAt)));
   // Events that arrive during a navigation are held and delivered once it commits (or fails).
   beforeNavigate((nav) => {
     if (nav.willUnload) return;
@@ -34,11 +34,11 @@
   });
   onMount(() => {
     const offStatus = stream.onStatus((s) => (streamStatus = s));
-    // The badge refetches on the first open (mount-to-subscribe race), every reconnect, and Session or run events.
+    // The badge refetches on a catch-up (a change since the page was served, or a reconnect) and Session or run events.
     const offBatch = stream.subscribe((batch) => {
       if (needsRefresh("pending-work", batch)) void pendingWork.refresh();
     });
-    stream.start();
+    stream.start(data.servedAt);
     return () => {
       offStatus();
       offBatch();

@@ -299,6 +299,14 @@ export const duoSseEventSchema = z.discriminatedUnion("type", [
     kind: z.enum(["bounds", "chunk", "offset", "transcript"]).optional(),
     at: z.string().datetime(),
   }),
+  /**
+   * Sent once right after a connection opens: when this Duo last changed on the server (its process start when it has
+   * not changed since). A client whose page data was served later has nothing to catch up on.
+   */
+  z.object({
+    type: z.literal("sync"),
+    changedAt: z.string().datetime(),
+  }),
 ]);
 export type DuoSseEvent = z.infer<typeof duoSseEventSchema>;
 

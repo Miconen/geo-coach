@@ -93,6 +93,35 @@ describe("DuoStream", () => {
     ]);
   });
 
+  it("the first open after a page load catches up only when the Duo changed after the page was served", () => {
+    const served = Date.parse("2026-11-24T12:00:00Z");
+    const sync = (at: string): DuoSseEvent => ({ type: "sync", changedAt: at });
+    // Nothing changed since: no refetch, and the sync event reaches no listener.
+    const quiet = make();
+    quiet.stream.start(served);
+    sources[0]!.open();
+    sources[0]!.message(sync("2026-11-24T11:59:00Z"));
+    expect(quiet.batches).toEqual([]);
+    // A later reconnect always catches up.
+    sources[0]!.drop();
+    sources[0]!.open();
+    expect(quiet.batches).toEqual([{ events: [], reopened: true }]);
+
+    // A change after the page was served: one catch-up.
+    const changedSince = make();
+    changedSince.stream.start(served);
+    sources[1]!.open();
+    sources[1]!.message(sync("2026-11-24T12:00:01Z"));
+    expect(changedSince.batches).toEqual([{ events: [], reopened: true }]);
+
+    // A first connection lost before its sync: the next open catches up in full.
+    const lost = make();
+    lost.stream.start(served);
+    sources[2]!.drop();
+    sources[2]!.open();
+    expect(lost.batches).toEqual([{ events: [], reopened: true }]);
+  });
+
   it("a stream that never opens retries with exponential backoff and keeps data on unknown probe results", async () => {
     const { stream, batches } = make();
     probeStatus = 500;
@@ -112,7 +141,7 @@ describe("DuoStream", () => {
     }
     expect(delays).toEqual([1000, 2000, 4000, 8000, 16000, 30000, 30000]);
     expect(batches).toEqual([]);
-    expect(fetchCalls.every((u) => u === "/api/duos/duo-a/pending-work")).toBe(true);
+    expect(fetchCalls.every((u) => u === "/api/duos/duo-a/pending-work?probe=1")).toBe(true);
     // A network error on the probe also keeps the stream.
     probeStatus = new Error("offline");
     expect(await stream.probe()).toBe("unknown");

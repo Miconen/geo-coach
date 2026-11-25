@@ -47,6 +47,10 @@ _Avoid_: hedge (for the Round itself)
 A Split or Spread the Duo agreed on aloud while guessing ("you go Spain, I'll go Portugal"), as opposed to one where the two Players simply disagreed. Calls are read from the Transcript.
 _Avoid_: intent
 
+**Countdown**
+The timer that starts when the first guess of a Round is placed, by either team, and ends the Round when it runs out. Scores are only known after it ends.
+_Avoid_: CD, timer (for this one specifically)
+
 **Timed-out guess**
 A guess the Player never pressed guess on: the pin they had placed was submitted when the Round's timer ran out. The first to guess within the Duo is whoever pressed guess earlier; when both guesses timed out, neither was first.
 

@@ -11,8 +11,13 @@
   import { browserStreamDeps, DuoStream, type StreamStatus } from "$lib/live/duo-stream.js";
   import { clearRecallAttribute, syncRecall } from "$lib/recall.svelte.js";
   import { PendingWorkStore, setPendingWork } from "$lib/live/pending-work.svelte.js";
+  import SharedMapHost from "$lib/map/SharedMapHost.svelte";
+  import { SharedMap, setSharedMap } from "$lib/map/shared-map.svelte.js";
 
   let { data, children } = $props();
+  // One Mapbox map per tab (#78), shared by every Duo page: pages slot it in and publish a scene.
+  const sharedMap = new SharedMap();
+  setSharedMap(sharedMap);
   const duoId = $derived(data.duo.id);
 
   // Recall (X4): the stored preference for this Player and Duo, applied before the keyed children render.
@@ -159,3 +164,4 @@
     {@render children()}
   {/key}
 {/if}
+<SharedMapHost map={sharedMap} />

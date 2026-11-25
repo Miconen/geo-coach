@@ -1,21 +1,22 @@
 import type { ExpressionSpecification, GeoJSONSource, Map as MapboxMap } from "mapbox-gl";
 import type { Feature, FeatureCollection, Polygon } from "geojson";
 import type { AreaMeasure } from "@geo-coach/shared";
+import {
+  MAP_FONT,
+  addCountryBoundariesSource,
+  addTerrainAndFog,
+  avatarImage,
+  countryBoundaries,
+  drawImage,
+  type MapStyle,
+} from "$lib/map/mapbox-base.js";
 import { CLASS_COLOR, MEASURE_SCALE, NO_CLASS_COLOR, OPPONENT_COLOR } from "./colors.js";
 import { EMPTY, type RoundLayers } from "./features.js";
 
 // The Map view's Mapbox layers: added on every style load (a style switch drops
 // custom layers), then kept in step with the page by `applyScene`.
 
-export type MapStyle = "dark" | "satellite" | "terrain";
-
-export const STYLE_URL: Record<MapStyle, string> = {
-  dark: "mapbox://styles/mapbox/dark-v11",
-  satellite: "mapbox://styles/mapbox/satellite-streets-v12",
-  terrain: "mapbox://styles/mapbox/outdoors-v12",
-};
-
-export const TERRAIN_EXAGGERATION = 2.5;
+export { STYLE_URL, TERRAIN_EXAGGERATION, type MapStyle } from "$lib/map/mapbox-base.js";
 /** The tilt used for Terrain when focused, so the relief shows. */
 export const TERRAIN_PITCH = 55;
 
@@ -41,7 +42,7 @@ const GEOJSON_SOURCES = [
 type SourceId = (typeof GEOJSON_SOURCES)[number];
 
 const NONE = ["==", ["get", "iso_3166_1"], ""] as ExpressionSpecification;
-const FONT = ["DIN Pro Bold", "Arial Unicode MS Bold"];
+const FONT = MAP_FONT;
 
 /** Everything the layers show; computed by the page, applied in one go. */
 export interface Scene {
@@ -64,31 +65,6 @@ export interface Scene {
 }
 
 // --- images -----------------------------------------------------------------
-
-function drawImage(size: number, draw: (ctx: CanvasRenderingContext2D, s: number) => void): ImageData {
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
-  draw(ctx, size);
-  return ctx.getImageData(0, 0, size, size);
-}
-
-function avatarImage(letter: string, color: string): ImageData {
-  return drawImage(56, (ctx, s) => {
-    ctx.beginPath();
-    ctx.arc(s / 2, s / 2, s / 2 - 3, 0, Math.PI * 2);
-    ctx.fillStyle = color;
-    ctx.fill();
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = "#fff";
-    ctx.stroke();
-    ctx.fillStyle = "#fff";
-    ctx.font = "bold 26px system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(letter, s / 2, s / 2 + 1);
-  });
-}
 
 function pinImage(color: string): ImageData {
   return drawImage(44, (ctx, s) => {
@@ -128,30 +104,14 @@ export function addSceneLayers(
   avatars: { initial: string; color: string }[],
 ) {
   addImages(map, avatars);
-  if (style === "terrain") {
-    map.addSource("dem", {
-      type: "raster-dem",
-      url: "mapbox://mapbox.mapbox-terrain-dem-v1",
-      tileSize: 512,
-      maxzoom: 14,
-    });
-    map.setTerrain({ source: "dem", exaggeration: TERRAIN_EXAGGERATION });
-  }
-  if (style !== "satellite") {
-    map.setFog({ color: "#0b1020", "high-color": "#1e293b", "space-color": "#020617", "horizon-blend": 0.05 });
-  }
+  addTerrainAndFog(map, style);
 
-  map.addSource("cb", { type: "vector", url: "mapbox://mapbox.country-boundaries-v1" });
+  addCountryBoundariesSource(map, "cb");
   for (const id of GEOJSON_SOURCES) map.addSource(id, { type: "geojson", data: EMPTY });
 
   // Fills go under the style's labels; everything else on top.
   const firstSymbol = map.getStyle()?.layers?.find((l) => l.type === "symbol")?.id;
-  const worldview: ExpressionSpecification = [
-    "any",
-    ["==", "all", ["get", "worldview"]],
-    ["in", "US", ["get", "worldview"]],
-  ];
-  const countryLayer = { source: "cb", "source-layer": "country_boundaries", filter: worldview };
+  const countryLayer = countryBoundaries("cb");
   map.addLayer({ id: COUNTRY_LAYER, type: "fill", ...countryLayer, paint: { "fill-opacity": 0.01 } }, firstSymbol);
   map.addLayer({ id: "hex", type: "fill", source: "hex", paint: { "fill-outline-color": "rgba(0,0,0,0.25)" } }, firstSymbol);
   map.addLayer({ id: REGION_LAYER, type: "fill", source: "regions", paint: { "fill-opacity": 0.01 } }, firstSymbol);

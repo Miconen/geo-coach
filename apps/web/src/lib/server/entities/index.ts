@@ -2,8 +2,8 @@ import { and, eq } from "drizzle-orm";
 import type { AppDb } from "../db/index.js";
 import { games, rounds, sessions } from "../db/schema.js";
 import { roundInDuo } from "../services/index.js";
+import { loadWorkbench } from "../workbench/cache.js";
 import {
-  buildWorkbenchData,
   type WorkbenchData,
   type WorkbenchGame,
   type WorkbenchLearning,
@@ -165,7 +165,7 @@ export async function loadGamePayload(
 ): Promise<GamePayload | null> {
   const [row] = await db.select({ id: games.id }).from(games).where(and(eq(games.id, gameId), eq(games.duoId, duoId)));
   if (!row) return null;
-  const full = await buildWorkbenchData(db, duoId, playerId);
+  const full = await loadWorkbench(db, duoId, playerId);
   const game = full.gamesById[gameId];
   if (!game) return null;
   const overlap = full.sessions.filter((s) => s.gameIds.includes(gameId)).map((s) => s.id);
@@ -198,7 +198,7 @@ export async function loadRoundPayload(
     .from(rounds)
     .where(and(eq(rounds.id, roundId), roundInDuo(duoId)));
   if (!row) return null;
-  const full = await buildWorkbenchData(db, duoId, playerId);
+  const full = await loadWorkbench(db, duoId, playerId);
   const round = full.roundsById[roundId];
   const game = round ? full.gamesById[round.gameId] : undefined;
   if (!round || !game) return null;
@@ -243,7 +243,7 @@ export async function loadSessionPayload(
     .where(and(eq(sessions.id, sessionId), eq(sessions.duoId, duoId)));
   if (!row) return null;
   const [full, runs] = await Promise.all([
-    buildWorkbenchData(db, duoId, playerId, { sessionId }),
+    loadWorkbench(db, duoId, playerId, { sessionId }),
     loadSessionRunsPage(db, duoId, sessionId, { cursor: null, purpose: null, noop: false, runId }),
   ]);
   const session: WorkbenchSession = full.sessions.find((s) => s.id === sessionId) ?? {

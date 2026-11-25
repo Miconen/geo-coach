@@ -24,6 +24,12 @@ class DuoEventBus {
   changedAt(duoId: string): number {
     return this.lastChanged.get(duoId) ?? this.startedAt;
   }
+  /** How many changed events each Duo has had in this process: a cache version (workbench/cache.ts). */
+  private changes = new Map<string, number>();
+
+  changeCount(duoId: string): number {
+    return this.changes.get(duoId) ?? 0;
+  }
   private heartbeats = new Map<string, Map<string, PlayerLiveStatus>>();
 
   subscribe(duoId: string, listener: Listener): () => void {
@@ -61,7 +67,10 @@ class DuoEventBus {
       });
     }
 
-    if (event.type === "changed") this.lastChanged.set(duoId, Date.now());
+    if (event.type === "changed") {
+      this.lastChanged.set(duoId, Date.now());
+      this.changes.set(duoId, this.changeCount(duoId) + 1);
+    }
 
     const set = this.listeners.get(duoId);
     if (!set) return;

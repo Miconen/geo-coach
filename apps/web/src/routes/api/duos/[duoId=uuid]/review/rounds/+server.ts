@@ -1,7 +1,7 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
 import { duoRoute } from "$lib/server/auth/guards.js";
-import { buildWorkbenchData } from "$lib/server/workbench/view-model.js";
+import { loadWorkbench } from "$lib/server/workbench/cache.js";
 import { reviewRounds } from "$lib/server/workbench/review-view.js";
 import { isUuid } from "$lib/uuid.js";
 
@@ -11,5 +11,5 @@ export const GET: RequestHandler = duoRoute(async ({ url }, { db, player, duoId 
   if (ids.length === 0 || ids.length > 200 || !ids.every((id) => isUuid(id))) {
     return json({ error: "Invalid ids" }, { status: 400 });
   }
-  return json(reviewRounds(await buildWorkbenchData(db, duoId, player.id), ids));
+  return json(reviewRounds(await loadWorkbench(db, duoId, player.id), ids));
 });

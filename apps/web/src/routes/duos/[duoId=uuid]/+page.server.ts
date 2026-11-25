@@ -5,7 +5,7 @@ import { assertDuoAccess } from "$lib/server/auth/guards.js";
 import { getDb } from "$lib/server/db/index.js";
 import { learnings } from "$lib/server/db/schema.js";
 import { findRunInDuo } from "$lib/server/services/index.js";
-import { buildWorkbenchData } from "$lib/server/workbench/view-model.js";
+import { loadWorkbench } from "$lib/server/workbench/cache.js";
 import { parseCountryParam } from "$lib/country-param.js";
 import { links } from "$lib/links.js";
 import { isUuid } from "$lib/uuid.js";
@@ -41,7 +41,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
   const country = parseCountryParam(q.get("country"));
   if (country) redirect(302, links.review(params.duoId, { country }));
 
-  const wb = await buildWorkbenchData(db, params.duoId, player.id, { speech: "cited" });
+  const wb = await loadWorkbench(db, params.duoId, player.id, { speech: "cited" });
   const games = Object.values(wb.gamesById)
     .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
     .slice(0, LATEST)

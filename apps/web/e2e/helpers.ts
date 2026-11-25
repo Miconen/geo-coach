@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
+import { PORT } from "../playwright.config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,7 +35,10 @@ export async function login(page: Page, playerId: string) {
   if (res.status() !== 302) throw new Error(`dev login failed: ${res.status()}`);
 }
 
-/** Runs SQL against the e2e database (for state changes no page can make, e.g. a membership removed mid-session). */
+/**
+ * Runs SQL against the e2e database (for state changes no page can make, e.g. a membership removed mid-session),
+ * then drops the server's cached derivations: a straight database write emits no changed event.
+ */
 export async function withSql<T>(fn: (sql: import("postgres").Sql) => Promise<T>): Promise<T> {
   const { default: postgres } = await import("postgres");
   const sql = postgres(process.env.E2E_DATABASE_URL ?? "postgres://geocoach:geocoach@localhost:5432/geocoach_e2e", { max: 1 });
@@ -42,5 +46,11 @@ export async function withSql<T>(fn: (sql: import("postgres").Sql) => Promise<T>
     return await fn(sql);
   } finally {
     await sql.end();
+    const res = await fetch(`http://localhost:${PORT}/spike/control`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "clear-workbench" }),
+    });
+    if (!res.ok) throw new Error(`clear-workbench: ${res.status}`);
   }
 }

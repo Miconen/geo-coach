@@ -12,13 +12,16 @@
   import { links } from "$lib/links.js";
   import { useEntityRefresh } from "$lib/live/entity-refresh.svelte.js";
   import { recall } from "$lib/recall.svelte.js";
-  import type { KnowledgePayload } from "$lib/server/entities/index.js";
+  import type { ClaimDetails, KnowledgeLookups, KnowledgePayload } from "$lib/server/entities/index.js";
+  import type { WorkbenchClaim } from "$lib/server/workbench/view-model.js";
   import { updateQuery } from "$lib/stats/url-query.js";
   import {
+    CLAIM_CARD_PAGE,
     CLAIM_STATUSES,
     CLAIM_STATUS_META,
     filterWorkbenchClaims,
     groupClaimsByCountry,
+    windowClaimGroups,
   } from "$lib/workbench/knowledge.js";
 
   let { data } = $props();
@@ -38,30 +41,82 @@
   let revealedLearnings = $state<Record<string, boolean>>({});
 
   const masked = (id: string) => recall.on && !revealedClaims[id];
-  const topics = $derived([...new Set(p.claims.flatMap((c) => c.topics))].sort());
-  const filtered = $derived(filterWorkbenchClaims(p.claims, { status, topic, query: search, country, masked }));
+  const topics = $derived([...new Set(p.summaries.flatMap((c) => c.topics))].sort());
+  const filtered = $derived(filterWorkbenchClaims(p.summaries, { status, topic, query: search, country, masked }));
   const groups = $derived(groupClaimsByCountry(filtered, country));
-  // Claim cards render 100 at a time (a Duo's bank runs to thousands; a multi-Country Claim shows once per Country);
-  // changing a filter resets the window.
+  // Claim cards render a page at a time (a Duo's bank runs to thousands; a multi-Country Claim shows once per
+  // Country); changing a filter resets the window.
   const cardTotal = $derived(groups.reduce((n, g) => n + g.claims.length, 0));
-  let shownCount = $state(100);
+  let shownCount = $state(CLAIM_CARD_PAGE);
   $effect(() => {
     void [status, topic, search, country];
-    shownCount = 100;
+    shownCount = CLAIM_CARD_PAGE;
   });
-  const shownGroups = $derived.by(() => {
-    let budget = shownCount;
-    const out: { group: (typeof groups)[number]; claims: (typeof groups)[number]["claims"] }[] = [];
-    for (const group of groups) {
-      if (budget <= 0) break;
-      out.push({ group, claims: group.claims.slice(0, budget) });
-      budget -= group.claims.length;
-    }
-    return out;
-  });
+  const shownGroups = $derived(windowClaimGroups(groups, shownCount));
 
   const claimParam = $derived(page.url.searchParams.get("claim"));
-  const drawerClaim = $derived(claimParam ? (p.claims.find((c) => c.id === claimParam) ?? null) : null);
+  const summaryIds = $derived(new Set(p.summaries.map((c) => c.id)));
+
+  // Full Claims: the payload ships the cards first shown; the rest load on demand for the cards on screen. A newer
+  // payload refetches them, and the last ones stay shown until it lands.
+  let fetched = $state.raw<{ base: unknown } & ClaimDetails>({
+    base: null,
+    claims: [],
+    wb: { roundsById: {}, gamesById: {}, players: {}, learnings: [] },
+  });
+  function mergeLookups(a: KnowledgeLookups, b: KnowledgeLookups): KnowledgeLookups {
+    const learnings = new Map(a.learnings.map((l) => [l.id, l]));
+    for (const l of b.learnings) learnings.set(l.id, l);
+    return {
+      roundsById: { ...a.roundsById, ...b.roundsById },
+      gamesById: { ...a.gamesById, ...b.gamesById },
+      players: { ...a.players, ...b.players },
+      learnings: [...learnings.values()],
+    };
+  }
+  const claimsById = $derived.by(() => {
+    const out: Record<string, WorkbenchClaim> = {};
+    for (const c of fetched.claims) out[c.id] = c;
+    for (const c of p.claims) out[c.id] = c;
+    return out;
+  });
+  const lookups = $derived(mergeLookups(fetched.wb, p.wb));
+
+  $effect(() => {
+    const current = p;
+    const fresh = fetched.base === current;
+    const have = new Set([...current.claims.map((c) => c.id), ...(fresh ? fetched.claims.map((c) => c.id) : [])]);
+    const needed = new Set(shownGroups.flatMap((g) => g.claims.map((c) => c.id)));
+    if (claimParam && summaryIds.has(claimParam)) needed.add(claimParam);
+    const missing = [...needed].filter((id) => !have.has(id));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    const chunks: string[][] = [];
+    for (let i = 0; i < missing.length; i += 200) chunks.push(missing.slice(i, i + 200));
+    void Promise.all(
+      chunks.map(async (chunk) => {
+        const res = await fetch(`/api/duos/${duoId}/knowledge/claims?ids=${chunk.join(",")}`);
+        return res.ok ? ((await res.json()) as ClaimDetails) : null;
+      }),
+    )
+      .then((parts) => {
+        if (cancelled || p !== current || parts.some((x) => x === null)) return;
+        const keep = fetched.base === current ? fetched : { claims: [], wb: { roundsById: {}, gamesById: {}, players: {}, learnings: [] } };
+        fetched = {
+          base: current,
+          claims: [...keep.claims, ...parts.flatMap((x) => x!.claims)],
+          wb: parts.reduce((acc, x) => mergeLookups(acc, x!.wb), keep.wb),
+        };
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  // A Claim with no summary no longer exists; one with a summary but no full Claim yet is still loading.
+  const drawerClaim = $derived(claimParam && summaryIds.has(claimParam) ? (claimsById[claimParam] ?? null) : null);
+  const drawerLoading = $derived(Boolean(claimParam && !drawerClaim && summaryIds.has(claimParam)));
 
   function setCountry(next: string | null) {
     country = next;
@@ -81,7 +136,7 @@
   }
 
   const cardProps = $derived({
-    wb: p.wb,
+    wb: lookups,
     duoId,
     revealedLearningIds: revealedLearnings,
     onSetEvidence: setClaimEvidence,
@@ -148,35 +203,40 @@
 
   {#if groups.length === 0}
     <div class="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 text-center text-sm text-[var(--muted)]">
-      {p.claims.length === 0 ? "No Claims yet. Processing runs and ingested Sources add them." : "No Claims match these filters."}
+      {p.summaries.length === 0 ? "No Claims yet. Processing runs and ingested Sources add them." : "No Claims match these filters."}
     </div>
   {:else}
     <div class="space-y-4">
-      {#each shownGroups as { group, claims } (group.code ?? "general")}
+      {#each shownGroups as group (group.code ?? "general")}
         <section class="space-y-2">
           <h2 class="px-1 text-xs font-bold">
             {#if group.code}<button type="button" class="mono mr-1 text-[var(--accent)] hover:underline" onclick={() => setCountry(group.code)}>{group.code}</button>{/if}
             {group.name}
-            <span class="mono ml-1 font-normal text-[var(--muted)]">{group.claims.length}</span>
+            <span class="mono ml-1 font-normal text-[var(--muted)]">{groups.find((g) => g.code === group.code)?.claims.length}</span>
           </h2>
-          {#each claims as claim (claim.id)}
-            <div class="space-y-1" data-testid="knowledge-claim" data-claim-id={claim.id}>
-              <Masked block revealed={Boolean(revealedClaims[claim.id])}>
+          {#each group.claims as summary (summary.id)}
+            {@const claim = claimsById[summary.id]}
+            <div class="space-y-1" data-testid="knowledge-claim" data-claim-id={summary.id}>
+              <Masked block revealed={Boolean(revealedClaims[summary.id])}>
                 {#snippet placeholder()}
                   <div class="flex items-center gap-2 rounded-xl border border-dashed border-[var(--border-strong)] px-3 py-2 text-xs">
-                    <span class="font-semibold uppercase text-[var(--muted)]">{CLAIM_STATUS_META[claim.status].label}</span>
+                    <span class="font-semibold uppercase text-[var(--muted)]">{CLAIM_STATUS_META[summary.status].label}</span>
                     <button
                       type="button"
                       data-testid="claim-reveal"
                       class="font-semibold text-[var(--accent)]"
-                      onclick={() => (revealedClaims = { ...revealedClaims, [claim.id]: true })}>Reveal</button
+                      onclick={() => (revealedClaims = { ...revealedClaims, [summary.id]: true })}>Reveal</button
                     >
                   </div>
                 {/snippet}
-                <ClaimCard {claim} {...cardProps} />
+                {#if claim}
+                  <ClaimCard {claim} {...cardProps} />
+                {:else}
+                  <div class="h-16 animate-pulse rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)]" aria-busy="true"></div>
+                {/if}
               </Masked>
               <a
-                href={links.knowledge(duoId, { country, claim: claim.id })}
+                href={links.knowledge(duoId, { country, claim: summary.id })}
                 data-sveltekit-noscroll
                 data-testid="open-claim"
                 class="px-1 text-[11px] font-medium text-[var(--accent)] hover:underline">Open Claim</a
@@ -189,17 +249,17 @@
         <button
           type="button"
           data-testid="claims-more"
-          onclick={() => (shownCount += 100)}
+          onclick={() => (shownCount += CLAIM_CARD_PAGE)}
           class="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs font-semibold text-[var(--accent)] hover:bg-[var(--surface-subtle)]"
         >
-          Show {Math.min(100, cardTotal - shownCount)} more of {cardTotal - shownCount} remaining
+          Show {Math.min(CLAIM_CARD_PAGE, cardTotal - shownCount)} more of {cardTotal - shownCount} remaining
         </button>
       {/if}
     </div>
   {/if}
 </main>
 
-{#if claimParam}
+{#if claimParam && !drawerLoading}
   <ClaimDrawer
     claim={drawerClaim}
     {closeHref}

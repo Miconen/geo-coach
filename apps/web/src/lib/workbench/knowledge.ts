@@ -15,6 +15,9 @@ export const CLAIM_STATUS_META: Record<ClaimStatus, { label: string; hint: strin
 
 export const CLAIM_STATUSES: ClaimStatus[] = ["speculated", "verified", "disproved", "disputed"];
 
+/** What /knowledge lists, filters and groups by for every Claim; a card's full Claim loads on demand. */
+export type ClaimSummary = Pick<WorkbenchClaim, "id" | "text" | "countries" | "regions" | "topics" | "status">;
+
 export interface ClaimFilters {
   status: ClaimStatus | "all";
   topic: string | "all";
@@ -25,7 +28,7 @@ export interface ClaimFilters {
   masked?: (claimId: string) => boolean;
 }
 
-export function filterWorkbenchClaims(claims: WorkbenchClaim[], f: ClaimFilters): WorkbenchClaim[] {
+export function filterWorkbenchClaims<C extends ClaimSummary>(claims: C[], f: ClaimFilters): C[] {
   const q = f.query.trim().toLowerCase();
   return claims.filter((c) => {
     if (f.status !== "all" && c.status !== f.status) return false;
@@ -42,11 +45,11 @@ export function filterWorkbenchClaims(claims: WorkbenchClaim[], f: ClaimFilters)
   });
 }
 
-export interface ClaimCountryGroup {
+export interface ClaimCountryGroup<C extends ClaimSummary = WorkbenchClaim> {
   /** `null` for Claims about no particular country. */
   code: string | null;
   name: string;
-  claims: WorkbenchClaim[];
+  claims: C[];
 }
 
 /**
@@ -54,9 +57,9 @@ export interface ClaimCountryGroup {
  * A Claim about several countries (a distinguisher) appears under each, or
  * only under `onlyCountry` when given.
  */
-export function groupClaimsByCountry(claims: WorkbenchClaim[], onlyCountry: string | null = null): ClaimCountryGroup[] {
-  const byCode = new Map<string, WorkbenchClaim[]>();
-  const general: WorkbenchClaim[] = [];
+export function groupClaimsByCountry<C extends ClaimSummary>(claims: C[], onlyCountry: string | null = null): ClaimCountryGroup<C>[] {
+  const byCode = new Map<string, C[]>();
+  const general: C[] = [];
   for (const c of claims) {
     const codes = onlyCountry ? c.countries.filter((code) => code === onlyCountry) : c.countries;
     if (codes.length === 0) general.push(c);
@@ -66,11 +69,26 @@ export function groupClaimsByCountry(claims: WorkbenchClaim[], onlyCountry: stri
       byCode.set(code, list);
     }
   }
-  const groups: ClaimCountryGroup[] = [...byCode.entries()]
+  const groups: ClaimCountryGroup<C>[] = [...byCode.entries()]
     .map(([code, list]) => ({ code, name: getCountryName(code), claims: list }))
     .sort((a, b) => a.name.localeCompare(b.name));
   if (general.length > 0) groups.push({ code: null, name: "General", claims: general });
   return groups;
+}
+
+/** /knowledge renders Claim cards a page at a time (a multi-Country Claim is a card per Country). */
+export const CLAIM_CARD_PAGE = 100;
+
+/** The first `count` cards of `groups`, in order, cutting the last group short. */
+export function windowClaimGroups<C extends ClaimSummary>(groups: ClaimCountryGroup<C>[], count: number): ClaimCountryGroup<C>[] {
+  const out: ClaimCountryGroup<C>[] = [];
+  let budget = count;
+  for (const group of groups) {
+    if (budget <= 0) break;
+    out.push(group.claims.length <= budget ? group : { ...group, claims: group.claims.slice(0, budget) });
+    budget -= group.claims.length;
+  }
+  return out;
 }
 
 export function countByStatus(claims: WorkbenchClaim[]): Record<ClaimStatus, number> {

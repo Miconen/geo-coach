@@ -3,7 +3,7 @@ import type { PageServerLoad } from "./$types";
 import { assertDuoAccess } from "$lib/server/auth/guards.js";
 import { getDb } from "$lib/server/db/index.js";
 import { findRunInDuo } from "$lib/server/services/index.js";
-import { buildWorkbenchData } from "$lib/server/workbench/view-model.js";
+import { loadWorkbench } from "$lib/server/workbench/cache.js";
 import { reviewView } from "$lib/server/workbench/review-view.js";
 import { links } from "$lib/links.js";
 import { isUuid } from "$lib/uuid.js";
@@ -19,7 +19,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
     if (run) redirect(302, links.session(params.duoId, run.sessionId, { run: run.id }));
   }
   return {
-    workbench: reviewView(await buildWorkbenchData(db, params.duoId, player.id, { speech: "cited" })),
+    workbench: reviewView(await loadWorkbench(db, params.duoId, player.id, { speech: "cited" })),
     runMissing: runId !== null,
   };
 };

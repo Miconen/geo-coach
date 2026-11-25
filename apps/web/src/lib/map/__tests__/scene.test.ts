@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  OPPONENT_GUESS_COLOR,
   DIM_OPACITY,
   bearingDeg,
   bearingToScreen,
@@ -248,7 +249,7 @@ describe("sceneFeatures", () => {
 
   it("shows every guess of a focused Round, Opponents neutral", () => {
     const f = sceneFeatures(scene({ rounds: [r, b], focusRoundIds: ["a"] }));
-    expect(f.guesses.features.map((x) => x.properties!.icon)).toEqual(["av:#3b82f6:M", "av:#9ca3af:O"]);
+    expect(f.guesses.features.map((x) => x.properties!.icon)).toEqual(["av:#3b82f6:M", `av:${OPPONENT_GUESS_COLOR}:O`]);
     expect(f.lines.features).toHaveLength(2);
     expect(f.km.features).toHaveLength(2);
   });

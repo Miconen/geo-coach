@@ -1,6 +1,7 @@
 import type { Feature, FeatureCollection, LineString, Point } from "geojson";
 import { greatCircleMeters } from "@geo-coach/shared";
 import { formatKm } from "$lib/stats/map/features.js";
+import { LENS_COLORS, OPPONENT_COLOR } from "$lib/player-color.js";
 
 // The shared map's scene (#78): what a Duo page asks the one persistent map to show.
 // Everything here is pure, so the host only turns it into Mapbox calls.
@@ -74,11 +75,11 @@ export interface MapScene {
   legend?: "bottom-left" | "bottom-right" | "top-right" | "hidden";
 }
 
-export const OPPONENT_GUESS_COLOR = "#9ca3af";
+export const OPPONENT_GUESS_COLOR = OPPONENT_COLOR;
 const UNKNOWN_PLAYER_COLOR = "#60a5fa";
 
-export const ANSWER_WON = "#22c55e";
-export const ANSWER_LOST = "#ef4444";
+export const ANSWER_WON = LENS_COLORS.answer;
+export const ANSWER_LOST = LENS_COLORS.wrongGuess;
 
 /** A focused Round's frame takes in the Duo's guesses within this distance of the answer. */
 export const FRAME_NEARBY_GUESS_KM = 3000;
@@ -93,7 +94,12 @@ export const avatarId = (g: MapGuess) => `av:${guessColor(g)}:${guessInitial(g)}
 /** g: the answer · r: a Duo wrong guess · y: named in Learnings · s: said aloud, not guessed. */
 export type LensKind = "g" | "r" | "y" | "s";
 export const LENS_ORDER: readonly LensKind[] = ["g", "r", "y", "s"];
-export const LENS_COLOR: Record<LensKind, string> = { g: "#22c55e", r: "#ef4444", y: "#facc15", s: "#a78bfa" };
+export const LENS_COLOR: Record<LensKind, string> = {
+  g: LENS_COLORS.answer,
+  r: LENS_COLORS.wrongGuess,
+  y: LENS_COLORS.inLearnings,
+  s: LENS_COLORS.saidAloud,
+};
 
 const duoHit = (r: MapRound) => r.countryCode !== null && r.guesses.some((g) => g.isDuo && g.countryCode === r.countryCode);
 

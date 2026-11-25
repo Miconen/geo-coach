@@ -6,7 +6,13 @@
   import { entityHref } from "$lib/links.js";
   import { roundLabel } from "$lib/entity-titles.js";
 
-  let { duoId, rounds }: { duoId: string; rounds: WorkbenchRound[] } = $props();
+  let {
+    duoId,
+    rounds,
+  }: {
+    duoId: string;
+    rounds: Pick<WorkbenchRound, "id" | "gameId" | "roundNumber" | "countryCode" | "duoBestScore" | "opponentBestScore" | "hpDelta">[];
+  } = $props();
 </script>
 
 <ol class="flex flex-wrap gap-1.5" data-testid="round-strip">

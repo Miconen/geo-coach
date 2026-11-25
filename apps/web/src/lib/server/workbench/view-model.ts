@@ -335,6 +335,11 @@ export interface WorkbenchOptions {
   sessionId?: string | null;
   /** A ?run= pin; dropped (pinMissing) when malformed, missing, foreign or of another pinned Session. */
   runId?: string | null;
+  /**
+   * "cited" loads only the speech a Learning cites, for pages that show no Round speech or timeline: Learnings
+   * derive the same, but Rounds' utteranceIds and utterances hold cited speech only. Default "all".
+   */
+  speech?: "all" | "cited";
 }
 
 /** Whether two Learnings' source spans overlap (supersession is per span, ADR 0001). */
@@ -496,12 +501,20 @@ export async function buildWorkbenchData(
     words: sql<WordTiming[]>`case when jsonb_array_length(${utterances.words}) > 0
       then jsonb_build_array(${utterances.words}->0, ${utterances.words}->-1) else '[]'::jsonb end`,
   };
+  const citedOnly = options.speech === "cited";
+  const citedIds = citedOnly ? [...new Set(derivedLearnings.flatMap((l) => l.utteranceIds))] : [];
   const rawUtterances =
-    currentVersionIds.length > 0
+    currentVersionIds.length > 0 && (!citedOnly || citedIds.length > 0)
       ? await db
           .select(utteranceColumns)
           .from(utterances)
-          .where(and(inArray(utterances.transcriptVersionId, currentVersionIds), speechInDuo(duoId)))
+          .where(
+            and(
+              inArray(utterances.transcriptVersionId, currentVersionIds),
+              citedOnly ? inArray(utterances.id, citedIds) : undefined,
+              speechInDuo(duoId),
+            ),
+          )
           .orderBy(asc(utterances.startedAt), asc(utterances.id))
       : [];
 
@@ -553,22 +566,26 @@ export async function buildWorkbenchData(
     }
   }
 
-  // Range status per purpose (ADR 0002): any overlapping stale range wins over an unprocessed one.
-  const derivePurposeRangeStatus = (
-    u: (typeof rawUtterances)[number],
-    ranges: Array<{ startUtc: Date; endUtc: Date; reason: "unprocessed" | "stale" }>,
-  ) =>
-    rangeStatus(
-      { startedAt: u.startedAt, endedAt: u.endedAt },
-      ranges.map((w) => ({ startedAt: w.startUtc, endedAt: w.endUtc, reason: w.reason })),
-    );
+  // Range status per purpose (ADR 0002): any overlapping stale range wins over an unprocessed one. Each Session's
+  // ranges are mapped once, not once per Utterance.
+  type WorkRangeRow = { startUtc: Date; endUtc: Date; reason: "unprocessed" | "stale" };
+  const mappedRanges = new Map<WorkRangeRow[], Parameters<typeof rangeStatus>[1]>();
+  const noRanges: WorkRangeRow[] = [];
+  const derivePurposeRangeStatus = (u: (typeof rawUtterances)[number], ranges: WorkRangeRow[]) => {
+    let mapped = mappedRanges.get(ranges);
+    if (!mapped) {
+      mapped = ranges.map((w) => ({ startedAt: w.startUtc, endedAt: w.endUtc, reason: w.reason }));
+      mappedRanges.set(ranges, mapped);
+    }
+    return rangeStatus({ startedAt: u.startedAt, endedAt: u.endedAt }, mapped);
+  };
 
   const correctTranscript = await loadTranscriptCorrector(db, duoId);
   const toWorkbenchUtterance = (u: (typeof rawUtterances)[number], historical: boolean): WorkbenchUtterance => {
     const sesId = recSessionById.get(u.recordingId) ?? "";
     const sessionWork = workRangesBySession.get(sesId);
-    const extractStatus = derivePurposeRangeStatus(u, sessionWork?.extract ?? []);
-    const tipsStatus = derivePurposeRangeStatus(u, sessionWork?.tips ?? []);
+    const extractStatus = derivePurposeRangeStatus(u, sessionWork?.extract ?? noRanges);
+    const tipsStatus = derivePurposeRangeStatus(u, sessionWork?.tips ?? noRanges);
     return {
       id: u.id,
       recordingId: u.recordingId,

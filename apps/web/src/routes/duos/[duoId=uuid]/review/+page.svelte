@@ -32,6 +32,7 @@
     CountryDossier,
     WorkbenchLearning,
   } from "$lib/server/workbench/view-model.js";
+  import type { ReviewRounds } from "$lib/server/workbench/review-view.js";
 
   let { data } = $props();
   let liveWorkbench = $state.raw<{
@@ -187,12 +188,19 @@
     !recallMode || (activeLearning ? Boolean(revealedIds[activeLearning.id]) : false),
   );
 
+  // Review ships Rounds without their speech (reviewView); the cards' full Rounds come on demand for the Rounds on
+  // screen. A newer derivation refetches them, and the last ones stay shown until it lands.
+  let detail = $state.raw<ReviewRounds & { wb: unknown }>({ wb: null, roundsById: {}, utterancesById: {} });
+  const roundSource = $derived(
+    wb ? { gamesById: wb.gamesById, learnings: wb.learnings, players: wb.players, roundsById: detail.roundsById, utterancesById: { ...wb.utterancesById, ...detail.utterancesById } } : null,
+  );
+
   // The Game behind the active Learning's first Round, for the Inspector's "Full Game" tab
-  const primaryGameSlice = $derived.by(() => {
+  const primaryGameId = $derived.by(() => {
     const roundId = activeLearning?.roundIds[0];
-    const round = roundId ? wb?.roundsById[roundId] : null;
-    return wb && round ? gameSlice(wb, round.gameId) : null;
+    return roundId ? (wb?.roundsById[roundId]?.gameId ?? null) : null;
   });
+  const primaryGameSlice = $derived(roundSource && primaryGameId ? gameSlice(roundSource, primaryGameId) : null);
 
   const activeLearningGames = $derived(
     wb && activeLearning ? learningGameLinks(wb, activeLearning.roundIds) : [],
@@ -205,6 +213,44 @@
   const activeCountryDossier = $derived(
     selectedCountry ? wb?.countryDossiers.find((c) => c.code === selectedCountry) ?? null : null,
   );
+
+  const neededRoundIds = $derived.by(() => {
+    const ids = new Set<string>(activeLearning?.roundIds ?? []);
+    for (const id of (primaryGameId ? wb?.gamesById[primaryGameId]?.roundIds : null) ?? []) ids.add(id);
+    if (activeCountryDossier && activeCountryDossier.learningCount === 0) for (const id of activeCountryDossier.roundIds) ids.add(id);
+    return [...ids].sort();
+  });
+
+  $effect(() => {
+    const current = wb;
+    const ids = neededRoundIds;
+    if (!current) return;
+    const fresh = detail.wb === current;
+    const missing = fresh ? ids.filter((id) => !detail.roundsById[id]) : ids;
+    if (missing.length === 0) return;
+    let cancelled = false;
+    const chunks: string[][] = [];
+    for (let i = 0; i < missing.length; i += 200) chunks.push(missing.slice(i, i + 200));
+    void Promise.all(
+      chunks.map(async (chunk) => {
+        const res = await fetch(`/api/duos/${current.duo.id}/review/rounds?ids=${chunk.join(",")}`);
+        return res.ok ? ((await res.json()) as ReviewRounds) : null;
+      }),
+    )
+      .then((parts) => {
+        if (cancelled || wb !== current || parts.some((x) => x === null)) return;
+        const keep = detail.wb === current ? detail : { roundsById: {}, utterancesById: {} };
+        detail = {
+          wb: current,
+          roundsById: Object.assign({}, keep.roundsById, ...parts.map((x) => x!.roundsById)),
+          utterancesById: Object.assign({}, keep.utterancesById, ...parts.map((x) => x!.utterancesById)),
+        };
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  });
 
   const activeCountryClaims = $derived(
     selectedCountry ? (wb?.claims ?? []).filter((c) => c.countries.includes(selectedCountry!)) : [],
@@ -239,11 +285,11 @@
 
   /** Cited speech and Round cards open the Round page (its speech), else the Session page (#56 4). */
   function openUtterance(utteranceId: string, roundId?: string) {
-    const utterance = wb?.utterancesById[utteranceId];
-    if (!wb || !utterance) return;
+    const utterance = roundSource?.utterancesById[utteranceId];
+    if (!wb || !roundSource || !utterance) return;
     const round = roundId
       ? wb.roundsById[roundId]
-      : Object.values(wb.roundsById).find((r) => r.utteranceIds.includes(utteranceId));
+      : Object.values(roundSource.roundsById).find((r) => r.utteranceIds.includes(utteranceId));
     void goto((round ? links.round(wb.duo.id, round.gameId, round.roundNumber) : null) ?? links.session(wb.duo.id, utterance.sessionId));
   }
 
@@ -664,7 +710,7 @@
                     No Learnings yet — bridge from played Rounds:
                   </div>
                   {#each activeCountryDossier.roundIds as rId}
-                    {@const slice = roundSlice(wb, rId)}
+                    {@const slice = roundSource ? roundSlice(roundSource, rId) : null}
                     {#if slice}
                       <Masked block revealed={Boolean(revealedRoundIds[rId])}>
                         {#snippet placeholder()}
@@ -1033,7 +1079,7 @@
 
               <!-- Linked Round Coaching Cards -->
               {#each activeLearning.roundIds as rId}
-                {@const slice = roundSlice(wb, rId)}
+                {@const slice = roundSource ? roundSlice(roundSource, rId) : null}
                 {#if slice}
                   <Masked block revealed={activeItemRevealed}>
                     {#snippet placeholder()}

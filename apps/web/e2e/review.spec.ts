@@ -99,3 +99,15 @@ test("gate: Recall survives Back", async ({ page }) => {
   await expect(page.locator("html")).toHaveAttribute("data-recall", "on");
   await expect(page.locator('[data-answer="learning-text"] .recall-mask-content').first()).toBeHidden();
 });
+
+test("Review ships only cited speech; a Learning's Round card fetches its full Round on demand", async ({ page }) => {
+  const data = await (await page.request.get(`${review}/__data.json`)).text();
+  expect(data).toContain("Okay, Portugal it is");
+  expect(data).not.toContain("Nice split, that saved us");
+  const rounds = page.waitForRequest((r) => r.url().includes(`/api/duos/${s.duoId}/review/rounds?ids=`));
+  await page.goto(`${review}?learning=${s.learningIds[0]}`);
+  await rounds;
+  // The full Round: its guesses and all three of its utterances, not only the two the Learning cites.
+  await expect(page.getByText("Miko: ES · 4000pt").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Jump to Utterance" })).toHaveCount(3);
+});

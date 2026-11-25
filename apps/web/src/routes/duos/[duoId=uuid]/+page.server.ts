@@ -41,7 +41,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
   const country = parseCountryParam(q.get("country"));
   if (country) redirect(302, links.review(params.duoId, { country }));
 
-  const wb = await buildWorkbenchData(db, params.duoId, player.id);
+  const wb = await buildWorkbenchData(db, params.duoId, player.id, { speech: "cited" });
   const games = Object.values(wb.gamesById)
     .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
     .slice(0, LATEST)

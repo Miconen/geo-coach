@@ -143,6 +143,8 @@ interface Token {
 const TOKEN_RE = /[\p{L}\p{M}\p{N}]+(?:['’-][\p{L}\p{M}\p{N}]+)*/gu;
 
 function foldText(value: string): string {
+  // ASCII has no marks to strip and no curly apostrophe: lowercasing is the whole fold.
+  if (/^[\x00-\x7f]*$/.test(value)) return value.toLowerCase();
   return value
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
@@ -252,7 +254,7 @@ export function applyCorrections(
   const { byFirstToken } = "byFirstToken" in rules ? rules : compileCorrectionRules(rules);
   const manual = [...spans];
   const matched = manual.map((s) => ({ start: s.rawStart, end: s.rawEnd }));
-  const tokens = tokenize(raw);
+  const tokens = byFirstToken.size > 0 ? tokenize(raw) : [];
   for (let i = 0; i < tokens.length; ) {
     const match = (byFirstToken.get(tokens[i]!.norm) ?? []).find((rule) => {
       const last = tokens[i + rule.tokens.length - 1];

@@ -47,7 +47,7 @@ export function knowledgeFromWorkbench(full: WorkbenchData): KnowledgePayload {
 }
 
 export async function loadKnowledgePayload(db: AppDb, duoId: string, playerId: string): Promise<KnowledgePayload> {
-  return knowledgeFromWorkbench(await buildWorkbenchData(db, duoId, playerId));
+  return knowledgeFromWorkbench(await buildWorkbenchData(db, duoId, playerId, { speech: "cited" }));
 }
 
 /** One Claim and the lookups its card needs (Review's drawer, #56 3b); null when it is not this Duo's. */
@@ -57,7 +57,7 @@ export interface ClaimPayload {
 }
 
 export async function loadClaimPayload(db: AppDb, duoId: string, playerId: string, claimId: string): Promise<ClaimPayload | null> {
-  const full = await buildWorkbenchData(db, duoId, playerId);
+  const full = await buildWorkbenchData(db, duoId, playerId, { speech: "cited" });
   const one = full.claimsById[claimId];
   if (!one) return null;
   const k = knowledgeFromWorkbench({ ...full, claims: [one] });

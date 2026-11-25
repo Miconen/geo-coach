@@ -2,7 +2,7 @@
   // A Game's result line (#56 2a token table: status badges, never chips).
   import type { WorkbenchGame } from "$lib/server/workbench/view-model.js";
 
-  let { game }: { game: WorkbenchGame } = $props();
+  let { game }: { game: Omit<WorkbenchGame, "roundIds" | "sessionIds"> } = $props();
 </script>
 
 <div class="flex flex-wrap items-center gap-2 text-xs" data-testid="game-scoreboard">

@@ -41,6 +41,24 @@
   const topics = $derived([...new Set(p.claims.flatMap((c) => c.topics))].sort());
   const filtered = $derived(filterWorkbenchClaims(p.claims, { status, topic, query: search, country, masked }));
   const groups = $derived(groupClaimsByCountry(filtered, country));
+  // Claim cards render 100 at a time (a Duo's bank runs to thousands; a multi-Country Claim shows once per Country);
+  // changing a filter resets the window.
+  const cardTotal = $derived(groups.reduce((n, g) => n + g.claims.length, 0));
+  let shownCount = $state(100);
+  $effect(() => {
+    void [status, topic, search, country];
+    shownCount = 100;
+  });
+  const shownGroups = $derived.by(() => {
+    let budget = shownCount;
+    const out: { group: (typeof groups)[number]; claims: (typeof groups)[number]["claims"] }[] = [];
+    for (const group of groups) {
+      if (budget <= 0) break;
+      out.push({ group, claims: group.claims.slice(0, budget) });
+      budget -= group.claims.length;
+    }
+    return out;
+  });
 
   const claimParam = $derived(page.url.searchParams.get("claim"));
   const drawerClaim = $derived(claimParam ? (p.claims.find((c) => c.id === claimParam) ?? null) : null);
@@ -134,14 +152,14 @@
     </div>
   {:else}
     <div class="space-y-4">
-      {#each groups as group (group.code ?? "general")}
+      {#each shownGroups as { group, claims } (group.code ?? "general")}
         <section class="space-y-2">
           <h2 class="px-1 text-xs font-bold">
             {#if group.code}<button type="button" class="mono mr-1 text-[var(--accent)] hover:underline" onclick={() => setCountry(group.code)}>{group.code}</button>{/if}
             {group.name}
             <span class="mono ml-1 font-normal text-[var(--muted)]">{group.claims.length}</span>
           </h2>
-          {#each group.claims as claim (claim.id)}
+          {#each claims as claim (claim.id)}
             <div class="space-y-1" data-testid="knowledge-claim" data-claim-id={claim.id}>
               <Masked block revealed={Boolean(revealedClaims[claim.id])}>
                 {#snippet placeholder()}
@@ -167,6 +185,16 @@
           {/each}
         </section>
       {/each}
+      {#if shownCount < cardTotal}
+        <button
+          type="button"
+          data-testid="claims-more"
+          onclick={() => (shownCount += 100)}
+          class="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs font-semibold text-[var(--accent)] hover:bg-[var(--surface-subtle)]"
+        >
+          Show {Math.min(100, cardTotal - shownCount)} more of {cardTotal - shownCount} remaining
+        </button>
+      {/if}
     </div>
   {/if}
 </main>

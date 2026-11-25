@@ -30,6 +30,7 @@
   import { gameSlice, learningGameLinks, roundSlice } from "$lib/workbench/slices.js";
   import type {
     CountryDossier,
+    WorkbenchClaim,
     WorkbenchLearning,
   } from "$lib/server/workbench/view-model.js";
   import type { ReviewRounds } from "$lib/server/workbench/review-view.js";
@@ -49,6 +50,7 @@
   /** The Continent -> Country list and dossier headers set ?country= (#56 3b), replacing the history entry. */
   function setCountry(code: string | null) {
     selectedCountry = code;
+    showAllCountryClaims = false;
     updateQuery((params) => {
       if (code) params.set("country", code);
       else params.delete("country");
@@ -252,9 +254,34 @@
     };
   });
 
+  // Review ships no Claim bank (reviewView): the selected Country's Claims come on demand, refetched for a newer
+  // derivation, the last ones shown until it lands. The first 20 render until asked for the rest.
+  let countryClaims = $state.raw<{ wb: unknown; country: string; claims: WorkbenchClaim[] } | null>(null);
+  let showAllCountryClaims = $state(false);
   const activeCountryClaims = $derived(
-    selectedCountry ? (wb?.claims ?? []).filter((c) => c.countries.includes(selectedCountry!)) : [],
+    activeCountryDossier && activeCountryDossier.claimCount > 0 && countryClaims?.country === activeCountryDossier.code
+      ? countryClaims.claims
+      : [],
   );
+  const shownCountryClaims = $derived(showAllCountryClaims ? activeCountryClaims : activeCountryClaims.slice(0, 20));
+
+  $effect(() => {
+    const current = wb;
+    const country = selectedCountry;
+    if (!current || !country || !current.countryDossiers.some((c) => c.code === country && c.claimCount > 0)) return;
+    if (countryClaims?.wb === current && countryClaims.country === country) return;
+    let cancelled = false;
+    fetch(`/api/duos/${current.duo.id}/review/claims?country=${country}`)
+      .then(async (res) => {
+        if (!res.ok) return;
+        const claims = (await res.json()) as WorkbenchClaim[];
+        if (!cancelled) countryClaims = { wb: current, country, claims };
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  });
 
   function openManualModal(opts: ManualPrefill = {}) {
     manualPrefill = opts;
@@ -539,7 +566,7 @@
             Knowledge Bank
           </div>
           <a href={links.knowledge(wb.duo.id)} data-testid="review-knowledge" class="mt-1.5 block rounded-md px-2 py-1.5 text-xs hover:bg-[var(--surface-subtle)]"
-            >All Claims ({wb.claims.length}) and Sources →</a
+            >All Claims ({wb.claimCount}) and Sources →</a
           >
         </div>
 
@@ -686,7 +713,7 @@
                       Evidence →
                     </a>
                   </div>
-                  {#each activeCountryClaims as claim (claim.id)}
+                  {#each shownCountryClaims as claim (claim.id)}
                     <Masked block revealed={Boolean(revealedClaimIds[claim.id])}>
                       {#snippet placeholder()}
                         <button
@@ -701,6 +728,16 @@
                       <ClaimCard {claim} {wb} compact revealedLearningIds={revealedIds} onSetEvidence={setClaimEvidence} />
                     </Masked>
                   {/each}
+                  {#if shownCountryClaims.length < activeCountryClaims.length}
+                    <button
+                      type="button"
+                      data-testid="country-claims-more"
+                      onclick={() => (showAllCountryClaims = true)}
+                      class="w-full rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold text-[var(--accent)] hover:bg-[var(--surface-subtle)]"
+                    >
+                      Show all {activeCountryClaims.length} Claims
+                    </button>
+                  {/if}
                 </div>
               {/if}
 

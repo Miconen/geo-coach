@@ -89,11 +89,8 @@ describe("avatars and colours", () => {
     expect(avatarIcon(guess({ playerId: "zz" }), players)).toBe("av-unknown");
   });
 
-  it("uses each Player's colour unless they share one", () => {
+  it("uses each Player's resolved colour", () => {
     expect(playerColors(players)).toEqual(["#2563eb", "#7c3aed"]);
-    const same = players.map((p) => ({ ...p, avatarColor: "#2563eb" }));
-    const [a, b] = playerColors(same);
-    expect(a).not.toBe(b);
   });
 
   it("formats km", () => {

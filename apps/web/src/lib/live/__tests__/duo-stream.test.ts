@@ -240,9 +240,9 @@ describe("refresh dependencies", () => {
     expect(hits.sort()).toEqual(["run", "session"]);
   });
 
-  it("Stats refreshes on game, run, learning, reaction and Session bounds; never on replay, chunk, offset or transcript", () => {
+  it("Stats refreshes on game, run, learning, reaction, Player colour and Session bounds; never on replay, chunk, offset or transcript", () => {
     const hits = entities.filter((entity) => needsRefresh("stats", { events: [changed(entity as never)], reopened: false }));
-    expect(hits.sort()).toEqual(["game", "learning", "reaction", "run", "session"]);
+    expect(hits.sort()).toEqual(["game", "learning", "player", "reaction", "run", "session"]);
     const session = (kind?: "bounds" | "chunk" | "offset" | "transcript"): DuoSseEvent => ({ ...changed("session"), ...(kind ? { kind } : {}) }) as DuoSseEvent;
     const one = (ev: DuoSseEvent) => needsRefresh("stats", { events: [ev], reopened: false });
     expect(one(changed("replay"))).toBe(false);

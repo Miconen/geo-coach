@@ -6,15 +6,15 @@ import type {
   RollingPoint,
 } from "@geo-coach/shared";
 import { formatNumber, formatPercent, formatSigned, unitLabel } from "./overview-text.js";
+import { OPPONENT_COLOR, playerInk } from "../player-color.js";
 
 // Wording for the Players section: the computed takeaways and the Best-guess chips.
 
 export const MODE_LABELS: Record<GameMode, string> = { moving: "Moving", nm: "NM", nmpz: "NMPZ" };
 
-/** Line colours per Player, in the order the Duo's Players come. */
-export const PLAYER_COLORS = ["var(--accent)", "var(--warn)", "var(--info)", "var(--ok)"];
-
-export const playerColor = (index: number) => PLAYER_COLORS[index % PLAYER_COLORS.length]!;
+/** A Player's colour (#74) for lines, dots and names, as it reads on the page's theme. */
+export const playerColor = (players: readonly { id: string; avatarColor: string }[], playerId: string) =>
+  playerInk(players.find((p) => p.id === playerId)?.avatarColor ?? OPPONENT_COLOR);
 
 /** A Player's name by id; "?" for an id the payload doesn't name. */
 export type NameOf = (playerId: string) => string;

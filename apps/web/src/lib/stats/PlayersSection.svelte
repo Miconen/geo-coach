@@ -57,7 +57,7 @@
   const trendWindow = $derived(smoothingWindow(smoothing, "rounds"));
   const players = $derived(payload.players);
   const nameOf = (id: string) => players.find((p) => p.id === id)?.displayName ?? "?";
-  const colorOf = (id: string) => playerColor(Math.max(0, players.findIndex((p) => p.id === id)));
+  const colorOf = (id: string) => playerColor(players, id);
 
   const summaries = $derived(playerSummaries(filtered, players));
   const firsts = $derived(firstGuesserStats(filtered.rounds, players));
@@ -249,7 +249,7 @@
 {#snippet playerName(id: string)}
   <span class="inline-flex items-center gap-1.5 font-bold text-[var(--ink)]">
     <span class="inline-block size-2.5 rounded-full" style:background={colorOf(id)}></span>
-    {nameOf(id)}
+    <span style:color={colorOf(id)}>{nameOf(id)}</span>
   </span>
 {/snippet}
 

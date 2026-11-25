@@ -147,8 +147,8 @@ async function main() {
     { id: otherDuoId, name: "Other Duo", geoguessrTeamId: "gg_team_other" },
   ]);
   await db.insert(schema.players).values([
-    { id: mikoId, discordId: "e2e_miko", displayName: "Miko", geoguessrUserId: "gg_e2e_p1", geoguessrName: "MikoGeo", avatarColor: "#2563eb" },
-    { id: soraId, discordId: "e2e_sora", displayName: "Sora", geoguessrUserId: "gg_e2e_p2", geoguessrName: "SoraMaps", avatarColor: "#db2777" },
+    { id: mikoId, discordId: "e2e_miko", displayName: "Miko", geoguessrUserId: "gg_e2e_p1", geoguessrName: "MikoGeo", color: "blue" },
+    { id: soraId, discordId: "e2e_sora", displayName: "Sora", geoguessrUserId: "gg_e2e_p2", geoguessrName: "SoraMaps", color: "pink" },
     { id: outsiderId, discordId: "e2e_out", displayName: "Outsider", geoguessrUserId: "gg_e2e_p3" },
   ]);
   await db.insert(schema.duoMemberships).values([

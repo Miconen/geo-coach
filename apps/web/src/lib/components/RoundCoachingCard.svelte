@@ -2,6 +2,7 @@
   import Inspect from "$lib/inspect/Inspect.svelte";
   import type { WorkbenchPlayer, WorkbenchRound, WorkbenchUtterance } from "$lib/server/workbench/view-model.js";
   import { guessedCountryLabel, isWrongCountry } from "$lib/round-countries.js";
+  import { OPPONENT_COLOR, playerInk } from "$lib/player-color.js";
 
   interface Props {
     round: WorkbenchRound;
@@ -48,7 +49,7 @@
       return {
         id: u.id,
         pct,
-        color: speaker?.avatarColor ?? "#2563eb",
+        color: speaker?.avatarColor ?? OPPONENT_COLOR,
         tooltip: recallHidden ? "Utterance" : `${speaker?.displayName ?? "Player"}: ${u.text}`,
       };
     }),
@@ -133,7 +134,7 @@
         >
           <span
             class="h-2 w-2 rounded-full"
-            style="background: color-mix(in srgb, {pl?.avatarColor ?? '#2563eb'}, #ffffff var(--speaker-lighten))"
+            style="background: {playerInk(pl?.avatarColor ?? OPPONENT_COLOR)}"
           ></span>
           {pl?.displayName ?? g.nick ?? "Duo"}: {guessedCountryLabel(g)} · {g.score}pt
           {#if g.distanceMeters !== null}
@@ -172,7 +173,7 @@
           disabled={!onSelectUtterance}
           onclick={() => onSelectUtterance?.(marker.id, round.id)}
           class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-3 w-3 rounded-full border-2 border-[var(--surface)] shadow enabled:cursor-pointer enabled:hover:scale-125"
-          style="left: {marker.pct}%; background: color-mix(in srgb, {marker.color}, #ffffff var(--speaker-lighten))"
+          style="left: {marker.pct}%; background: {playerInk(marker.color)}"
           aria-label="Jump to Utterance"
         ></button>
       {/each}

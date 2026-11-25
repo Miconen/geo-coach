@@ -15,6 +15,7 @@ import {
 } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
 import { duoMemberships, games, players, recordings, rounds } from "../db/schema.js";
+import { resolvePlayerColors } from "../../player-color.js";
 import {
   deriveCurrentCallLabels,
   deriveLearningsWithStatus,
@@ -38,7 +39,7 @@ function roundCall(
  * browser (ADR 0003). Opponents carry no nickname or GeoGuessr ID: only
  * `isDuo: false` tells them apart from the Duo's Players.
  */
-export async function buildStatsPayload(db: AppDb, duoId: string): Promise<StatsPayload> {
+export async function buildStatsPayload(db: AppDb, duoId: string, viewerPlayerId?: string): Promise<StatsPayload> {
   const callLabels = await deriveCurrentCallLabels(db, duoId);
   const [memberships, allRecordings, allGames, allRounds, derivedLearnings] = await Promise.all([
     db.query.duoMemberships.findMany({ where: eq(duoMemberships.duoId, duoId) }),
@@ -149,12 +150,13 @@ export async function buildStatsPayload(db: AppDb, duoId: string): Promise<Stats
     };
   });
 
+  const colorByPlayer = resolvePlayerColors(duoPlayers, viewerPlayerId);
   return {
     duoId,
     players: duoPlayers.map((p) => ({
       id: p.id,
       displayName: p.displayName,
-      avatarColor: p.avatarColor,
+      avatarColor: colorByPlayer[p.id]!,
     })),
     sessions,
     games: statsGames,

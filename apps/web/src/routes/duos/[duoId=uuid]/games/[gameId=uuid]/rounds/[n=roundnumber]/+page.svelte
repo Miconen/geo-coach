@@ -14,6 +14,7 @@
   import { useEntityRefresh } from "$lib/live/entity-refresh.svelte.js";
   import type { RoundPayload } from "$lib/server/entities/index.js";
   import { roundSlice } from "$lib/workbench/slices.js";
+  import { playerInk } from "$lib/player-color.js";
 
   let { data } = $props();
   const live = useEntityRefresh<RoundPayload>({
@@ -104,7 +105,9 @@
             {#each slice.utterances as u (u.id)}
               <li class="rounded bg-[var(--surface-subtle)] px-2 py-1 text-xs">
                 <span class="mono text-[var(--muted)]">{new Date(u.startedAt).toISOString().slice(11, 19)}</span>
-                <strong class="ml-1">{p.wb.players[u.playerId]?.displayName ?? "Player"}:</strong>
+                <strong class="ml-1" style:color={p.wb.players[u.playerId] ? playerInk(p.wb.players[u.playerId]!.avatarColor) : undefined}
+                  >{p.wb.players[u.playerId]?.displayName ?? "Player"}:</strong
+                >
                 <UtteranceText {duoId} utterance={u} countryCode={p.round.countryCode} onSaved={live.refresh} />
               </li>
             {:else}

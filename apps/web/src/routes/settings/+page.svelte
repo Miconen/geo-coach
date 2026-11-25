@@ -4,6 +4,7 @@
   import { getTheme, setTheme } from "$lib/theme.svelte.js";
   import { getDeveloperMode, setDeveloperMode } from "$lib/developer-mode.svelte.js";
   import TranscriptCorrections from "$lib/components/TranscriptCorrections.svelte";
+  import { PLAYER_PALETTE, playerInk, type PlayerColorKey } from "$lib/player-color.js";
 
   let { data } = $props();
   let scope = $state<"companion" | "mcp">("companion");
@@ -40,6 +41,21 @@
   async function revoke(id: string) {
     await fetch(`/api/tokens?id=${encodeURIComponent(id)}`, { method: "DELETE" });
     await invalidateAll();
+  }
+
+  // The Player colour (#74): saved at once, then the page data reloads.
+  let pendingColor = $state<string | null | undefined>(undefined);
+  const myColor = $derived(pendingColor !== undefined ? pendingColor : data.player.color);
+  async function saveColor(color: PlayerColorKey) {
+    pendingColor = color;
+    const res = await fetch("/api/player/color", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ color }),
+    });
+    if (!res.ok) feedback = "Saving your colour failed.";
+    await invalidateAll();
+    pendingColor = undefined;
   }
 
   async function saveHotwords(duoId: string) {
@@ -124,6 +140,42 @@
         </button>
       {/each}
     </div>
+  </section>
+
+  <section class="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 space-y-4" data-testid="player-color">
+    <div>
+      <h2 class="text-base font-semibold">Your colour</h2>
+      <p class="text-xs text-[var(--muted)]">
+        Your name, guesses and map pins are drawn in this colour, and your Duo partner sees it too.
+        {#if !myColor}You're on a default until you pick one.{/if}
+      </p>
+    </div>
+    <div class="flex flex-wrap gap-2" role="radiogroup" aria-label="Your colour">
+      {#each PLAYER_PALETTE as c (c.key)}
+        {@const active = myColor === c.key}
+        <button
+          type="button"
+          role="radio"
+          aria-checked={active}
+          data-color={c.key}
+          onclick={() => saveColor(c.key)}
+          class="flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold cursor-pointer {active
+            ? 'border-[var(--accent)] bg-[var(--accent-soft)]/60 ring-1 ring-[var(--accent)]/40'
+            : 'border-[var(--border)] bg-[var(--surface-subtle)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]'}"
+        >
+          <span class="grid size-5 place-items-center rounded-full text-[10px] text-white" style:background={c.hex} aria-hidden="true"
+            >{data.player.displayName.trim().charAt(0).toUpperCase()}</span
+          >
+          <span style:color={playerInk(c.hex)}>{c.label}</span>
+        </button>
+      {/each}
+    </div>
+    {#each data.partners.filter((p) => myColor && p.color === myColor) as p (p.id)}
+      <p class="text-xs text-[var(--muted)]">
+        {p.displayName} chose {PLAYER_PALETTE.find((c) => c.key === myColor)?.label} too: you each see your own name in it, and
+        the other in a different colour.
+      </p>
+    {/each}
   </section>
 
   <section class="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">

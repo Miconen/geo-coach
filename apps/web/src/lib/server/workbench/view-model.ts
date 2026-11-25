@@ -61,6 +61,7 @@ import {
   roundInDuo,
   speechInDuo,
 } from "../services/index.js";
+import { resolvePlayerColors } from "../../player-color.js";
 import { isProcessorOnline } from "../mcp/processing-jobs.js";
 import {
   buildRunTimeline,
@@ -74,6 +75,7 @@ export interface WorkbenchPlayer {
   displayName: string;
   geoguessrUserId: string | null;
   geoguessrName: string | null;
+  /** The colour to draw this Player in, resolved for the viewer (resolvePlayerColors, #74). */
   avatarColor: string;
   isCurrentPlayer: boolean;
 }
@@ -538,13 +540,14 @@ export async function buildWorkbenchData(
       : [];
 
   const playersMap: Record<string, WorkbenchPlayer> = {};
+  const colorByPlayer = resolvePlayerColors(duoPlayers, viewerPlayerId);
   for (const p of duoPlayers) {
     playersMap[p.id] = {
       id: p.id,
       displayName: p.displayName,
       geoguessrUserId: p.geoguessrUserId,
       geoguessrName: p.geoguessrName,
-      avatarColor: p.avatarColor,
+      avatarColor: colorByPlayer[p.id]!,
       isCurrentPlayer: p.id === viewerPlayerId,
     };
   }

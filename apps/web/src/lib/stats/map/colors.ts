@@ -1,5 +1,8 @@
 import type { AreaMeasure, MapRoundClass, StatsPlayer } from "@geo-coach/shared";
 import { MISTAKE_CLASS_LABELS, formatNumber, formatPercent, formatSigned } from "../overview-text.js";
+import { OPPONENT_COLOR } from "../../player-color.js";
+
+export { OPPONENT_COLOR };
 
 // Colours and their legends for the Map view. Mapbox paints need real colours, not
 // CSS variables, and they sit on a dark map whatever the page theme.
@@ -17,16 +20,9 @@ export const CLASS_LABEL: Record<MapRoundClass, string> = { ...MISTAKE_CLASS_LAB
 
 export const classColor = (cls: MapRoundClass | null) => (cls ? CLASS_COLOR[cls] : NO_CLASS_COLOR);
 
-export const OPPONENT_COLOR = "#8b5cf6";
-/** Used when the Players share a colour (both on the default), so their avatars differ. */
-const FALLBACK_PLAYER_COLORS = ["#ec4899", "#f59e0b"];
-
-/** Each Player's avatar colour: their own, unless two Players share one. */
+/** Each Player's avatar colour, in payload order (already resolved per Duo and viewer, #74). */
 export function playerColors(players: readonly StatsPlayer[]): string[] {
-  const distinct = new Set(players.map((p) => p.avatarColor.toLowerCase())).size === players.length;
-  return players.map((p, i) =>
-    distinct ? p.avatarColor : (FALLBACK_PLAYER_COLORS[i] ?? FALLBACK_PLAYER_COLORS[0]!),
-  );
+  return players.map((p) => p.avatarColor);
 }
 
 export const initial = (name: string) => name.trim().charAt(0).toUpperCase() || "?";

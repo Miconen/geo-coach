@@ -7,7 +7,8 @@ declare global {
         displayName: string;
         geoguessrUserId: string | null;
         geoguessrName: string | null;
-        avatarColor: string;
+        /** The stored Player colour choice (#74); resolve it with resolvePlayerColors. */
+        color: string | null;
       } | null;
       sessionId: string | null;
       /** The session store could not be read; cookie routes answer 503 (assertAuthAvailable). */

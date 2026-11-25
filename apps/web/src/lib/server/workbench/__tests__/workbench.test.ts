@@ -44,7 +44,7 @@ describe("Seam 6: A3 Atlas + Command Deck coaching workbench view-model", () => 
         displayName: "Miko",
         geoguessrUserId: "gg_p1",
         geoguessrName: "MikoGeo",
-        avatarColor: "#2563eb",
+        color: "blue",
       },
       {
         id: soraId,
@@ -52,7 +52,7 @@ describe("Seam 6: A3 Atlas + Command Deck coaching workbench view-model", () => 
         displayName: "Sora",
         geoguessrUserId: "gg_p2",
         geoguessrName: "SoraMaps",
-        avatarColor: "#7c3aed",
+        color: "pink",
       },
     ]);
     await handle.db.insert(duoMemberships).values([

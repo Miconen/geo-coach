@@ -18,6 +18,7 @@
   import PlotChart from "./PlotChart.svelte";
   import { formatNumber, formatPercent, formatSeconds, formatSigned, unitLabel } from "./overview-text.js";
   import { playerColor } from "./players-text.js";
+  import { OPPONENT_COLOR } from "$lib/player-color.js";
   import {
     FIRST_TEAM_LABELS,
     MIN_BUCKET_GUESSES,
@@ -42,7 +43,7 @@
   const stats = $derived(speedStats(filtered, players, window));
 
   const DUO = "var(--accent)";
-  const OPPONENTS = "var(--danger)";
+  const OPPONENTS = OPPONENT_COLOR;
   const TIP = { lineWidth: 32 } as const;
 
   function spreadColor(s: SpeedSpread): string {
@@ -53,7 +54,7 @@
       case "opponent-each":
         return OPPONENTS;
       case "player":
-        return playerColor(Math.max(0, players.findIndex((p) => p.id === (s.group as { playerId: string }).playerId)));
+        return playerColor(players, s.group.playerId);
     }
   }
 

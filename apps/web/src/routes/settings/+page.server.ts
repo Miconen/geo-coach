@@ -3,7 +3,7 @@ import { eq, inArray } from "drizzle-orm";
 import type { PageServerLoad } from "./$types";
 import { assertAuthAvailable, loginUrlFor } from "$lib/server/auth/guards.js";
 import { getDb } from "$lib/server/db/index.js";
-import { duoMemberships, duos } from "$lib/server/db/schema.js";
+import { duoMemberships, duos, players } from "$lib/server/db/schema.js";
 import { listPlayerTokens } from "$lib/server/auth/index.js";
 
 export const load: PageServerLoad = async ({ locals, url }) => {
@@ -17,12 +17,27 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     listPlayerTokens(db, locals.player.id),
   ]);
   const duoIds = memberships.map((m) => m.duoId);
-  const playerDuos =
-    duoIds.length > 0 ? await db.query.duos.findMany({ where: inArray(duos.id, duoIds) }) : [];
+  const [playerDuos, duoMembers] =
+    duoIds.length > 0
+      ? await Promise.all([
+          db.query.duos.findMany({ where: inArray(duos.id, duoIds) }),
+          db.query.duoMemberships.findMany({ where: inArray(duoMemberships.duoId, duoIds), columns: { playerId: true } }),
+        ])
+      : [[], []];
+  // Duo partners' colour choices (#74), so the picker can say when a partner chose the same one.
+  const partnerIds = [...new Set(duoMembers.map((m) => m.playerId))].filter((id) => id !== locals.player!.id);
+  const partners =
+    partnerIds.length > 0
+      ? await db.query.players.findMany({
+          where: inArray(players.id, partnerIds),
+          columns: { id: true, displayName: true, color: true },
+        })
+      : [];
 
   return {
     player: locals.player,
     origin: url.origin,
+    partners,
     duos: playerDuos.map((d) => ({
       id: d.id,
       name: d.name,

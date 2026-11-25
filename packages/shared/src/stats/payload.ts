@@ -16,7 +16,7 @@ export interface StatsPayload {
 export interface StatsPlayer {
   id: string;
   displayName: string;
-  /** The Player's colour, as in the workbench. */
+  /** The colour to draw the Player in, resolved for the viewer (#74), as in the workbench. */
   avatarColor: string;
 }
 

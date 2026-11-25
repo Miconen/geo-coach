@@ -48,7 +48,8 @@ export const players = pgTable("players", {
   displayName: text("display_name").notNull(),
   geoguessrUserId: text("geoguessr_user_id").unique(),
   geoguessrName: text("geoguessr_name"),
-  avatarColor: text("avatar_color").notNull().default("#2563eb"),
+  /** The Player colour they chose in Settings (a PLAYER_PALETTE key, #74); null draws a default. */
+  color: text("color"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

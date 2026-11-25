@@ -5,6 +5,7 @@
   import { DELETE_SPEECH_LABEL } from "$lib/delete-speech.js";
   import Inspect from "$lib/inspect/Inspect.svelte";
   import { formatRelSec } from "$lib/workbench/format.js";
+  import { playerInk } from "$lib/player-color.js";
   import type { RoundSlice } from "$lib/workbench/slices.js";
   import type {
     WorkbenchGame,
@@ -119,9 +120,7 @@
                 <span class="mono text-[var(--muted)]">{formatRelSec(round.startTime, u.startedAt)}</span>
                 <strong
                   class="ml-1.5"
-                  style="color: {speaker?.avatarColor
-                    ? `color-mix(in srgb, ${speaker.avatarColor}, #ffffff var(--speaker-lighten))`
-                    : 'var(--ink)'}"
+                  style="color: {speaker ? playerInk(speaker.avatarColor) : 'var(--ink)'}"
                 >
                   {speaker?.displayName ?? "Player"}:
                 </strong>

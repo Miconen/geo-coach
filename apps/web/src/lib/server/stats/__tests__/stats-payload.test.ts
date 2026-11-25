@@ -10,6 +10,7 @@ import {
   upsertRawGame,
 } from "../../services/index.js";
 import { buildStatsPayload } from "../payload.js";
+import { PLAYER_PALETTE } from "../../../player-color.js";
 
 // Made-up duel in the real payload's shape (see #37): no real Opponents.
 const rawDuel = {
@@ -151,7 +152,7 @@ describe("buildStatsPayload", () => {
 
     const payload = await buildStatsPayload(handle.db, duoId);
 
-    expect(payload.players).toEqual([{ id: mikoId, displayName: "Miko", avatarColor: "#2563eb" }]);
+    expect(payload.players).toEqual([{ id: mikoId, displayName: "Miko", avatarColor: PLAYER_PALETTE[0].hex }]);
     expect(payload.sessions.map((s) => s.id)).toEqual([sessionId]);
     expect(payload.games).toHaveLength(1);
     expect(payload.games[0]).toMatchObject({

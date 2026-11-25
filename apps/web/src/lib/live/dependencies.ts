@@ -9,9 +9,9 @@ export type Consumer = "review" | "pending-work" | "game" | "round" | "session" 
 
 /** X5 Consumers, by event type (learning and reaction name no Game, Round or Session: pages refresh Duo-wide). */
 const CONSUMES: Record<Exclude<Consumer, "review" | "pending-work" | "stats">, ReadonlySet<ChangedEntity>> = {
-  game: new Set(["game", "replay", "learning", "reaction", "run", "processing", "session", "claim", "source", "corrections"]),
-  round: new Set(["game", "replay", "learning", "reaction", "run", "processing", "session", "claim", "source", "corrections"]),
-  session: new Set(["session", "game", "run", "learning", "processing", "reaction", "claim", "corrections"]),
+  game: new Set(["game", "replay", "learning", "reaction", "run", "processing", "session", "claim", "source", "corrections", "player"]),
+  round: new Set(["game", "replay", "learning", "reaction", "run", "processing", "session", "claim", "source", "corrections", "player"]),
+  session: new Set(["session", "game", "run", "learning", "processing", "reaction", "claim", "corrections", "player"]),
   // Events that change RunTimeline rows or counts: they reset the paged history to page one.
   "session-runs": new Set(["run", "processing", "claim", "learning", "session"]),
   // /knowledge and Claim drawers (#56 3a): Evidence labels read the Round's country and the Game's date; linked
@@ -37,7 +37,7 @@ function matches(consumer: Consumer, ev: Changed): boolean {
     // offset and transcript changes never rebuild it (its payload reparses every rawDuel).
     case "stats":
       if (ev.entity === "session") return ev.kind === undefined || ev.kind === "bounds";
-      return ev.entity === "game" || ev.entity === "run" || ev.entity === "learning" || ev.entity === "reaction";
+      return ev.entity === "game" || ev.entity === "run" || ev.entity === "learning" || ev.entity === "reaction" || ev.entity === "player";
     default:
       return CONSUMES[consumer].has(ev.entity);
   }

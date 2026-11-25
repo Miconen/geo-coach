@@ -18,7 +18,7 @@ const player = (id: string): NonNullable<Locals["player"]> => ({
   displayName: "P",
   geoguessrUserId: null,
   geoguessrName: null,
-  avatarColor: "#000",
+  color: null,
 });
 
 function event(locals: Partial<Locals>, duoId: string) {

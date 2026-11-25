@@ -16,7 +16,8 @@ interface SeedConfig {
     displayName: string;
     geoguessrUserId?: string;
     geoguessrName?: string;
-    avatarColor?: string;
+    /** A PLAYER_PALETTE key (#74); unset draws a default. */
+    color?: string;
     duoTeamIds: string[];
   }>;
 }
@@ -37,7 +38,7 @@ const DEFAULT_DEV_SEED: SeedConfig = {
       displayName: "Miko",
       geoguessrUserId: "gg_dev_p1",
       geoguessrName: "MikoGeo",
-      avatarColor: "#2563eb",
+      color: "blue",
       duoTeamIds: ["gg_team_dev_duo"],
     },
     {
@@ -45,7 +46,7 @@ const DEFAULT_DEV_SEED: SeedConfig = {
       displayName: "Sora",
       geoguessrUserId: "gg_dev_p2",
       geoguessrName: "SoraMaps",
-      avatarColor: "#7c3aed",
+      color: "pink",
       duoTeamIds: ["gg_team_dev_duo"],
     },
   ],
@@ -92,7 +93,7 @@ async function main() {
         displayName: p.displayName,
         geoguessrUserId: p.geoguessrUserId ?? null,
         geoguessrName: p.geoguessrName ?? null,
-        avatarColor: p.avatarColor ?? "#2563eb",
+        color: p.color ?? null,
       });
     }
     for (const teamId of p.duoTeamIds) {

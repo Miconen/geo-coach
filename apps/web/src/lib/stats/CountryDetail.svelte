@@ -28,6 +28,7 @@
     unitLabel,
   } from "./overview-text.js";
   import { countAndDamage, learningTakeaway, placeName, regionLabel } from "./rankings-text.js";
+  import { playerInk } from "$lib/player-color.js";
 
   let {
     row,
@@ -225,7 +226,7 @@
     <span class="text-[var(--muted)]">Best guess</span>
     {#each players as p (p.id)}
       <span>
-        <span class="font-semibold text-[var(--ink)]">{p.displayName}</span>
+        <span class="font-semibold" style:color={playerInk(p.avatarColor)}>{p.displayName}</span>
         {formatPercent(row.bestGuessShare[p.id] ?? 0)}
       </span>
     {/each}

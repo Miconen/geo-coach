@@ -34,6 +34,7 @@
     WorkbenchLearning,
   } from "$lib/server/workbench/view-model.js";
   import type { ReviewRounds } from "$lib/server/workbench/review-view.js";
+  import { playerInk } from "$lib/player-color.js";
 
   let { data } = $props();
   let liveWorkbench = $state.raw<{
@@ -1151,7 +1152,9 @@
                         >
                           {primaryRound ? formatRelSec(primaryRound.startTime, u.startedAt) : new Date(u.startedAt).toISOString().slice(11, 19)}
                         </button>
-                        <strong class="ml-1.5">{wb.players[u.playerId]?.displayName ?? "Player"}:</strong>
+                        <strong class="ml-1.5" style:color={wb.players[u.playerId] ? playerInk(wb.players[u.playerId]!.avatarColor) : undefined}
+                          >{wb.players[u.playerId]?.displayName ?? "Player"}:</strong
+                        >
                         <UtteranceText duoId={wb.duo.id} utterance={u} editable={false} />
                       </div>
                     {/if}

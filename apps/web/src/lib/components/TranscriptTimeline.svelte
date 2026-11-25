@@ -13,6 +13,7 @@
   import UtteranceText from "./UtteranceText.svelte";
   import type { ManualPrefill } from "./ManualLearningModal.svelte";
   import { DELETE_SPEECH_LABEL } from "$lib/delete-speech.js";
+  import { playerInk } from "$lib/player-color.js";
 
   let {
     wb,
@@ -135,7 +136,7 @@
           >
             <div>
               <span class="mono text-[var(--muted)]">{new Date(u.startedAt).toISOString().slice(11, 19)}</span>
-              <strong class="ml-1.5">{speaker?.displayName ?? "Player"}:</strong>
+              <strong class="ml-1.5" style:color={speaker ? playerInk(speaker.avatarColor) : undefined}>{speaker?.displayName ?? "Player"}:</strong>
               <UtteranceText duoId={wb.duo.id} utterance={u} {onSaved} />
             </div>
             <div class="flex shrink-0 items-center gap-2">

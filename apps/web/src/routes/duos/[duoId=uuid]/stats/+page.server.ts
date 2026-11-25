@@ -6,6 +6,6 @@ import { buildStatsPayload } from "$lib/server/stats/payload.js";
 // URL-free: filters live in the URL and are applied in the browser (ADR 0003), so they never rerun this load.
 export const load: PageServerLoad = async ({ locals, params, url }) => {
   const db = getDb();
-  await assertDuoAccess(locals, params.duoId, url, db);
-  return { stats: await buildStatsPayload(db, params.duoId) };
+  const player = await assertDuoAccess(locals, params.duoId, url, db);
+  return { stats: await buildStatsPayload(db, params.duoId, player.id) };
 };

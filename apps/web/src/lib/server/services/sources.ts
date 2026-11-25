@@ -508,34 +508,30 @@ export interface CitedSection {
   title: string;
 }
 
-/** Every Source section a Duo's Documentation Evidence cites, with its Source's title and version. */
+/**
+ * Every Source section a Duo's Documentation Evidence cites, with its Source's title and version. Two plain queries
+ * matched here: as one join the planner misjudged the Evidence count and nested-looped (~200 ms at 7k Claims).
+ */
 export async function listCitedSections(db: AppDb, duoId: string): Promise<CitedSection[]> {
-  const rows = await db
-    .selectDistinct({
-      sourceVersionId: sourceSections.sourceVersionId,
-      anchor: sourceSections.anchor,
-      heading: sourceSections.heading,
-      versionNo: sourceVersions.versionNo,
-      sourceId: sources.id,
-      title: sources.title,
-    })
-    .from(claimEvidence)
-    .innerJoin(
-      sourceSections,
-      and(
-        eq(sourceSections.sourceVersionId, claimEvidence.sourceVersionId),
-        eq(sourceSections.anchor, claimEvidence.sectionAnchor),
-      ),
-    )
-    .innerJoin(sourceVersions, eq(sourceVersions.id, sourceSections.sourceVersionId))
-    .innerJoin(sources, eq(sources.id, sourceVersions.sourceId))
-    .where(
-      and(
-        evidenceInDuo(duoId),
-        eq(claimEvidence.kind, "documentation"),
-        eq(sources.duoId, duoId),
-        eq(sourceVersions.duoId, duoId),
-      ),
-    );
-  return rows;
+  const [cited, sections] = await Promise.all([
+    db
+      .selectDistinct({ sourceVersionId: claimEvidence.sourceVersionId, anchor: claimEvidence.sectionAnchor })
+      .from(claimEvidence)
+      .where(and(evidenceInDuo(duoId), eq(claimEvidence.kind, "documentation"))),
+    db
+      .select({
+        sourceVersionId: sourceSections.sourceVersionId,
+        anchor: sourceSections.anchor,
+        heading: sourceSections.heading,
+        versionNo: sourceVersions.versionNo,
+        sourceId: sources.id,
+        title: sources.title,
+      })
+      .from(sourceSections)
+      .innerJoin(sourceVersions, eq(sourceVersions.id, sourceSections.sourceVersionId))
+      .innerJoin(sources, eq(sources.id, sourceVersions.sourceId))
+      .where(and(eq(sources.duoId, duoId), eq(sourceVersions.duoId, duoId))),
+  ]);
+  const keys = new Set(cited.map((c) => `${c.sourceVersionId}:${c.anchor}`));
+  return sections.filter((s) => keys.has(`${s.sourceVersionId}:${s.anchor}`));
 }

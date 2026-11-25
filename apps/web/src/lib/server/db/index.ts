@@ -11,7 +11,9 @@ export function getDb(): AppDb {
   if (cachedDb) return cachedDb;
   const url =
     process.env.DATABASE_URL ?? "postgres://geocoach:geocoach@localhost:5432/geocoach";
-  cachedSql = postgres(url, { max: 10 });
+  // JIT compiles plans whose cost estimates run high (the scope checks' subplans), adding ~15 ms to queries that run
+  // in a few: off for this OLTP workload.
+  cachedSql = postgres(url, { max: 10, connection: { jit: "off" } });
   cachedDb = drizzle(cachedSql, { schema });
   return cachedDb;
 }

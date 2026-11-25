@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { login, seed, withSql } from "./helpers.js";
 
-// #56 1b-shell: Duo routes, the chrome, redirects (X1), preload off (X4) and deep links.
+// #56 1b-shell: Duo routes, the chrome, redirects (X1), hover preload and deep links.
 const s = seed();
 const review = `/duos/${s.duoId}/review`;
 const stats = `/duos/${s.duoId}/stats`;
@@ -31,7 +31,7 @@ test("losing membership mid-visit turns the next in-Duo navigation into a 404", 
   }
 });
 
-test("Settings returns to the last Duo, and hovering links never fetches __data.json", async ({ page }) => {
+test("Settings returns to the last Duo, and hovering a link preloads its __data.json", async ({ page }) => {
   await login(page, s.mikoId);
   await page.goto(stats);
   await expect(page.getByRole("heading", { name: "Stats" })).toBeVisible();
@@ -43,8 +43,7 @@ test("Settings returns to the last Duo, and hovering links never fetches __data.
   const nav = page.getByRole("navigation", { name: "Duo" });
   await nav.getByRole("link", { name: "Review" }).hover();
   await nav.getByRole("link", { name: "Settings" }).hover();
-  await page.waitForTimeout(300);
-  expect(dataRequests).toEqual([]);
+  await expect.poll(() => dataRequests.some((u) => u.includes("/review/__data.json"))).toBe(true);
   await nav.getByRole("link", { name: "Settings" }).click();
   await expect(page).toHaveURL(/\/settings$/);
   await page.getByRole("link", { name: /Back to Workbench/ }).click();

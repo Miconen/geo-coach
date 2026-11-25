@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { entityHref, links } from "../links.js";
@@ -65,27 +65,8 @@ describe("links", () => {
   });
 });
 
-describe("preload is off for Duo routes (X4)", () => {
-  const root = join(__dirname, "../../");
-  it("app.html disables data preloading", () => {
-    expect(readFileSync(join(root, "app.html"), "utf8")).toContain('data-sveltekit-preload-data="off"');
-  });
-
-  it("no Duo route calls preloadData or opts back into preloading", () => {
-    const files: string[] = [];
-    const walk = (dir: string) => {
-      for (const name of readdirSync(dir)) {
-        const p = join(dir, name);
-        if (statSync(p).isDirectory()) walk(p);
-        else if (/\.(svelte|ts)$/.test(name)) files.push(p);
-      }
-    };
-    walk(join(root, "routes/duos"));
-    walk(join(root, "lib/components"));
-    expect(files.length).toBeGreaterThan(0);
-    for (const f of files) {
-      const src = readFileSync(f, "utf8");
-      expect(src, f).not.toMatch(/preloadData|preload-data="(hover|tap|eager)"/);
-    }
+describe("hover preload", () => {
+  it("app.html preloads a link's data on hover", () => {
+    expect(readFileSync(join(__dirname, "../../app.html"), "utf8")).toContain('data-sveltekit-preload-data="hover"');
   });
 });

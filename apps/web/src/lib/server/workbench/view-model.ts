@@ -398,6 +398,87 @@ function describeWorkRange(range: WorkRange, playersById: Record<string, Workben
   };
 }
 
+// words only as first/last bounds (all speechSpanMs needs), never the full timing array.
+export const UTTERANCE_COLUMNS = {
+  id: utterances.id,
+  recordingId: utterances.recordingId,
+  transcriptVersionId: utterances.transcriptVersionId,
+  playerId: utterances.playerId,
+  text: utterances.text,
+  startedAt: utterances.startedAt,
+  endedAt: utterances.endedAt,
+  startSampleMs: utterances.startSampleMs,
+  avgLogprob: utterances.avgLogprob,
+  noSpeechProb: utterances.noSpeechProb,
+  words: sql<WordTiming[]>`case when jsonb_array_length(${utterances.words}) > 0
+    then jsonb_build_array(${utterances.words}->0, ${utterances.words}->-1) else '[]'::jsonb end`,
+};
+
+type UtteranceRow = {
+  id: string;
+  recordingId: string;
+  playerId: string;
+  text: string;
+  startedAt: Date;
+  endedAt: Date;
+  startSampleMs: number;
+  avgLogprob: number | null;
+  noSpeechProb: number | null;
+  words: WordTiming[];
+};
+type WorkRangeRow = { startUtc: Date; endUtc: Date; reason: "unprocessed" | "stale" };
+
+/**
+ * Turns UTTERANCE_COLUMNS rows into WorkbenchUtterances. The derivation and the Round page's on-demand speech
+ * (loadRoundSpeech) share it, so both read the same text, citations and range status.
+ */
+export function utteranceMapper(ctx: {
+  recSessionById: ReadonlyMap<string, string>;
+  workRangesBySession: ReadonlyMap<string, { extract: WorkRangeRow[]; tips: WorkRangeRow[] }>;
+  /** Utterance id -> the current Learnings citing it. */
+  citedByUtterance: ReadonlyMap<string, string[]>;
+  correctTranscript: Awaited<ReturnType<typeof loadTranscriptCorrector>>;
+}): (u: UtteranceRow, historical: boolean) => WorkbenchUtterance {
+  const { recSessionById, workRangesBySession, citedByUtterance, correctTranscript } = ctx;
+  // Range status per purpose (ADR 0002): any overlapping stale range wins over an unprocessed one. Each Session's
+  // ranges are mapped once, not once per Utterance.
+  const mappedRanges = new Map<WorkRangeRow[], Parameters<typeof rangeStatus>[1]>();
+  const noRanges: WorkRangeRow[] = [];
+  const derivePurposeRangeStatus = (u: UtteranceRow, ranges: WorkRangeRow[]) => {
+    let mapped = mappedRanges.get(ranges);
+    if (!mapped) {
+      mapped = ranges.map((w) => ({ startedAt: w.startUtc, endedAt: w.endUtc, reason: w.reason }));
+      mappedRanges.set(ranges, mapped);
+    }
+    return rangeStatus({ startedAt: u.startedAt, endedAt: u.endedAt }, mapped);
+  };
+  return (u, historical) => {
+    const sesId = recSessionById.get(u.recordingId) ?? "";
+    const sessionWork = workRangesBySession.get(sesId);
+    const extractStatus = derivePurposeRangeStatus(u, sessionWork?.extract ?? noRanges);
+    const tipsStatus = derivePurposeRangeStatus(u, sessionWork?.tips ?? noRanges);
+    return {
+      id: u.id,
+      recordingId: u.recordingId,
+      sessionId: sesId,
+      playerId: u.playerId,
+      text: correctTranscript(u).text,
+      rawText: u.text,
+      startedAt: u.startedAt.toISOString(),
+      endedAt: u.endedAt.toISOString(),
+      avgLogprob: u.avgLogprob,
+      noSpeechProb: u.noSpeechProb,
+      citedByLearningIds: citedByUtterance.get(u.id) ?? [],
+      historical,
+      rangeStatus: extractStatus,
+      rangeStatusByPurpose: {
+        extract: extractStatus,
+        tips: tipsStatus,
+      },
+    };
+  };
+}
+
 export async function buildWorkbenchData(
   db: AppDb,
   duoId: string,
@@ -486,27 +567,12 @@ export async function buildWorkbenchData(
     ).values(),
   ];
 
-  // words only as first/last bounds (all speechSpanMs needs), never the full timing array.
-  const utteranceColumns = {
-    id: utterances.id,
-    recordingId: utterances.recordingId,
-    transcriptVersionId: utterances.transcriptVersionId,
-    playerId: utterances.playerId,
-    text: utterances.text,
-    startedAt: utterances.startedAt,
-    endedAt: utterances.endedAt,
-    startSampleMs: utterances.startSampleMs,
-    avgLogprob: utterances.avgLogprob,
-    noSpeechProb: utterances.noSpeechProb,
-    words: sql<WordTiming[]>`case when jsonb_array_length(${utterances.words}) > 0
-      then jsonb_build_array(${utterances.words}->0, ${utterances.words}->-1) else '[]'::jsonb end`,
-  };
   const citedOnly = options.speech === "cited";
   const citedIds = citedOnly ? [...new Set(derivedLearnings.flatMap((l) => l.utteranceIds))] : [];
   const rawUtterances =
     currentVersionIds.length > 0 && (!citedOnly || citedIds.length > 0)
       ? await db
-          .select(utteranceColumns)
+          .select(UTTERANCE_COLUMNS)
           .from(utterances)
           .where(
             and(
@@ -527,7 +593,7 @@ export async function buildWorkbenchData(
   const historicalUtterances =
     historicalIds.length > 0
       ? await db
-          .select(utteranceColumns)
+          .select(UTTERANCE_COLUMNS)
           .from(utterances)
           .where(and(inArray(utterances.id, historicalIds), speechInDuo(duoId)))
       : [];
@@ -566,46 +632,12 @@ export async function buildWorkbenchData(
     }
   }
 
-  // Range status per purpose (ADR 0002): any overlapping stale range wins over an unprocessed one. Each Session's
-  // ranges are mapped once, not once per Utterance.
-  type WorkRangeRow = { startUtc: Date; endUtc: Date; reason: "unprocessed" | "stale" };
-  const mappedRanges = new Map<WorkRangeRow[], Parameters<typeof rangeStatus>[1]>();
-  const noRanges: WorkRangeRow[] = [];
-  const derivePurposeRangeStatus = (u: (typeof rawUtterances)[number], ranges: WorkRangeRow[]) => {
-    let mapped = mappedRanges.get(ranges);
-    if (!mapped) {
-      mapped = ranges.map((w) => ({ startedAt: w.startUtc, endedAt: w.endUtc, reason: w.reason }));
-      mappedRanges.set(ranges, mapped);
-    }
-    return rangeStatus({ startedAt: u.startedAt, endedAt: u.endedAt }, mapped);
-  };
-
-  const correctTranscript = await loadTranscriptCorrector(db, duoId);
-  const toWorkbenchUtterance = (u: (typeof rawUtterances)[number], historical: boolean): WorkbenchUtterance => {
-    const sesId = recSessionById.get(u.recordingId) ?? "";
-    const sessionWork = workRangesBySession.get(sesId);
-    const extractStatus = derivePurposeRangeStatus(u, sessionWork?.extract ?? noRanges);
-    const tipsStatus = derivePurposeRangeStatus(u, sessionWork?.tips ?? noRanges);
-    return {
-      id: u.id,
-      recordingId: u.recordingId,
-      sessionId: sesId,
-      playerId: u.playerId,
-      text: correctTranscript(u).text,
-      rawText: u.text,
-      startedAt: u.startedAt.toISOString(),
-      endedAt: u.endedAt.toISOString(),
-      avgLogprob: u.avgLogprob,
-      noSpeechProb: u.noSpeechProb,
-      citedByLearningIds: citedByUtterance.get(u.id) ?? [],
-      historical,
-      rangeStatus: extractStatus,
-      rangeStatusByPurpose: {
-        extract: extractStatus,
-        tips: tipsStatus,
-      },
-    };
-  };
+  const toWorkbenchUtterance = utteranceMapper({
+    recSessionById,
+    workRangesBySession,
+    citedByUtterance,
+    correctTranscript: await loadTranscriptCorrector(db, duoId),
+  });
 
   const wbUtterances: WorkbenchUtterance[] = rawUtterances.map((u) => toWorkbenchUtterance(u, false));
   const utterancesById: Record<string, WorkbenchUtterance> = {};

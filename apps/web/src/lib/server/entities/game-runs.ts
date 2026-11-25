@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, or } from "drizzle-orm";
 import { intervalsOverlap } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
 import { callLabels, claimEvidence, claims, processingRuns, rounds } from "../db/schema.js";
@@ -47,8 +47,7 @@ export async function loadGameRuns(
   if (roundIds.size === 0) return [];
   const roundList = [...roundIds];
 
-  const [runs, labels, evidence] = await Promise.all([
-    db.select().from(processingRuns).where(runInDuo(duoId)),
+  const [labels, evidence] = await Promise.all([
     db
       .select({ runId: callLabels.runId, roundId: callLabels.roundId, id: callLabels.id })
       .from(callLabels)
@@ -72,8 +71,21 @@ export async function loadGameRuns(
   }
   for (const label of labels) add(label.runId, "call-label");
   for (const ev of evidence) add(ev.runId, "evidence");
+  // Only runs already admitted above or whose range can overlap the Game in one of its Sessions (#72): never every
+  // run of the Duo. The range test here is a superset; intervalsOverlap below is the exact check.
   const gameSessions = new Set(game.sessionIds);
   const gameSpan = { startedAt: new Date(game.startedAt), endedAt: new Date(game.endedAt) };
+  const admitted = [...reasons.keys()];
+  const overlapping =
+    gameSessions.size > 0
+      ? and(
+          inArray(processingRuns.sessionId, [...gameSessions]),
+          lte(processingRuns.rangeStart, gameSpan.endedAt),
+          gte(processingRuns.rangeEnd, gameSpan.startedAt),
+        )
+      : undefined;
+  const candidates = admitted.length > 0 ? or(inArray(processingRuns.id, admitted), overlapping) : overlapping;
+  const runs = candidates ? await db.select().from(processingRuns).where(and(runInDuo(duoId), candidates)) : [];
   for (const run of runs) {
     if (gameSessions.has(run.sessionId) && intervalsOverlap({ startedAt: run.rangeStart, endedAt: run.rangeEnd }, gameSpan)) {
       add(run.id, "session-overlap");

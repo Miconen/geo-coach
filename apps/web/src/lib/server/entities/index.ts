@@ -13,9 +13,11 @@ import {
 } from "../workbench/view-model.js";
 import { loadSessionRunsPage, type SessionRunsPage } from "./session-runs.js";
 import { loadGameRuns, type GameRun } from "./game-runs.js";
+import { loadRoundSpeech } from "./round-speech.js";
 
 export * from "./session-runs.js";
 export * from "./game-runs.js";
+export * from "./round-speech.js";
 
 /**
  * Entity payloads for the Game, Round and Session pages and their /refresh endpoints (#56 2a). Each is a slice of
@@ -165,7 +167,8 @@ export async function loadGamePayload(
 ): Promise<GamePayload | null> {
   const [row] = await db.select({ id: games.id }).from(games).where(and(eq(games.id, gameId), eq(games.duoId, duoId)));
   if (!row) return null;
-  const full = await loadWorkbench(db, duoId, playerId);
+  // Cited speech, as the Games list reads it: the Game page shows no Round speech, so both share one cache entry.
+  const full = await loadWorkbench(db, duoId, playerId, { speech: "cited" });
   const game = full.gamesById[gameId];
   if (!game) return null;
   const overlap = full.sessions.filter((s) => s.gameIds.includes(gameId)).map((s) => s.id);
@@ -198,12 +201,19 @@ export async function loadRoundPayload(
     .from(rounds)
     .where(and(eq(rounds.id, roundId), roundInDuo(duoId)));
   if (!row) return null;
-  const full = await loadWorkbench(db, duoId, playerId);
-  const round = full.roundsById[roundId];
-  const game = round ? full.gamesById[round.gameId] : undefined;
-  if (!round || !game) return null;
+  // The cited-speech derivation the Game page shares, plus this Round's full speech loaded on its own.
+  const full = await loadWorkbench(db, duoId, playerId, { speech: "cited" });
+  const cited = full.roundsById[roundId];
+  const game = cited ? full.gamesById[cited.gameId] : undefined;
+  if (!cited || !game) return null;
+  const speech = await loadRoundSpeech(db, duoId, roundId, full);
+  const round: WorkbenchRound = { ...cited, utteranceIds: speech.utteranceIds };
   const sessionIds = full.sessions.filter((s) => s.gameIds.includes(game.id)).map((s) => s.id);
   const wb = slice(full, { gameIds: new Set([game.id]), sessionIds: new Set(sessionIds) });
+  wb.roundsById[roundId] = round;
+  wb.utterancesById = { ...wb.utterancesById, ...speech.utterancesById };
+  const known = new Set(wb.utterances.map((u) => u.id));
+  wb.utterances = [...wb.utterances, ...Object.values(speech.utterancesById).filter((u) => !known.has(u.id))];
   return {
     kind: "round",
     game,

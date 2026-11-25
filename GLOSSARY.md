@@ -24,6 +24,13 @@ The movement rules a Game is played with: Moving, NoMove (NM), or NMPZ (no move,
 **Round**
 One location within a Game, which the Duo guesses on.
 
+**Camera**
+What captured a Round's location: one of the Generations of Google's car camera, or another camera such as the low cam, the skull cam or the Trekker. A country can have coverage from several Cameras, so the Camera is a clue that narrows the countries down.
+
+**Generation**
+One of the four generations of Google's car camera, Gen 1 to Gen 4, told apart by clues like blur, colour and the car. Some coverage clues belong to one Generation only (truck coverage is a Gen 4 thing), so a country with no coverage from that Generation is ruled out.
+_Avoid_: cam (for a Generation)
+
 **Region**
 A first-level subdivision of a country as geo-coach groups it: a US state, a Brazilian state, a French region, a UK nation. Both a Round's location and each guess have one.
 _Avoid_: subdivision, province, state (for the general idea)

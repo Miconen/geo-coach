@@ -3,16 +3,24 @@
  * has not shipped yet does not exist, so EntityChip renders plain text for it (see `entityHref`).
  */
 
+import { anchor } from "./anchors.js";
+import { RANK_PARAM, writeMapView, type MapUrlView } from "./stats/map/view-state.js";
+
 type Query = Record<string, string | number | null | undefined | readonly string[]>;
 
-function withQuery(path: string, query: Query = {}, hash?: string | null): string {
+function toParams(query: Query | URLSearchParams): URLSearchParams {
+  if (query instanceof URLSearchParams) return new URLSearchParams(query);
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
     if (value === null || value === undefined || value === "") continue;
     if (Array.isArray(value)) for (const v of value) params.append(key, v);
     else params.set(key, String(value));
   }
-  const qs = params.toString();
+  return params;
+}
+
+function withQuery(path: string, query: Query | URLSearchParams = {}, hash?: string | null): string {
+  const qs = toParams(query).toString();
   return `${path}${qs ? `?${qs}` : ""}${hash ? `#${hash}` : ""}`;
 }
 
@@ -27,7 +35,7 @@ export const links = {
     withQuery(
       `/duos/${duoId}/review`,
       { learning: q.learning, run: q.run, country: q.country, claim: q.claim },
-      q.run ? `run-${q.run}` : null,
+      q.run ? anchor.run(q.run) : null,
     ),
   /** A Claim's drawer; its canonical route is Review's ?claim= (#56 X1). */
   claim: (duoId: string, claimId: string) => withQuery(`/duos/${duoId}/review`, { claim: claimId }),
@@ -39,36 +47,60 @@ export const links = {
     withQuery(`/duos/${duoId}/knowledge/sources/${sourceId}`, { v: q.v, section: q.section }, q.section),
   /** A Source image. ?r=2 is revalidated on every view through the member check (no-cache), unlike the old URL. */
   sourceImage: (imageId: string) => `/api/sources/images/${imageId}?r=2`,
-  /** Statistics; `params` are the Stats filter params (see packages/shared stats filter). */
-  stats: (duoId: string, params: URLSearchParams | Query = {}) =>
-    params instanceof URLSearchParams
-      ? withQuery(`/duos/${duoId}/stats`, Object.fromEntries(groupParams(params)))
-      : withQuery(`/duos/${duoId}/stats`, params),
+  /**
+   * Statistics; `params` are the Stats filter params (see packages/shared stats filter). `view.map` focuses the
+   * Map view (a country, its Regions, an open Round, its Game shown whole) and `view.rank` a Rankings row (#73);
+   * `view.section` scrolls to a section.
+   */
+  stats: (
+    duoId: string,
+    params: URLSearchParams | Query = {},
+    view: { map?: Partial<MapUrlView>; rank?: string | null; section?: string | null } = {},
+  ) => {
+    const qs = toParams(params);
+    if (view.map) writeMapView(qs, view.map);
+    if (view.rank) qs.set(RANK_PARAM, view.rank);
+    return withQuery(`/duos/${duoId}/stats`, qs, view.section);
+  },
   /** Games index. */
   games: (duoId: string) => `/duos/${duoId}/games`,
-  /** A Game. */
-  game: (duoId: string, gameId: string) => `/duos/${duoId}/games/${gameId}`,
-  /** A Round by its stored number; null for X7's non-positive numbers (they never link). */
-  round: (duoId: string, gameId: string, roundNumber: number, q: { location?: boolean } = {}) =>
+  /** A Game; `round` or `learning` scrolls to and highlights that item (#73), `section` a page section. */
+  game: (duoId: string, gameId: string, q: { round?: string | null; learning?: string | null; section?: string | null } = {}) =>
+    withQuery(`/duos/${duoId}/games/${gameId}`, {}, q.round ? anchor.round(q.round) : q.learning ? anchor.learning(q.learning) : q.section),
+  /**
+   * A Round by its stored number; null for X7's non-positive numbers (they never link). `location` shows the exact
+   * location (#location); `learning` scrolls to one of its Learnings (#73), `section` a page section.
+   */
+  round: (
+    duoId: string,
+    gameId: string,
+    roundNumber: number,
+    q: { location?: boolean; learning?: string | null; section?: string | null } = {},
+  ) =>
     roundNumber > 0
-      ? withQuery(`/duos/${duoId}/games/${gameId}/rounds/${roundNumber}`, { location: q.location ? "1" : null }, q.location ? "location" : null)
+      ? withQuery(
+          `/duos/${duoId}/games/${gameId}/rounds/${roundNumber}`,
+          { location: q.location ? "1" : null },
+          q.learning ? anchor.learning(q.learning) : q.location ? "location" : q.section,
+        )
       : null,
   /** Sessions index. */
   sessions: (duoId: string) => `/duos/${duoId}/sessions`,
-  /** A Session; ?run= pins a run (#run-<id>). */
-  session: (duoId: string, sessionId: string, q: { run?: string | null } = {}) =>
-    withQuery(`/duos/${duoId}/sessions/${sessionId}`, { run: q.run }, q.run ? `run-${q.run}` : null),
+  /**
+   * A Session; ?run= pins a run (#run-<id>). `round` or `learning` anchors one item (#73); on the map-first Session
+   * page a Round anchor focuses that Round instead of scrolling to it.
+   */
+  session: (duoId: string, sessionId: string, q: { run?: string | null; round?: string | null; learning?: string | null } = {}) =>
+    withQuery(
+      `/duos/${duoId}/sessions/${sessionId}`,
+      { run: q.run },
+      q.run ? anchor.run(q.run) : q.round ? anchor.round(q.round) : q.learning ? anchor.learning(q.learning) : null,
+    ),
   /** Global Settings (not Duo-scoped). */
   settings: () => "/settings",
   /** Sign-in that returns to `next`. */
   login: (next?: string | null) => withQuery("/login", { next: next && next !== "/" ? next : null }),
 };
-
-function groupParams(params: URLSearchParams): Map<string, string[]> {
-  const out = new Map<string, string[]>();
-  for (const [k, v] of params) out.set(k, [...(out.get(k) ?? []), v]);
-  return out;
-}
 
 /** Entity kinds a chip can stand for (one shape, icon and colour each; see entity-tokens.ts). */
 export type EntityKind = "game" | "round" | "session" | "learning" | "claim" | "source" | "run" | "country";

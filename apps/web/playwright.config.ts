@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
-export const PORT = 5174;
+// E2E_PORT and E2E_DATABASE_URL let two checkouts (worktrees) run the suite side by side.
+export const PORT = Number(process.env.E2E_PORT ?? 5174);
 const E2E_DATABASE_URL =
   process.env.E2E_DATABASE_URL ?? "postgres://geocoach:geocoach@localhost:5432/geocoach_e2e";
 

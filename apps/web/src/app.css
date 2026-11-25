@@ -78,3 +78,17 @@ html[data-recall="pending"] .recall-mask-content {
 html:not([data-recall="on"]):not([data-recall="pending"]) .recall-mask-placeholder {
   display: none !important;
 }
+
+/* An element a URL's #anchor points at (#73, anchors.ts): highlighted for a moment after the scroll. */
+[data-anchored] {
+  animation: anchored 2.4s ease-out;
+}
+@keyframes anchored {
+  0%,
+  40% {
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent;
+  }
+}

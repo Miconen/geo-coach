@@ -19,7 +19,9 @@
   import { entityHref, links } from "$lib/links.js";
   import ClaimDrawer from "$lib/components/ClaimDrawer.svelte";
   import { parseCountryParam } from "$lib/country-param.js";
-  import { updateQuery } from "$lib/stats/url-query.js";
+  import { updateQuery, viewParams } from "$lib/url-state.js";
+  import { readEnumParam, setParam } from "$lib/view-url.js";
+  import { anchor, parseAnchor } from "$lib/anchors.js";
   import type { ClaimPayload } from "$lib/server/entities/knowledge.js";
   import { gameTitle, roundLabel, sessionTitle } from "$lib/entity-titles.js";
   import { getDuoStream } from "$lib/live/context.js";
@@ -90,10 +92,25 @@
   function isInteractive(el: HTMLElement | null): boolean {
     return Boolean(el?.closest("button, a[href], input, textarea, select, summary, [contenteditable], [role='button']"));
   }
-  let inspectorTab = $state<"provenance" | "game">("provenance");
+  // The inspector tab is in the URL (#73, ?tab=game), replacing the history entry like a filter.
+  const inspectorTab = $derived(readEnumParam(viewParams(), "tab", ["provenance", "game"] as const) ?? "provenance");
+  function setInspectorTab(tab: "provenance" | "game") {
+    updateQuery((params) => setParam(params, "tab", tab === "provenance" ? null : tab));
+  }
   // A ?learning= deep link pins that Learning, even when the current filters hide it.
   const pinnedLearningId = (() => page.url.searchParams.get("learning"))();
   let selectedLearningId = $state<string | null>(pinnedLearningId);
+  // A #learning-… or #round-… anchor (#73) selects that Learning (or the first one from that Round); the Duo
+  // layout then scrolls to it and highlights it.
+  onMount(() => {
+    const target = parseAnchor(location.hash);
+    if (!wb || !target || pinnedLearningId) return;
+    if (target.kind === "learning" && wb.learnings.some((l) => l.id === target.id)) selectedLearningId = target.id;
+    if (target.kind === "round") {
+      const from = filteredLearnings.find((l) => l.roundIds.includes(target.id)) ?? wb.learnings.find((l) => l.roundIds.includes(target.id));
+      if (from) selectedLearningId = from.id;
+    }
+  });
 
   // Live SSE heartbeat statuses
   let sseLiveStatuses = $state<typeof data.workbench extends null ? never : NonNullable<typeof data.workbench>["liveStatuses"] | null>(null);
@@ -801,6 +818,7 @@
                 {@const isRevealed = Boolean(revealedIds[item.id])}
                 {@const gameLinks = learningGameLinks(wb, item.roundIds)}
                 <div
+                  id={anchor.learning(item.id)}
                   data-learning-row={item.id}
                   data-selected={isSelected ? "1" : undefined}
                   class="relative rounded-xl border bg-[var(--surface)] transition-colors {isSelected
@@ -945,7 +963,7 @@
 
           <div class="flex items-center gap-2 border-b border-[var(--border)] pb-2 text-xs">
             <button
-              onclick={() => (inspectorTab = "provenance")}
+              onclick={() => setInspectorTab("provenance")}
               class="rounded-md px-2.5 py-1 font-semibold {inspectorTab === 'provenance'
                 ? 'bg-[var(--accent-soft)] text-[var(--accent-soft-ink)]'
                 : 'text-[var(--muted)]'}"
@@ -954,7 +972,7 @@
             </button>
             {#if primaryGame && activeLearningRevealed}
               <button
-                onclick={() => (inspectorTab = "game")}
+                onclick={() => setInspectorTab("game")}
                 class="rounded-md px-2.5 py-1 font-semibold {inspectorTab === 'game'
                   ? 'bg-[var(--accent-soft)] text-[var(--accent-soft-ink)]'
                   : 'text-[var(--muted)]'}"
@@ -1118,17 +1136,19 @@
               {#each activeLearning.roundIds as rId}
                 {@const slice = roundSource ? roundSlice(roundSource, rId) : null}
                 {#if slice}
-                  <Masked block revealed={activeItemRevealed}>
-                    {#snippet placeholder()}
-                      <RoundCoachingCard round={slice.round} utterances={slice.utterances} players={slice.players} recallHidden />
-                    {/snippet}
-                    <RoundCoachingCard
-                      round={slice.round}
-                      utterances={slice.utterances}
-                      players={slice.players}
-                      onSelectUtterance={openUtterance}
-                    />
-                  </Masked>
+                  <div id={anchor.round(rId)} class="rounded-xl">
+                    <Masked block revealed={activeItemRevealed}>
+                      {#snippet placeholder()}
+                        <RoundCoachingCard round={slice.round} utterances={slice.utterances} players={slice.players} recallHidden />
+                      {/snippet}
+                      <RoundCoachingCard
+                        round={slice.round}
+                        utterances={slice.utterances}
+                        players={slice.players}
+                        onSelectUtterance={openUtterance}
+                      />
+                    </Masked>
+                  </div>
                 {/if}
               {/each}
 

@@ -6,6 +6,7 @@
   import { page } from "$app/state";
   import ThemeSwitcher from "$lib/components/ThemeSwitcher.svelte";
   import { followHash } from "$lib/anchors.js";
+  import { DUO_SECTIONS, duoSection } from "$lib/duo-sections.js";
   import { links } from "$lib/links.js";
   import { setDuoStream } from "$lib/live/context.js";
   import { needsRefresh } from "$lib/live/dependencies.js";
@@ -69,16 +70,11 @@
     return () => window.removeEventListener("hashchange", followLocationHash);
   });
 
-  const SECTIONS = [
-    { key: "review", label: "Review", href: (id: string) => links.review(id) },
-    { key: "games", label: "Games", href: (id: string) => links.games(id) },
-    { key: "sessions", label: "Sessions", href: (id: string) => links.sessions(id) },
-    { key: "knowledge", label: "Knowledge", href: (id: string) => links.knowledge(id) },
-    { key: "stats", label: "Stats", href: (id: string) => links.stats(id) },
-  ] as const;
   // Entity pages add their own crumbs below the section (the parent first, then the page itself).
   const crumbs = $derived((page.data.crumbs ?? []) as Array<{ label: string; href?: string }>);
-  const current = $derived(SECTIONS.find((s) => page.route.id?.startsWith(`/duos/[duoId=uuid]/${s.key}`)) ?? null);
+  // The nav highlights the section (#75); the breadcrumb already starts at Home, so it names only the others.
+  const section = $derived(duoSection(page.route.id));
+  const current = $derived(section?.key === "home" ? null : section);
 
   // Pending extract ranges and worker status, fetched lazily (never part of the layout load).
   const pendingWork = new PendingWorkStore(
@@ -133,12 +129,12 @@
         {/if}
       </ol>
       <div class="flex flex-wrap items-center gap-1.5">
-        {#each SECTIONS as s}
+        {#each DUO_SECTIONS as s}
           <a
             href={s.href(duoId)}
             data-testid="section-{s.key}"
-            aria-current={current?.key === s.key ? "page" : undefined}
-            class="rounded-lg px-2.5 py-1 font-medium {current?.key === s.key
+            aria-current={section?.key === s.key ? "page" : undefined}
+            class="rounded-lg px-2.5 py-1 font-medium {section?.key === s.key
               ? 'bg-[var(--accent-soft)] text-[var(--accent-soft-ink)]'
               : 'text-[var(--ink)] hover:bg-[var(--surface-hover)]'}">{s.label}</a
           >

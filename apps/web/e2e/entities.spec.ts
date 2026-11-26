@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { login, openSessionDetails, seed, withSql } from "./helpers.js";
+import { followBackLink, login, openDetails, seed, withSql } from "./helpers.js";
 
 // #56 2a(ii): Game, Round and Session pages, their links from existing surfaces, live refresh and Recall.
 const s = seed();
@@ -55,17 +55,20 @@ test.describe("entity pages", () => {
     await expect(page).toHaveURL(/\/games\/[0-9a-f-]{36}$/);
     await onlyOneH1(page, /^vs /);
     await expect(page.getByTestId("breadcrumb")).toContainText("Games");
+    // The Game page's Rounds, Sessions and runs sit in its details drawer (#82).
+    await openDetails(page);
     await expectNoDeadChips(page);
     await page.getByTestId("round-strip").getByRole("link").first().click();
     await expect(page).toHaveURL(/\/rounds\/\d+$/);
     await onlyOneH1(page, /· Round \d+$/);
     await expect(page.getByTestId("breadcrumb")).toContainText("vs ");
-    await page.getByTestId("back-link").click();
+    await followBackLink(page);
     await expect(page).toHaveURL(/\/games\/[0-9a-f-]{36}$/);
+    await openDetails(page);
     await page.getByTestId("game-sessions").getByRole("link").first().click();
     await expect(page).toHaveURL(new RegExp(`/sessions/${s.sessionId}$`));
     await onlyOneH1(page, /^Session /);
-    await openSessionDetails(page);
+    await openDetails(page);
     await expect(page.locator(`#run-${s.runId}`)).toBeVisible();
     await expectNoDeadChips(page);
     // Reciprocal: the Session lists the Game that listed it, as "Game N" (no Opponent names, #79).
@@ -78,7 +81,7 @@ test.describe("entity pages", () => {
     await page.waitForLoadState("networkidle");
     await page.locator(`[data-testid="session-link"][data-session-id="${s.sessionId}"]`).click();
     await expect(page).toHaveURL(new RegExp(`/sessions/${s.sessionId}$`));
-    await openSessionDetails(page);
+    await openDetails(page);
     await page.getByTestId("session-games").getByRole("link", { name: /^Game \d+$/ }).first().click();
     await expect(page).toHaveURL(/\/games\/[0-9a-f-]{36}$/);
 
@@ -114,7 +117,7 @@ test.describe("entity pages", () => {
   test("a stored Round 0 renders as plain text everywhere and /rounds/0 is 404", async ({ page }) => {
     const zero = game2.rounds.find((r) => r.roundNumber === 0);
     expect(zero).toBeTruthy();
-    await page.goto(`${duo}/games/${game2.id}`);
+    await page.goto(`${duo}/games/${game2.id}?drawer=details`);
     await expect(page.getByTestId("round-strip").locator('[data-entity-text="round"]', { hasText: "Round 0" })).toHaveCount(1);
     await expect(page.getByTestId("round-strip").getByRole("link", { name: /^Round 0/ })).toHaveCount(0);
     expect((await page.goto(`${duo}/games/${game2.id}/rounds/0`))!.status()).toBe(404);
@@ -123,7 +126,7 @@ test.describe("entity pages", () => {
   });
 
   test("Game provenance: run-wide and Game-scoped counts, and the owning Session's anchor link", async ({ page }) => {
-    await page.goto(`${duo}/games/${game1.id}`);
+    await page.goto(`${duo}/games/${game1.id}?drawer=details`);
     await page.getByTestId("game-runs").locator("summary").click();
     const row = page.locator(`[data-testid="game-run"][data-run-id="${s.runId}"]`);
     await expect(row.getByTestId("run-wide-counts")).toContainText("Learnings: 2 current of 2 surviving");
@@ -232,19 +235,18 @@ test.describe("entity pages", () => {
   test("keyboard walkthrough: Round to Game to Session to runs, with reciprocal links", async ({ page }) => {
     const round = game1.rounds.find((r) => r.roundNumber === 1)!;
     await page.goto(`${duo}/games/${game1.id}/rounds/${round.roundNumber}`);
-    await page.waitForLoadState("networkidle");
-    await page.getByTestId("back-link").focus();
-    await page.keyboard.press("Enter");
+    await followBackLink(page);
     await expect(page).toHaveURL(new RegExp(`/games/${game1.id}$`));
+    await openDetails(page);
     await page.getByTestId("game-sessions").getByRole("link").first().focus();
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(new RegExp(`/sessions/${s.sessionId}$`));
-    await openSessionDetails(page);
+    await openDetails(page);
     await page.getByTestId("session-games").getByRole("link").first().focus();
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/games\/[0-9a-f-]{36}$/);
     await page.goBack();
-    await openSessionDetails(page);
+    await openDetails(page);
     await page.locator(`#run-${s.runId}`).getByRole("link", { name: /^run / }).focus();
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(new RegExp(`\\?run=${s.runId}#run-${s.runId}$`));
@@ -274,19 +276,34 @@ test("Back-with-Recall: cold Round links and Back never reveal", async ({ page }
   await page.goto("/settings");
   await page.evaluate((k) => localStorage.setItem(k, "1"), `recall:v1:${s.mikoId}:${s.duoId}`);
   const round = game1.rounds.find((r) => r.roundNumber === 1)!;
-  await page.goto(`${duo}/games/${game1.id}/rounds/${round.roundNumber}?location=1#location`);
-  await expect(page.getByTestId("round-location").locator(".recall-mask-content")).toBeHidden();
+  await page.goto(`${duo}/games/${game1.id}/rounds/${round.roundNumber}?drawer=details`);
+  // The map keeps the answer behind its Reveal; the speech behind its own.
+  await expect(page.getByTestId("debrief-reveal")).toBeVisible();
   const speech = page.getByTestId("round-speech");
   await speech.locator("summary").click();
   await expect(speech.getByText("You go Spain", { exact: false }).filter({ visible: true })).toHaveCount(0);
   await speech.getByTestId("round-reveal").click();
   await expect(speech.getByText("You go Spain", { exact: false }).filter({ visible: true }).first()).toBeVisible();
-  await page.getByTestId("back-link").click();
+  await followBackLink(page);
   await expect(page).toHaveURL(new RegExp(`/games/${game1.id}$`));
   await page.goBack();
-  await page.getByTestId("round-speech").locator("summary").click();
+  await expect(page.getByTestId("debrief-reveal")).toBeVisible();
   await expect(page.getByTestId("round-speech").getByText("You go Spain", { exact: false }).filter({ visible: true })).toHaveCount(0);
+  // The Round panel's Learnings, behind the drawer until it closes.
+  await page.getByTestId("chip-details").click();
+  await expect(page.getByTestId("debrief-panel")).toBeVisible();
   await expect(page.locator('[data-answer="learning-text"]').filter({ visible: true }).first()).toHaveText(/Hidden/);
+});
+
+test("?location=1 opens a Round already revealed, with its exact location", async ({ page }) => {
+  await login(page, s.mikoId);
+  await page.goto("/settings");
+  await page.evaluate((k) => localStorage.setItem(k, "1"), `recall:v1:${s.mikoId}:${s.duoId}`);
+  const round = game1.rounds.find((r) => r.roundNumber === 1)!;
+  await page.goto(`${duo}/games/${game1.id}/rounds/${round.roundNumber}?location=1#location`);
+  await expect(page.getByTestId("round-location")).toBeVisible();
+  await expect(page.getByTestId("round-location")).toContainText(/-?\d+\.\d{5}, -?\d+\.\d{5}/);
+  await expect(page.getByTestId("debrief-reveal")).toHaveCount(0);
 });
 
 test.describe("entity pages, live", () => {
@@ -322,7 +339,7 @@ test.describe("entity pages, live", () => {
   });
 
   test("an offset that moves speech out of an open Round refreshes it", async ({ page }) => {
-    await page.goto(`${duo}/games/${game1.id}/rounds/${round1().roundNumber}`);
+    await page.goto(`${duo}/games/${game1.id}/rounds/${round1().roundNumber}?drawer=details`);
     await streamOpen(page);
     const speech = page.getByTestId("round-speech");
     await speech.locator("summary").click();
@@ -337,7 +354,7 @@ test.describe("entity pages, live", () => {
   });
 
   test("a correction refreshes an open Round", async ({ page }) => {
-    await page.goto(`${duo}/games/${game1.id}/rounds/${round1().roundNumber}`);
+    await page.goto(`${duo}/games/${game1.id}/rounds/${round1().roundNumber}?drawer=details`);
     await streamOpen(page);
     const speech = page.getByTestId("round-speech");
     await speech.locator("summary").click();
@@ -351,7 +368,7 @@ test.describe("entity pages, live", () => {
 
   test("a Manual Learning cited to another Session's Round relates the Sessions by citation", async ({ page }) => {
     const [u] = await withSql((sql) => sql<{ id: string }[]>`SELECT u.id FROM utterances u JOIN recordings r ON r.id = u.recording_id WHERE r.session_id = ${s.session2Id} LIMIT 1`);
-    await page.goto(`${duo}/games/${game1.id}`);
+    await page.goto(`${duo}/games/${game1.id}?drawer=details`);
     await streamOpen(page);
     const res = await page.request.post("/api/learnings", {
       data: { duoId: s.duoId, kind: "clue", text: "Cross-Session note", detail: null, countries: [], regions: [], topics: [], utteranceIds: [u!.id], roundIds: [round1().id] },

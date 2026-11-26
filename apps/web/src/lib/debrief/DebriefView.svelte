@@ -97,8 +97,10 @@
           : undefined) ?? null,
   );
   const country = $derived(sel.country && /^[A-Za-z]{2}$/.test(sel.country) ? countryView(debrief, sel.country) : null);
-  // Once the selection lives in page.state, a closed drawer stays closed; only a cold load opens the default.
-  const drawerKey = $derived(page.state.query !== undefined ? sel.drawer : (sel.drawer ?? defaultDrawer));
+  // Once the view moves the selection, a closed drawer stays closed; only a cold load opens the default. (Other
+  // view params, like a <details> in the drawer writing ?open=, don't count: they'd close the drawer they live in.)
+  let selected = $state(untrack(() => page.state.query !== undefined));
+  const drawerKey = $derived(selected ? sel.drawer : (sel.drawer ?? defaultDrawer));
   const drawer = $derived(drawerKey === "learnings" || (drawerKey === "details" && details) ? drawerKey : null);
 
   const tally = $derived(record(debrief));
@@ -123,6 +125,7 @@
 
   const go = (patch: Partial<DebriefSelection>, opts?: { replace?: boolean }) => {
     pop = null;
+    selected = true;
     select(patch, opts);
   };
   const focusRound = (id: string) => {
@@ -295,7 +298,7 @@
   {/if}
 {/snippet}
 
-<div class="relative h-[calc(100dvh-4.25rem)] min-h-[560px]" use:mapSlot={map} data-testid="debrief">
+<div class="relative h-[calc(100dvh-4.25rem)] min-h-[560px]" use:mapSlot={map} data-testid="debrief" data-hover-round={hoverRound}>
   {#if round}
     <RoundCallouts {map} {debrief} {round} {masked} {hoverPlayer} />
   {/if}

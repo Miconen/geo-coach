@@ -114,17 +114,20 @@ test("anchors scroll to and highlight Rounds, Learnings and sections on Game, Ro
   await login(page, s.soraId);
   const r = roundOf(2);
 
+  // The map-first Game page (#82) focuses an anchored Round, as the Session page does.
   await page.goto(`${duo}/games/${game1!.id}#round-${r.id}`);
-  await expect(page.locator(`#round-${r.id}`)).toHaveAttribute("data-anchored", "");
-  await expect(page.locator(`#round-${r.id}`)).toBeInViewport();
+  await expect(page).toHaveURL(new RegExp(`round=${r.id}`));
+  await expect(page.getByTestId("scope-title")).toHaveText(/· Round 2$/);
 
-  // A section anchor opens its drawer.
+  // A section anchor opens the details drawer, and the section in it.
   await page.goto(`${duo}/games/${game1!.id}#runs`);
   await expect(page.getByTestId("game-runs")).toHaveAttribute("open", "");
+  await expect(page.getByTestId("game-runs")).toHaveAttribute("data-anchored", "");
 
+  // The Round page's #claims opens its Claims and Evidence tab.
   await page.goto(`${duo}/games/${game1!.id}/rounds/2#claims`);
-  await expect(page.getByTestId("round-claims")).toHaveAttribute("open", "");
-  await expect(page.getByTestId("round-claims")).toHaveAttribute("data-anchored", "");
+  await expect(page.getByTestId("round-claims")).toBeVisible();
+  await expect(page.locator("#claims")).toHaveAttribute("data-anchored", "");
 
   const learning = s.learningIds[0]!;
   await page.goto(`${duo}/review#learning-${learning}`);
@@ -138,6 +141,9 @@ test("drawers and tabs are in the URL, replacing the history entry", async ({ pa
   await page.goto(`${duo}/games/${game1!.id}`);
   await ready(page);
   const before = await historyLength(page);
+  // The Game page's details drawer (#82) and the sections in it.
+  await page.getByTestId("chip-details").click();
+  await expect(page).toHaveURL(/\?drawer=details$/);
   await page.getByTestId("game-runs").locator("summary").click();
   await expect(page).toHaveURL(/open=runs/);
   await page.getByTestId("round-learnings").locator("summary").click();
@@ -147,7 +153,18 @@ test("drawers and tabs are in the URL, replacing the history entry", async ({ pa
   await expect(page.getByTestId("game-runs")).toHaveAttribute("open", "");
   await expect(page.getByTestId("round-learnings")).toHaveAttribute("open", "");
   await page.getByTestId("game-runs").locator("summary").click();
-  await expect(page).toHaveURL(/\?open=learnings$/);
+  await expect(page).toHaveURL(/\?drawer=details&open=learnings$/);
+
+  // The Round page's Claims and Evidence tab replaces too.
+  await page.goto(`${duo}/games/${game1!.id}/rounds/2`);
+  await ready(page);
+  const onRound = await historyLength(page);
+  await page.getByTestId("round-tab-claims").click();
+  await expect(page).toHaveURL(/\?tab=claims$/);
+  await expect(page.getByTestId("round-claims")).toBeVisible();
+  expect(await historyLength(page)).toBe(onRound);
+  await page.reload();
+  await expect(page.getByTestId("round-claims")).toBeVisible();
 });
 
 test("unknown or malformed params are ignored without an error page", async ({ page }) => {

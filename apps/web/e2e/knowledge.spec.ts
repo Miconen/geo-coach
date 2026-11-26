@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { login, seed } from "./helpers.js";
+import { login, openDetails, seed } from "./helpers.js";
 
 // #56 3a: /knowledge, Claim drawers, Source excerpts, Evidence links, Home and the ?r=2 image namespace.
 const s = seed();
@@ -61,7 +61,11 @@ test("Claim Evidence links its Round and Source section; a stored Round 0 stays 
   await expect(roundChip).toHaveAttribute("href", `/duos/${s.duoId}/games/${game1!.id}/rounds/2`);
   await roundChip.click();
   await expect(page).toHaveURL(new RegExp(`/games/${game1!.id}/rounds/2$`));
-  await expect(page.getByTestId("round-claims")).toContainText("Citing Claims (1)");
+  // The Round page lists its citing Claims in a tab beside the transcript (#82).
+  await expect(async () => {
+    await page.getByTestId("round-tab-claims").click();
+    await expect(page.getByTestId("round-claims")).toContainText("Citing Claims (1)", { timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
   await page.goBack();
 
   const sourceChip = claimCard(page, s.claimIds.bollards).locator('[data-entity-chip="source"]');
@@ -165,6 +169,8 @@ test("with Recall on, an Evidence chip to a Round masks its answers when hydrate
   await drawer.getByTestId("claim-drawer-reveal").click();
   await drawer.locator('[data-entity-chip="round"]').click();
   await expect(page).toHaveURL(new RegExp(`/rounds/2$`));
+  await expect(page.getByTestId("debrief-reveal")).toBeVisible();
+  await openDetails(page);
   await page.getByTestId("round-speech").locator("summary").click();
   await expect(page.getByTestId("round-reveal")).toBeVisible();
   await expect(page.getByTestId("round-utterances")).toBeHidden();

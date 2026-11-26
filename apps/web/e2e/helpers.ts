@@ -56,13 +56,21 @@ export async function withSql<T>(fn: (sql: import("postgres").Sql) => Promise<T>
 }
 
 /**
- * Opens the Session page's "Session details" drawer (#79): its Games, processing ranges, run history and full
- * Transcript. Retries until the page has hydrated and the drawer shows.
+ * Opens a debrief page's details drawer: the Session page's "Session details" (#79: its Games, processing ranges,
+ * run history and full Transcript), or the Game and Round pages' details (#82: what those pages held before).
+ * Retries until the page has hydrated and the drawer shows.
  */
-export async function openSessionDetails(page: Page) {
+export async function openDetails(page: Page) {
   const drawer = page.getByTestId("drawer-details");
   await expect(async () => {
     if (!(await drawer.isVisible())) await page.getByTestId("chip-details").click();
     await expect(drawer).toBeVisible({ timeout: 1_000 });
   }).toPass({ timeout: 15_000 });
+}
+
+/** Follows a debrief page's back link: screen-reader only until focused, so by keyboard (#79, #82). */
+export async function followBackLink(page: Page) {
+  await page.waitForLoadState("networkidle");
+  await page.getByTestId("back-link").focus();
+  await page.keyboard.press("Enter");
 }

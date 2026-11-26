@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { login, seed, withSql } from "./helpers.js";
+import { followBackLink, login, openDetails, seed, withSql } from "./helpers.js";
 
 // #56 2b: Stats URL state (ADR 0007), Round-card links, Back and reload, country links and live refresh.
 const s = seed();
@@ -90,7 +90,7 @@ test("traversal from a Stats Round card: a stored Round 0 stays plain text", asy
   await page.locator(`[data-testid="best-guess"][data-round-id="${roundOf(game1, 2).id}"]`).click();
   await page.getByTestId("round-card-link").click();
   await expect(page).toHaveURL(new RegExp(`/games/${game1!.id}/rounds/2$`));
-  await page.getByTestId("back-link").click();
+  await followBackLink(page);
   await expect(page).toHaveURL(new RegExp(`/games/${game1!.id}$`));
 });
 
@@ -103,6 +103,8 @@ test("with Recall on, a Round reached from a Stats card is masked when hydrated 
   await page.getByTestId("round-card-link").click();
   await expect(page).toHaveURL(new RegExp(`/rounds/2$`));
   await expect(page.locator("html")).toHaveAttribute("data-recall", "on");
+  await expect(page.getByTestId("debrief-reveal")).toBeVisible();
+  await openDetails(page);
   await page.getByTestId("round-speech").locator("summary").click();
   await expect(page.getByTestId("round-reveal")).toBeVisible();
   await expect(page.getByTestId("round-utterances")).toBeHidden();

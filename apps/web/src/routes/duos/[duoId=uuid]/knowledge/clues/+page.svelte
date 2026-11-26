@@ -2,7 +2,7 @@
   // Clues (#89): the Duo's Clues by family, to rename and merge (a merge moves every Claim and Round link), and Claim
   // tagging: how much of the bank the current tagger prompt has tagged, and a control that queues the next N Claims
   // for the processing worker (100 first, as the test run before the full backfill). Clues taggers created are marked
-  // "new" so a Player can review them.
+  // "new" so a Player can review them. Round tagging (#95): one control queues `clues` runs for every Session.
   import { links } from "$lib/links.js";
   import { useEntityRefresh } from "$lib/live/entity-refresh.svelte.js";
   import type { CluesPayload } from "$lib/server/entities/clues.js";
@@ -43,6 +43,36 @@
     }
   }
   const tag = () => send(`/api/duos/${duoId}/clues`, "POST", { limit: wholeQueue ? null : limit });
+
+  // Round tagging (#95): extract queues it per Session; this backfills every Session's untagged or stale Rounds.
+  type RoundTagging = { queued: number; alreadyActive: number; sessions: number; skippedRecording: number };
+  let roundsBusy = $state(false);
+  let roundsError = $state<string | null>(null);
+  let roundsResult = $state<RoundTagging | null>(null);
+  async function tagRounds() {
+    roundsBusy = true;
+    roundsError = null;
+    roundsResult = null;
+    try {
+      const res = await fetch(`/api/duos/${duoId}/clues/rounds`, { method: "POST" });
+      const body = (await res.json().catch(() => null)) as (RoundTagging & { error?: string }) | null;
+      if (res.ok && body) roundsResult = body;
+      else roundsError = body?.error ?? "Something went wrong.";
+      if (res.status === 503) await live.refresh();
+    } finally {
+      roundsBusy = false;
+    }
+  }
+  const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
+  const roundsLine = (r: RoundTagging) => {
+    if (r.queued === 0 && r.alreadyActive === 0 && r.skippedRecording === 0) return "Every Session's Rounds are already tagged.";
+    const parts = [
+      r.queued > 0 ? `Queued ${plural(r.queued, "range")} in ${plural(r.sessions, "Session")}` : "Queued nothing new",
+      `${plural(r.alreadyActive, "range")} already queued or running`,
+    ];
+    if (r.skippedRecording > 0) parts.push(`${plural(r.skippedRecording, "Session")} still recording, skipped`);
+    return parts.join(" · ");
+  };
   async function rename() {
     if (editing && (await send(`/api/duos/${duoId}/clues/${editing.id}`, "PATCH", { name: editing.name }))) editing = null;
   }
@@ -134,6 +164,24 @@
         {/each}
       </ul>
     {/if}
+  </section>
+
+  <section class="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-xs" data-testid="round-tagging">
+    <h2 class="font-semibold uppercase tracking-wide text-[var(--muted)]">Tagging Rounds</h2>
+    <p class="text-[11px] text-[var(--muted)]">
+      Processing a Session also tags the Clues said in its Rounds. This queues that for every Session not tagged yet or
+      changed since, except Sessions still recording.
+    </p>
+    <button
+      type="button"
+      class="rounded-md bg-[var(--accent)] px-2.5 py-1 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+      disabled={roundsBusy || !p.workerOnline}
+      title={!p.workerOnline ? "The processing worker is offline" : undefined}
+      data-testid="round-tagging-start"
+      onclick={tagRounds}>{p.workerOnline ? "Tag Rounds in all Sessions" : "Worker offline"}</button
+    >
+    {#if roundsError}<p class="text-[var(--danger)]" role="alert" data-testid="round-tagging-error">{roundsError}</p>{/if}
+    {#if roundsResult}<p data-testid="round-tagging-result">{roundsLine(roundsResult)}</p>{/if}
   </section>
 
   {#each families as [family, clues] (family)}

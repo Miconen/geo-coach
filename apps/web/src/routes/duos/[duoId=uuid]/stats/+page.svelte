@@ -1,6 +1,4 @@
 <script lang="ts">
-  import { page } from "$app/state";
-  import type { Snapshot } from "./$types";
   import {
     EMPTY_STATS_FILTER,
     DEFAULT_SMOOTHING,
@@ -24,7 +22,9 @@
   import EffectsSection from "$lib/stats/EffectsSection.svelte";
   import VersusSection from "$lib/stats/VersusSection.svelte";
   import MapViewSection from "$lib/stats/map/MapViewSection.svelte";
-  import { updateQuery } from "$lib/stats/url-query.js";
+  import { RANK_PARAM } from "$lib/stats/map/view-state.js";
+  import { pushQuery, updateQuery, viewParams } from "$lib/url-state.js";
+  import { readParam, setParam } from "$lib/view-url.js";
   import { useEntityRefresh } from "$lib/live/entity-refresh.svelte.js";
   import type { StatsPayload } from "@geo-coach/shared";
 
@@ -41,26 +41,26 @@
   const stats = $derived(live.current);
 
   let mapView = $state<MapViewSection>();
-  let rankingSelected = $state<string | null>(null);
 
-  // Back restores the open Round card and the selected Rankings row (filters come back from the URL).
-  export const snapshot: Snapshot<{ round: string | null; country: string | null }> = {
-    capture: () => ({ round: mapView?.openRoundId() ?? null, country: rankingSelected }),
-    restore: (s) => {
-      rankingSelected = s.country;
-      if (s.round) mapView?.showRound(s.round, { scroll: false });
-    },
-  };
+  // The selected Rankings row is a focus, in the URL (#73): selecting one adds a history entry, so Back closes it,
+  // and a reload or a shared link reopens it. The Map view keeps its own focus params the same way.
+  const rankingSelected = $derived(readParam(viewParams(), RANK_PARAM, (v) => /^[A-Z]{2}$/.test(v)));
+  function selectRanking(code: string | null) {
+    pushQuery((params) => setParam(params, RANK_PARAM, code));
+  }
 
   // The filter lives in the URL so a view can be bookmarked; changing it never reloads
-  // the payload, since every panel is computed here in the browser (ADR 0003).
-  let filter = $state<StatsFilter>(parseStatsFilter(page.url.searchParams));
+  // the payload, since every panel is computed here in the browser (ADR 0003). It's read
+  // back from the URL (#73), so Back to an earlier focus shows the filter it had; keyed by
+  // its serialized form, so a focus change alone never refilters.
+  const filterKey = $derived(serializeStatsFilter(parseStatsFilter(viewParams())).toString());
+  const filter = $derived<StatsFilter>(parseStatsFilter(new URLSearchParams(filterKey)));
 
   const filtered = $derived(applyFilter(stats, filter));
 
   // How much the time-series charts are smoothed. Not part of the filter (it never
   // narrows the Rounds), but kept in the URL next to it so a view can be bookmarked.
-  let smoothing = $state<SmoothingLevel>(parseSmoothing(page.url.searchParams));
+  const smoothing = $derived<SmoothingLevel>(parseSmoothing(viewParams()));
 
   const SMOOTHING_LABELS: Record<SmoothingLevel, string> = {
     off: "Off",
@@ -70,7 +70,6 @@
   };
 
   function setSmoothing(next: SmoothingLevel) {
-    smoothing = next;
     updateQuery((params) => {
       if (next === DEFAULT_SMOOTHING) params.delete(SMOOTHING_PARAM);
       else params.set(SMOOTHING_PARAM, next);
@@ -97,7 +96,6 @@
   const isFiltered = $derived(serializeStatsFilter(filter).toString() !== "");
 
   function setFilter(next: StatsFilter) {
-    filter = next;
     updateQuery((params) => {
       for (const key of STATS_FILTER_PARAMS) params.delete(key);
       for (const [key, value] of serializeStatsFilter(next)) params.append(key, value);
@@ -300,7 +298,7 @@
         </div>
       {:else if section.id === "rankings"}
         <div class="mt-3">
-          <RankingsSection duoId={data.duo.id} payload={stats} {filter} bind:selected={rankingSelected} />
+          <RankingsSection duoId={data.duo.id} payload={stats} {filter} bind:selected={() => rankingSelected, selectRanking} />
         </div>
       {:else if section.id === "versus"}
         <div class="mt-3">

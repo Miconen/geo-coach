@@ -3,6 +3,7 @@
   // numbers render as plain text, never a link.
   import type { WorkbenchRound } from "$lib/server/workbench/view-model.js";
   import EntityChip from "./EntityChip.svelte";
+  import { anchor } from "$lib/anchors.js";
   import { entityHref } from "$lib/links.js";
   import { roundLabel } from "$lib/entity-titles.js";
 
@@ -17,7 +18,7 @@
 
 <ol class="flex flex-wrap gap-1.5" data-testid="round-strip">
   {#each rounds as r (r.id)}
-    <li class="flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs">
+    <li id={anchor.round(r.id)} class="flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs">
       <EntityChip
         kind="round"
         label={roundLabel(r)}

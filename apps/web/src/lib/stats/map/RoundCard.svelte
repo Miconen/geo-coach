@@ -207,6 +207,7 @@
   type="button"
   class="mt-3 w-full rounded-full py-1.5 text-sm font-semibold {gameShown ? 'bg-yellow-400 text-black' : 'bg-white/10 hover:bg-white/20'}"
   onclick={ontogglegame}
+  data-testid="round-card-show-game"
 >
   {gameShown ? "Hide the other Rounds" : `Show all ${gameState.roundCount} Rounds of this Game`}
 </button>
@@ -219,6 +220,8 @@
           type="button"
           class="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left hover:bg-white/10 {x.id === round.id ? 'bg-white/10' : ''}"
           onclick={() => onopenround(x.id)}
+          data-testid="round-card-game-round"
+          data-round-id={x.id}
         >
           <span class="w-6 font-mono text-xs text-yellow-300">R{x.roundNumber}</span>
           <Flag code={x.countryCode} size="sm" />

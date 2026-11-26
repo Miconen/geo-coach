@@ -1,6 +1,65 @@
 import type { Polygon } from "geojson";
+import { isValidIsoCountryCode, regionName } from "@geo-coach/shared";
+import { isUuid } from "../../uuid.js";
+import { readListParam, readParam, setListParam, setParam } from "../../view-url.js";
 
 // What the Map view is looking at, as plain data, and how Esc steps back out of it.
+
+/**
+ * The part of the Map view that is in the URL (#73): what is focused, never the camera (worked out from the
+ * selection) or the drawing tool. Keys stay clear of the Stats filter's (`country` there filters every panel).
+ */
+export interface MapUrlView {
+  /** ?focus=DE: the focused country. */
+  country: string | null;
+  /** ?region=DE-BY (repeated): its selected Regions. */
+  regions: string[];
+  /** ?round=<uuid>: the open Round card. */
+  roundId: string | null;
+  /** ?allRounds=1: "Show all x Rounds of this Game" for the open Round. */
+  allRounds: boolean;
+}
+
+export const MAP_VIEW_PARAMS = { country: "focus", regions: "region", roundId: "round", allRounds: "allRounds" } as const;
+/** ?rank=DE: the selected Rankings row. */
+export const RANK_PARAM = "rank";
+
+const isCountry = (v: string) => v.length === 2 && v === v.toUpperCase() && isValidIsoCountryCode(v);
+
+/** Reads the Map view's params; a malformed or inconsistent one (a Region without its country) is ignored. */
+export function parseMapView(params: URLSearchParams): MapUrlView {
+  const country = readParam(params, MAP_VIEW_PARAMS.country, isCountry);
+  const regions = country
+    ? readListParam(params, MAP_VIEW_PARAMS.regions, (v) => v.startsWith(`${country}-`) && regionName(v) !== null)
+    : [];
+  const roundId = readParam(params, MAP_VIEW_PARAMS.roundId, isUuid)?.toLowerCase() ?? null;
+  const allRounds = roundId !== null && params.get(MAP_VIEW_PARAMS.allRounds) === "1";
+  return { country, regions, roundId, allRounds };
+}
+
+/** Writes the Map view's params, replacing any there were; fields left out are cleared. */
+export function writeMapView(params: URLSearchParams, view: Partial<MapUrlView>): void {
+  const roundId = view.roundId ?? null;
+  setParam(params, MAP_VIEW_PARAMS.country, view.country ?? null);
+  setListParam(params, MAP_VIEW_PARAMS.regions, view.country ? (view.regions ?? []) : []);
+  setParam(params, MAP_VIEW_PARAMS.roundId, roundId);
+  setParam(params, MAP_VIEW_PARAMS.allRounds, roundId !== null && Boolean(view.allRounds));
+}
+
+/** The URL part of an explorer view. */
+export function mapUrlViewOf(view: ExplorerView): MapUrlView {
+  return { country: view.country, regions: view.regions, roundId: view.roundId, allRounds: view.gameId !== null };
+}
+
+export function sameMapUrlView(a: MapUrlView, b: MapUrlView): boolean {
+  return (
+    a.country === b.country &&
+    a.roundId === b.roundId &&
+    a.allRounds === b.allRounds &&
+    a.regions.length === b.regions.length &&
+    a.regions.every((r, i) => r === b.regions[i])
+  );
+}
 
 /** Press-drag-release drawing tools; "pan" is the map's own dragging. */
 export type DrawTool = "pan" | "lasso" | "box";

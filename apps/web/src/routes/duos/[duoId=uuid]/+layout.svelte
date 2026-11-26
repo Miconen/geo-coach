@@ -2,9 +2,10 @@
   // Duo chrome (#56 1b-shell): breadcrumb and where-am-I, section nav, Duo switcher, pending-work badge.
   // Children are keyed by Duo, so switching Duos never reuses one Duo's page state for another.
   import { onMount, untrack } from "svelte";
-  import { beforeNavigate, goto } from "$app/navigation";
+  import { afterNavigate, beforeNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import ThemeSwitcher from "$lib/components/ThemeSwitcher.svelte";
+  import { followHash } from "$lib/anchors.js";
   import { links } from "$lib/links.js";
   import { setDuoStream } from "$lib/live/context.js";
   import { needsRefresh } from "$lib/live/dependencies.js";
@@ -51,6 +52,21 @@
       pendingWork.dispose();
       clearRecallAttribute();
     };
+  });
+
+  // Id anchors (#73): a URL's #round-…, #learning-… or section anchor scrolls to and highlights its element, on a
+  // cold load, after a link navigation and on a hash change. An element that renders late gets two retries.
+  function followLocationHash() {
+    const hash = location.hash;
+    if (!hash || followHash(hash)) return;
+    for (const ms of [250, 1000]) setTimeout(() => location.hash === hash && followHash(hash), ms);
+  }
+  afterNavigate((nav) => {
+    if (nav.type !== "popstate") followLocationHash();
+  });
+  onMount(() => {
+    window.addEventListener("hashchange", followLocationHash);
+    return () => window.removeEventListener("hashchange", followLocationHash);
   });
 
   const SECTIONS = [

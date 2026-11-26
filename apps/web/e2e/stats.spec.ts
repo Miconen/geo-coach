@@ -60,21 +60,24 @@ test("a Stats Round card links its Round page without a map token; Back restores
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Round 2");
   expect(await page.evaluate(() => (window as unknown as { __spa?: number }).__spa)).toBe(1);
 
+  // The open Round is a focus in the URL (#73).
+  const statsWithRound = new RegExp(`/stats\\?smooth=light&round=${g2r2.id}$`);
   await page.goBack();
-  await expect(page).toHaveURL(new RegExp(`/stats\\?smooth=light$`));
+  await expect(page).toHaveURL(statsWithRound);
   await expect(page.getByTestId("round-card-link")).toHaveAttribute("href", `/duos/${s.duoId}/games/${game2!.id}/rounds/2`);
   await expect(filterBar(page).locator("label", { hasText: "Smoothing" }).locator("select")).toHaveValue("light");
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(scrollBefore - 80);
   expect(await page.evaluate(() => window.scrollY)).toBeLessThan(scrollBefore + 80);
 
-  // Round -> Back -> reload keeps the address bar (and the selection, from the session snapshot).
+  // Round -> Back -> reload keeps the address bar and the selection.
   await page.getByTestId("round-card-link").click();
   await expect(page).toHaveURL(new RegExp(`/rounds/2$`));
   await page.goBack();
-  await expect(page).toHaveURL(new RegExp(`/stats\\?smooth=light$`));
+  await expect(page).toHaveURL(statsWithRound);
   await page.reload();
-  await expect(page).toHaveURL(new RegExp(`/stats\\?smooth=light$`));
+  await expect(page).toHaveURL(statsWithRound);
   await expect(filterBar(page).locator("label", { hasText: "Smoothing" }).locator("select")).toHaveValue("light");
+  await expect(page.getByTestId("round-card-link")).toHaveAttribute("href", `/duos/${s.duoId}/games/${game2!.id}/rounds/2`);
 });
 
 test("traversal from a Stats Round card: a stored Round 0 stays plain text", async ({ page }) => {

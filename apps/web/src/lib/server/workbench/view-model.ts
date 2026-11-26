@@ -42,6 +42,7 @@ import {
   utterances,
 } from "../db/schema.js";
 import { duoEventBus, type PlayerLiveStatus } from "../events/bus.js";
+import { keptDerivedRoundIds } from "./learning-rounds.js";
 import {
   DomainError,
   deriveClaims,
@@ -909,22 +910,33 @@ export async function buildWorkbenchData(
     .map((l) => {
       for (const t of l.topics) allTopicsSet.add(t);
 
-      // Derive Rounds from source Utterances overlapping Round time windows
-      const derivedRoundSet = new Set<string>();
-      for (const uId of l.utteranceIds) {
+      // Derive Rounds from source Utterances overlapping Round time windows, kept to the ones it's about (#87)
+      const citedCountByRound = new Map<string, number>();
+      for (const uId of new Set(l.utteranceIds)) {
         const u = utterancesById[uId];
         if (!u) continue;
         const uInterval = { startedAt: new Date(u.startedAt), endedAt: new Date(u.endedAt) };
         for (const [rId, b] of roundDateBounds.entries()) {
           if (intervalsOverlap(uInterval, { startedAt: b.start, endedAt: b.end })) {
-            derivedRoundSet.add(rId);
+            citedCountByRound.set(rId, (citedCountByRound.get(rId) ?? 0) + 1);
           }
         }
       }
+      const derivedRoundSet = new Set(
+        keptDerivedRoundIds(
+          [...citedCountByRound].map(([rId, citedCount]) => ({
+            roundId: rId,
+            citedCount,
+            answerCountry: roundsById[rId]!.countryCode,
+            guesses: roundsById[rId]!.guesses,
+          })),
+          l.countries,
+        ),
+      );
 
       const explicitRoundIds = l.explicitRoundIds;
-      const debriefRoundIds = explicitRoundIds.filter((rId) => !derivedRoundSet.has(rId));
-      if (derivedRoundSet.size === 0 && explicitRoundIds.length === 0) {
+      const debriefRoundIds = explicitRoundIds.filter((rId) => !citedCountByRound.has(rId));
+      if (citedCountByRound.size === 0 && explicitRoundIds.length === 0) {
         const earliest = l.utteranceIds
           .flatMap((uId) => (utterancesById[uId] ? [utterancesById[uId]!] : []))
           .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))[0];

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { login, seed } from "./helpers.js";
+import { login, openSessionDetails, seed } from "./helpers.js";
 
 // #56 0b: run history in the existing pane, ?run= deep links (X2) and Session selection.
 const s = seed();
@@ -49,6 +49,7 @@ test("Review's Session links open Session pages; rapid switches show the last Se
   }
   await two.click();
   await expect(page).toHaveURL(new RegExp(`/sessions/${s.session2Id}$`));
+  await openSessionDetails(page);
   const timeline = page.getByTestId("run-timeline");
   await expect(timeline.locator(`[data-run-id="${s.run2Id}"]`)).toBeVisible();
   await expect(timeline.locator(`[data-run-id="${s.runId}"]`)).toHaveCount(0);

@@ -24,6 +24,11 @@ export function pushQuery(mutate: (params: URLSearchParams) => void, opts: { has
   const href = nextViewHref(location, mutate, opts.hash);
   // A focus change that changes nothing adds no entry (a repeated click, a restore from Back).
   if (href === `${location.pathname}${location.search}${location.hash}`) return;
+  // Stamp the entry we're leaving with its own query first: a cold-loaded entry has no page.state.query, so Back
+  // to it after a reload would read page.url, which a reload of a later entry has moved on.
+  if (page.state.query === undefined) {
+    replaceState(`${location.pathname}${location.search}${location.hash}`, { ...page.state, query: location.search });
+  }
   pushState(href, { ...page.state, query: new URL(href, location.origin).search });
 }
 

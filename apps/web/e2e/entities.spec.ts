@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { login, seed, withSql } from "./helpers.js";
+import { login, openSessionDetails, seed, withSql } from "./helpers.js";
 
 // #56 2a(ii): Game, Round and Session pages, their links from existing surfaces, live refresh and Recall.
 const s = seed();
@@ -65,10 +65,11 @@ test.describe("entity pages", () => {
     await page.getByTestId("game-sessions").getByRole("link").first().click();
     await expect(page).toHaveURL(new RegExp(`/sessions/${s.sessionId}$`));
     await onlyOneH1(page, /^Session /);
+    await openSessionDetails(page);
     await expect(page.locator(`#run-${s.runId}`)).toBeVisible();
     await expectNoDeadChips(page);
-    // Reciprocal: the Session lists the Game that listed it.
-    await expect(page.getByTestId("session-games").getByRole("link", { name: /vs / }).first()).toBeVisible();
+    // Reciprocal: the Session lists the Game that listed it, as "Game N" (no Opponent names, #79).
+    await expect(page.getByTestId("session-games").getByRole("link", { name: /^Game \d+$/ }).first()).toBeVisible();
   });
 
   test("traversal from the Session Game control and the Learning inspector", async ({ page }) => {
@@ -77,7 +78,8 @@ test.describe("entity pages", () => {
     await page.waitForLoadState("networkidle");
     await page.locator(`[data-testid="session-link"][data-session-id="${s.sessionId}"]`).click();
     await expect(page).toHaveURL(new RegExp(`/sessions/${s.sessionId}$`));
-    await page.getByTestId("session-games").getByRole("link", { name: /vs / }).first().click();
+    await openSessionDetails(page);
+    await page.getByTestId("session-games").getByRole("link", { name: /^Game \d+$/ }).first().click();
     await expect(page).toHaveURL(/\/games\/[0-9a-f-]{36}$/);
 
     await page.goto(`${duo}/review?learning=${s.learningIds[0]}`);
@@ -143,7 +145,7 @@ test.describe("entity pages", () => {
       return { zero, open };
     });
     try {
-      await page.goto(`${duo}/sessions/${s.sessionId}`);
+      await page.goto(`${duo}/sessions/${s.sessionId}?drawer=details`);
       const first = page.locator(`#run-${s.runId}`);
       await expect(first.getByTestId("run-counts")).toContainText("Learnings: 0 current of 2 surviving");
       await expect(first.getByTestId("run-superseded")).toContainText("2 outputs displaced, no replacement output");
@@ -237,10 +239,12 @@ test.describe("entity pages", () => {
     await page.getByTestId("game-sessions").getByRole("link").first().focus();
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(new RegExp(`/sessions/${s.sessionId}$`));
+    await openSessionDetails(page);
     await page.getByTestId("session-games").getByRole("link").first().focus();
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/games\/[0-9a-f-]{36}$/);
     await page.goBack();
+    await openSessionDetails(page);
     await page.locator(`#run-${s.runId}`).getByRole("link", { name: /^run / }).focus();
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(new RegExp(`\\?run=${s.runId}#run-${s.runId}$`));
@@ -296,7 +300,7 @@ test.describe("entity pages, live", () => {
   };
 
   test("a stale recording heartbeat after the committed stop does not mark the Session recording", async ({ page }) => {
-    await page.goto(`${duo}/sessions/${s.sessionId}`);
+    await page.goto(`${duo}/sessions/${s.sessionId}?drawer=details`);
     await streamOpen(page);
     const token = ((await (await page.request.post("/api/tokens", { data: { scope: "companion", label: "e2e-hb" } })).json()) as { rawToken: string }).rawToken;
     const hb = await page.request.post("/api/companion/heartbeat", {
@@ -356,7 +360,7 @@ test.describe("entity pages, live", () => {
     const { id } = (await res.json()) as { id: string };
     try {
       await expect(page.getByTestId("game-sessions")).toContainText("Related by citation");
-      await page.goto(`${duo}/sessions/${s.session2Id}`);
+      await page.goto(`${duo}/sessions/${s.session2Id}?drawer=details`);
       await expect(page.getByTestId("session-games")).toContainText("Related by citation");
     } finally {
       await withSql((sql) => sql`DELETE FROM learnings WHERE id = ${id}`);
@@ -375,7 +379,7 @@ test.describe("entity pages, live", () => {
       return { ids, claimId: crypto.randomUUID() };
     });
     try {
-      await page.goto(`${duo}/sessions/${s.session2Id}`);
+      await page.goto(`${duo}/sessions/${s.session2Id}?drawer=details`);
       await streamOpen(page);
       const rows = page.getByTestId("run-row");
       await page.getByRole("button", { name: /^Show \d+ older$/ }).click();

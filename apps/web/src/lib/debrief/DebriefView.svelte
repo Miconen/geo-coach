@@ -19,6 +19,8 @@
   import Damage from "./Damage.svelte";
   import RoundCallouts from "./RoundCallouts.svelte";
   import RoundTranscript from "./RoundTranscript.svelte";
+  import SaidAloud from "./SaidAloud.svelte";
+  import { LENS_COLORS, playerInk } from "$lib/player-color.js";
   import { anchoredRoundId, readSelection, select, type DebriefSelection } from "./selection.js";
   import type { Debrief, DebriefGame, DebriefRound, DebriefScope } from "./types.js";
   import {
@@ -193,6 +195,7 @@
   const signTone = (n: number | null) => (n === null ? "" : n >= 0 ? "text-[var(--ok)]" : "text-[var(--danger)]");
   const resultTone = (won: boolean | null) => (won ? "text-[var(--ok)]" : won === false ? "text-[var(--danger)]" : "text-[var(--muted)]");
   const panel = "rounded-xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_90%,transparent)] shadow-xl backdrop-blur";
+  const saidInk = playerInk(LENS_COLORS.saidAloud);
   const chipBtn = "rounded-md px-1.5 py-0.5 text-xs text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink)]";
 </script>
 
@@ -336,7 +339,8 @@
                       >
                         <span>{flag(m.code)}</span>
                         <span class="truncate">{m.name}</span>
-                        {#if m.rounds.length > 1}<span class="ml-auto text-[var(--danger)]">×{m.rounds.length}</span>{/if}
+                        {#if m.rounds.some((r) => r.saidAloud.length)}<span class="ml-auto text-[10px] font-semibold" style="color:{saidInk}" data-testid="said-it">said it</span>{/if}
+                        {#if m.rounds.length > 1}<span class="{m.rounds.some((r) => r.saidAloud.length) ? '' : 'ml-auto'} text-[var(--danger)]">×{m.rounds.length}</span>{/if}
                       </button>
                     </li>
                   {/each}
@@ -383,6 +387,7 @@
           <button type="button" class="text-lg leading-none text-[var(--muted)] hover:text-[var(--ink)]" aria-label="Close" onclick={() => go({ round: null })}>×</button>
         </div>
         <RoundTranscript {debrief} {round} revealed={!masked} onReveal={reveal} onHover={(id) => (hoverPlayer = id)} />
+        <SaidAloud {debrief} {round} revealed={!masked} />
         <h3 class="pt-1 text-[11px] font-semibold uppercase text-[var(--muted)]">Learnings</h3>
         <ul class="space-y-1.5">
           {#each learningsOf(debrief, round.learningIds) as l (l.id)}
@@ -448,7 +453,11 @@
                 <span class="text-[var(--muted)]">Round {r.roundNumber}</span>
                 <Masked revealed={isRevealed(r.id, game.id)} label="?"><span>{flag(r.countryCode)}</span></Masked>
               </span>
-              <span class="flex items-center gap-1.5"><Damage hp={r.hpDelta} /><Masked revealed={isRevealed(r.id, game.id)} label="">{@render km(r)}</Masked></span>
+              <span class="flex items-center gap-1.5"
+                ><Damage hp={r.hpDelta} /><Masked revealed={isRevealed(r.id, game.id)} label=""
+                  >{@render km(r)}{#if r.saidAloud.length}<span class="ml-1 text-[10px] font-semibold" style="color:{saidInk}" data-testid="said-it">said it</span>{/if}</Masked
+                ></span
+              >
             </button>
           {/each}
         </div>

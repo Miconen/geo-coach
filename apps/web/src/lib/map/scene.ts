@@ -34,10 +34,11 @@ export interface MapRound {
   countryCode: string | null;
   won: boolean;
   guesses: MapGuess[];
-  /** Countries named in this Round's Learnings (yellow in the Outcome lens). */
-  learningCountries: readonly string[];
-  /** A Player named the answer aloud but the Duo didn't guess it (#80): the answer is striped green and violet. */
-  saidAloud?: boolean;
+  /**
+   * Countries a Player named while guessing (#86). Those no Duo guess landed in get the Outcome lens's violet
+   * outline. Absent where no transcript is loaded (the Games list).
+   */
+  said?: readonly string[];
 }
 
 export type Padding = number | { top: number; bottom: number; left: number; right: number };
@@ -91,42 +92,40 @@ export const avatarId = (g: MapGuess) => `av:${guessColor(g)}:${guessInitial(g)}
 
 // --- Outcome lens -------------------------------------------------------------
 
-/** g: the answer · r: a Duo wrong guess · y: named in Learnings · s: said aloud, not guessed. */
-export type LensKind = "g" | "r" | "y" | "s";
-export const LENS_ORDER: readonly LensKind[] = ["g", "r", "y", "s"];
+/** A lens fill. g: the answer · r: a Duo wrong guess. Plain colours, never a texture. */
+export type LensKind = "g" | "r";
 export const LENS_COLOR: Record<LensKind, string> = {
   g: LENS_COLORS.answer,
   r: LENS_COLORS.wrongGuess,
-  y: LENS_COLORS.inLearnings,
-  s: LENS_COLORS.saidAloud,
 };
+/** The outline on a country said while guessing that no Duo guess landed in. */
+export const LENS_OUTLINE_COLOR = LENS_COLORS.saidAloud;
 
-const duoHit = (r: MapRound) => r.countryCode !== null && r.guesses.some((g) => g.isDuo && g.countryCode === r.countryCode);
-
-/**
- * Each country's lens categories across the focused Rounds, in LENS_ORDER. One category is a plain fill;
- * several are striped. No precedence: the answer is plain green even when Learnings name it, and only the
- * Duo's wrong guesses paint red. Nothing is filled under Recall.
- */
-export function lensCategories(rounds: readonly MapRound[], masked: boolean): Map<string, LensKind[]> {
-  const found = new Map<string, Set<LensKind>>();
-  if (masked) return new Map();
-  const mark = (code: string, kind: LensKind) => found.set(code, (found.get(code) ?? new Set()).add(kind));
-  for (const r of rounds) {
-    if (r.countryCode) {
-      mark(r.countryCode, "g");
-      if (r.saidAloud && !duoHit(r)) mark(r.countryCode, "s");
-    }
-    for (const g of r.guesses) {
-      if (g.isDuo && g.countryCode && g.countryCode !== r.countryCode) mark(g.countryCode, "r");
-    }
-    for (const c of r.learningCountries) if (c !== r.countryCode) mark(c, "y");
-  }
-  return new Map([...found].map(([code, kinds]) => [code, LENS_ORDER.filter((k) => kinds.has(k))]));
+export interface Lens {
+  /** Each filled country's fill. */
+  fills: Map<string, LensKind>;
+  /** Countries a Player named while guessing a Round that no Duo guess of it landed in. */
+  outlines: Set<string>;
 }
 
-/** The fill pattern image for a set of categories ("lens-g", "lens-ry"…). */
-export const lensPatternId = (kinds: readonly LensKind[]) => `lens-${kinds.join("")}`;
+/**
+ * The Outcome lens across the focused Rounds (#86): the answer filled green, a Duo wrong guess red (an Opponent's
+ * guess paints nothing), and a violet outline on a country said while guessing that no Duo guess landed in, the
+ * missed answer included. A country that's the answer in one focused Round and a wrong guess in another stays
+ * green. Nothing shows under Recall.
+ */
+export function lensCategories(rounds: readonly MapRound[], masked: boolean): Lens {
+  const fills = new Map<string, LensKind>();
+  const outlines = new Set<string>();
+  if (masked) return { fills, outlines };
+  for (const r of rounds) {
+    if (r.countryCode) fills.set(r.countryCode, "g");
+    const duo = new Set(r.guesses.flatMap((g) => (g.isDuo && g.countryCode ? [g.countryCode] : [])));
+    for (const c of duo) if (c !== r.countryCode && fills.get(c) !== "g") fills.set(c, "r");
+    for (const c of r.said ?? []) if (!duo.has(c)) outlines.add(c);
+  }
+  return { fills, outlines };
+}
 
 // --- dimming --------------------------------------------------------------------
 

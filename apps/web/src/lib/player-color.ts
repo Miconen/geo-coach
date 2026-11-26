@@ -1,6 +1,6 @@
 // Player colours (#74): each Player picks one from PLAYER_PALETTE in Settings, and every surface that shows a Player
 // draws the colour resolvePlayerColors gives it. The palette keeps clear of the map lens colours (the Outcome lens's
-// green, red and yellow, and the "said aloud, not guessed" violet), and every entry reads as text on every theme
+// green and red fills and its "said while guessing, not guessed" violet outline), and every entry reads as text on every theme
 // (playerInk) and under a white initial on an avatar pin.
 
 export const PLAYER_PALETTE = [
@@ -20,7 +20,6 @@ export const OPPONENT_COLOR = "#5b6472";
 export const LENS_COLORS = {
   answer: "#22c55e",
   wrongGuess: "#ef4444",
-  inLearnings: "#facc15",
   saidAloud: "#8b5cf6",
 } as const;
 

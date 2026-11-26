@@ -121,7 +121,6 @@ export function buildHome(wb: WorkbenchData, duoId: string, timeZone?: string): 
               ]
             : [],
         ),
-        learningCountries: [...new Set(current.filter((l) => l.roundIds.includes(r.id)).flatMap((l) => l.countries))],
       });
     }
   }

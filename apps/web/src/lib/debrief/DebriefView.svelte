@@ -24,6 +24,7 @@
   import { anchoredRoundId, readSelection, select, type DebriefSelection } from "./selection.js";
   import type { Debrief, DebriefGame, DebriefRound, DebriefScope } from "./types.js";
   import {
+    clock,
     countryPopup,
     countryView,
     flag,
@@ -317,14 +318,18 @@
       {#each popup.guessedBy as g, i (i)}
         <p class="mt-1 text-red-300">✗ {g.isDuo ? playerName(debrief, g) : "An Opponent"} guessed here</p>
       {/each}
-      {#if popup.named.length}
-        <ul class="mt-1.5 space-y-1">
-          {#each popup.named as l (l.id)}
-            <li class="rounded-lg bg-yellow-400/10 px-2 py-1 text-yellow-100"><span class="font-semibold uppercase text-yellow-300">{l.kind}</span> {l.text}</li>
+      {#if popup.said.length}
+        <ul class="mt-1.5 space-y-1" data-testid="country-popup-said">
+          {#each popup.said as l (l.id)}
+            <li class="rounded-lg px-2 py-1" style="background:color-mix(in srgb, {LENS_COLORS.saidAloud} 18%, transparent)">
+              <span class="tabular-nums text-white/50">{clock(l.atS)}</span>
+              <span class="font-semibold">{debrief.players[l.playerId]?.name ?? "Player"}</span>
+              <q class="italic">{l.text}</q>
+            </li>
           {/each}
         </ul>
-      {:else}
-        <p class="mt-1 text-white/50">No Learning names {popup.name}.</p>
+      {:else if !popup.guessedBy.length}
+        <p class="mt-1 text-white/50">No one guessed or named {popup.name} while guessing.</p>
       {/if}
       {#if popup.hasRounds && scope.kind !== "round"}
         <button type="button" class="mt-1.5 text-[11px] font-semibold text-sky-300 hover:underline" onclick={() => go({ country: popup.code, round: null })}>

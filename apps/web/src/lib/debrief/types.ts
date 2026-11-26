@@ -41,6 +41,12 @@ export interface DebriefLine {
   afterEnd: boolean;
 }
 
+/** A country a Player named while guessing was on (#86), with the Utterances that named it, oldest first. */
+export interface SaidCountry {
+  code: string;
+  lines: DebriefLine[];
+}
+
 export interface DebriefRound {
   id: string;
   gameId: string;
@@ -88,6 +94,8 @@ export interface DebriefRound {
    * Duo guess landed there. Empty otherwise.
    */
   saidAloud: DebriefLine[];
+  /** Every country a Player named while guessing was on (#86), in order of first mention, guessed or not. */
+  saidWhileGuessing: SaidCountry[];
 }
 
 export interface DebriefGame {

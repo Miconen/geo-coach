@@ -8,8 +8,8 @@ import {
   type StatsGuess,
   type StatsRound,
 } from "@geo-coach/shared";
-import type { Debrief, DebriefGame, DebriefGuess, DebriefLine, DebriefPlayer, DebriefRound } from "$lib/debrief/types.js";
-import { namesCountry } from "../country-mentions.js";
+import type { Debrief, DebriefGame, DebriefGuess, DebriefLine, DebriefPlayer, DebriefRound, SaidCountry } from "$lib/debrief/types.js";
+import { countriesNamed } from "../country-mentions.js";
 import type { WorkbenchData, WorkbenchLearning, WorkbenchRound } from "../workbench/view-model.js";
 
 /** What a Game adds beyond the workbench: its mode and map, and each Round's starting camera (from the raw duel). */
@@ -172,6 +172,7 @@ function debriefRound(
     })
     .sort((a, b) => a.atS - b.atS);
   const missedAnswer = r.countryCode !== null && !guesses.some((g) => g.isDuo && g.countryCode === r.countryCode);
+  const said = saidWhileGuessing(transcript);
   return {
     id: r.id,
     gameId: r.gameId,
@@ -203,14 +204,26 @@ function debriefRound(
     transcript,
     endS: (end - start) / 1000,
     countdownS: r.timerStartTime ? (ms(r.timerStartTime) - start) / 1000 : null,
-    saidAloud: missedAnswer ? saidAloud(transcript, r.countryCode!) : [],
+    saidAloud: missedAnswer ? linesNaming(said, r.countryCode!) : [],
+    saidWhileGuessing: said,
   };
 }
 
 /**
- * The Utterances that named the answer country while guessing was still on (#80). Speech after guessing ends is a
- * reaction to the reveal, so it never counts.
+ * Every country named while guessing was still on (#86), in order of first mention, each with the Utterances that
+ * named it. Speech after guessing ends is a reaction to the reveal, so it never counts.
  */
-export function saidAloud(transcript: readonly DebriefLine[], answerCode: string): DebriefLine[] {
-  return transcript.filter((l) => !l.afterEnd && namesCountry(l.text, answerCode));
+export function saidWhileGuessing(transcript: readonly DebriefLine[]): SaidCountry[] {
+  const by = new Map<string, DebriefLine[]>();
+  for (const l of transcript) {
+    if (l.afterEnd) continue;
+    for (const code of countriesNamed(l.text)) by.set(code, [...(by.get(code) ?? []), l]);
+  }
+  return [...by].map(([code, lines]) => ({ code, lines }));
 }
+
+const linesNaming = (said: readonly SaidCountry[], code: string) => said.find((c) => c.code === code.toUpperCase())?.lines ?? [];
+
+/** The Utterances that named the answer country while guessing was still on (#80). */
+export const saidAloud = (transcript: readonly DebriefLine[], answerCode: string): DebriefLine[] =>
+  linesNaming(saidWhileGuessing(transcript), answerCode);

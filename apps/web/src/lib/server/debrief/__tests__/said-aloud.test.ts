@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDebrief, saidAloud, type DebriefInput } from "../build.js";
+import { buildDebrief, saidAloud, saidWhileGuessing, type DebriefInput } from "../build.js";
 import { mapRounds } from "$lib/debrief/view.js";
 import type { DebriefLine } from "$lib/debrief/types.js";
 import type { WorkbenchGame, WorkbenchRound, WorkbenchUtterance } from "../../workbench/view-model.js";
@@ -109,8 +109,36 @@ describe("said aloud, not guessed", () => {
     expect(byId("cz6").saidAloud.map((l) => l.id)).toEqual(["cz6-said"]);
   });
 
-  it("marks the map Round so the Outcome lens stripes the answer", () => {
-    const flags = Object.fromEntries(mapRounds(d, d.rounds).map((m) => [m.id, m.saidAloud]));
-    expect(flags).toEqual({ dk: true, cz5: false, cz6: true });
+  it("gives the map every country said while guessing, so the Outcome lens can outline the ones not guessed", () => {
+    const said = Object.fromEntries(mapRounds(d, d.rounds).map((m) => [m.id, m.said]));
+    expect(said).toEqual({ dk: ["DK", "DE"], cz5: ["CZ"], cz6: ["CZ", "DE"] });
+  });
+});
+
+describe("every country said while guessing (#86)", () => {
+  const line = (id: string, atS: number, text: string, afterEnd = false): DebriefLine => ({ id, playerId: MICO, text, atS, afterEnd });
+
+  it("finds several countries in one Round, each with the Utterances that named it, in order of first mention", () => {
+    const transcript = [
+      line("a", 5, "looks like thailand or maybe laos"),
+      line("b", 12, "no, indonesia"),
+      line("c", 20, "thailand plates though"),
+    ];
+    expect(saidWhileGuessing(transcript).map((c) => [c.code, c.lines.map((l) => l.id)])).toEqual([
+      ["TH", ["a", "c"]],
+      ["LA", ["a"]],
+      ["ID", ["b"]],
+    ]);
+  });
+
+  it("ignores speech after guessing ends", () => {
+    const transcript = [line("a", 5, "thailand"), line("b", 90, "oh it was bangladesh", true), line("c", 91, "thailand again", true)];
+    expect(saidWhileGuessing(transcript).map((c) => [c.code, c.lines.map((l) => l.id)])).toEqual([["TH", ["a"]]]);
+  });
+
+  it("is what the Round's said-aloud lines come from: the answer's entry", () => {
+    const r = buildDebrief(input).rounds.find((x) => x.id === "cz6")!;
+    expect(r.saidWhileGuessing.map((c) => c.code)).toEqual(["CZ", "DE"]);
+    expect(r.saidAloud).toEqual(r.saidWhileGuessing[0]!.lines);
   });
 });

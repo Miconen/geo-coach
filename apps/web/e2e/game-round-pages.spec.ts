@@ -71,6 +71,9 @@ test("a Round page shows that Round focused, as its Session page does", async ({
   await expect(page.getByTestId("round-transcript")).toBeVisible();
   await expect(page.getByTestId("transcript-line")).toHaveCount(lines);
   await expect(page.locator("body")).not.toContainText(/\bvs\b(?! Opponents)/);
+  // The Outcome lens legend (#86): two plain fills and the violet outline, no Learnings, no stripes.
+  await expect(page.getByTestId("lens-legend-entry")).toHaveText(["Answer", "Our wrong guess", "Said while guessing, not guessed"]);
+  await expect(page.getByTestId("shared-map-legend")).not.toContainText(/Learnings|Striped/);
 });
 
 test("the Round page's Claims and Evidence tab lists the citing Claims with their Evidence", async ({ page }) => {

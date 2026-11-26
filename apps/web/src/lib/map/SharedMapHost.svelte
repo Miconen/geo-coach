@@ -23,7 +23,7 @@
     avatarImage,
     countryBoundaries,
   } from "./mapbox-base.js";
-  import { LENS_LABEL, lensPatternImage, lensSwatchCss } from "./lens.js";
+  import { LENS_LEGEND } from "./lens.js";
   import {
     ANSWER_LOST,
     ANSWER_WON,
@@ -40,13 +40,13 @@
     framePoints,
     guessColor,
     guessInitial,
+    LENS_COLOR,
+    LENS_OUTLINE_COLOR,
     lensCategories,
-    lensPatternId,
     litRoundIds,
     opacityByRound,
     paddingBox,
     sceneFeatures,
-    type LensKind,
     type MapRound,
     type MapScene,
   } from "./scene.js";
@@ -62,6 +62,7 @@
   ];
   const COUNTRY_HIT = "countries-hit";
   const LENS_LAYER = "lens";
+  const LENS_OUTLINE_LAYER = "lens-outline";
   const NO_COUNTRY = ["==", ["get", "iso_3166_1"], ""] as ExpressionSpecification;
 
   let park: HTMLDivElement;
@@ -200,7 +201,17 @@
         type: "fill",
         ...countries,
         filter: ["all", countries.filter, NO_COUNTRY],
-        paint: { "fill-opacity": 0.6 },
+        paint: { "fill-color": LENS_COLOR.g, "fill-opacity": 0.6 },
+      },
+      firstSymbol,
+    );
+    m.addLayer(
+      {
+        id: LENS_OUTLINE_LAYER,
+        type: "line",
+        ...countries,
+        filter: ["all", countries.filter, NO_COUNTRY],
+        paint: { "line-color": LENS_OUTLINE_COLOR, "line-width": 3 },
       },
       firstSymbol,
     );
@@ -258,6 +269,7 @@
     if (!s) {
       for (const id of SOURCES) set(id, empty());
       m.setFilter(LENS_LAYER, NO_COUNTRY);
+      m.setFilter(LENS_OUTLINE_LAYER, NO_COUNTRY);
       return;
     }
 
@@ -284,19 +296,21 @@
 
   function applyLens(m: MapboxMap, s: MapScene) {
     const focus = new Set(s.focusRoundIds);
-    const cats = lensCategories(
+    const { fills, outlines } = lensCategories(
       s.rounds.filter((r) => focus.has(r.id)),
       s.masked,
     );
-    if (cats.size === 0) return void m.setFilter(LENS_LAYER, NO_COUNTRY);
-    for (const kinds of cats.values()) addImage(m, lensPatternId(kinds), () => lensPatternImage(kinds));
     const countries = countryBoundaries("cb");
-    m.setFilter(LENS_LAYER, ["all", countries.filter, ["in", ["get", "iso_3166_1"], ["literal", [...cats.keys()]]]]);
-    m.setPaintProperty(LENS_LAYER, "fill-pattern", [
+    const only = (codes: readonly string[]): ExpressionSpecification =>
+      codes.length ? ["all", countries.filter, ["in", ["get", "iso_3166_1"], ["literal", codes]]] : NO_COUNTRY;
+    m.setFilter(LENS_OUTLINE_LAYER, only([...outlines]));
+    m.setFilter(LENS_LAYER, only([...fills.keys()]));
+    if (fills.size === 0) return;
+    m.setPaintProperty(LENS_LAYER, "fill-color", [
       "match",
       ["get", "iso_3166_1"],
-      ...[...cats].flatMap(([code, kinds]) => [code, lensPatternId(kinds)]),
-      lensPatternId(["g"]),
+      ...[...fills].flatMap(([code, kind]) => [code, LENS_COLOR[kind]]),
+      LENS_COLOR.g,
     ] as unknown as ExpressionSpecification);
   }
 
@@ -381,7 +395,6 @@
   });
 
   const focusedAny = $derived((shared.scene?.focusRoundIds.length ?? 0) > 0);
-  const legendKinds: LensKind[][] = [["g"], ["r"], ["y"], ["g", "s"], ["r", "y"]];
 
   onMount(() => {
     const ro = new ResizeObserver(() => {
@@ -485,10 +498,13 @@
       data-testid="shared-map-legend"
     >
       {#if focusedAny && !shared.scene.masked}
-        {#each legendKinds as kinds (kinds.join(""))}
-          <span class="flex items-center gap-1">
-            <span class="inline-block size-2.5 rounded-sm" style="background:{lensSwatchCss(kinds)}"></span>
-            {kinds.length === 1 ? LENS_LABEL[kinds[0]!] : kinds[0] === "g" ? "Said aloud, not guessed" : "Striped: more than one"}
+        {#each LENS_LEGEND as e (e.label)}
+          <span class="flex items-center gap-1" data-testid="lens-legend-entry">
+            <span
+              class="inline-block size-2.5 rounded-sm"
+              style="background:{e.fill ?? 'transparent'};{e.outline ? ` box-shadow: inset 0 0 0 1.5px ${e.outline}` : ''}"
+            ></span>
+            {e.label}
           </span>
         {/each}
       {:else if !shared.scene.masked}

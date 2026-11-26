@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PanoView } from "@geo-coach/shared";
 import { buildDebrief, type DebriefInput } from "../build.js";
-import { countryView, mapRounds, missedCountries, placeCallouts, record, roundName, signed, stepRound } from "$lib/debrief/view.js";
+import { countryPopup, countryView, mapRounds, missedCountries, placeCallouts, record, roundName, signed, stepRound } from "$lib/debrief/view.js";
 import type { WorkbenchGame, WorkbenchLearning, WorkbenchRound, WorkbenchUtterance } from "../../workbench/view-model.js";
 
 // Fixtures shaped on the 2026-11-23 18:31 dev Session (#79): Game 1 · Round 1 was Denmark, Mico guessed Lithuania
@@ -210,12 +210,25 @@ describe("debrief view helpers", () => {
     ]);
   });
 
-  it("gives the map Player colours, initials and Learning countries", () => {
+  it("gives the map Player colours, initials and the countries said while guessing, never Learning countries", () => {
     const [m] = mapRounds(d, [d.rounds[0]!]);
     expect(m!.title).toBe("Game 1 · Round 1");
     expect(m!.guesses[0]).toMatchObject({ isDuo: true, color: "#c0267a", initial: "C" });
     expect(m!.guesses[2]).toMatchObject({ isDuo: false, color: undefined });
-    expect(m!.learningCountries).toEqual(["DK", "DE"]);
+    expect(m!.said).toEqual(["DK", "DE"]);
+    expect(m).not.toHaveProperty("learningCountries");
+  });
+
+  it("explains a clicked country in a Round: who guessed there, and for an outlined one the Utterances naming it", () => {
+    const r1 = d.rounds[0]!;
+    const de = countryPopup(d, r1, "de");
+    expect(de.guessedBy.map((g) => g.playerId)).toEqual([CERKIE]);
+    // Guessed, so not outlined: no quotes, though Cerkie said germany.
+    expect(de.said).toEqual([]);
+    const line = { id: "x", playerId: MICO, text: "sweden?", atS: 30, afterEnd: false };
+    const se = countryPopup(d, { ...r1, saidWhileGuessing: [{ code: "SE", lines: [line] }] }, "se");
+    expect(se.guessedBy).toEqual([]);
+    expect(se.said).toEqual([line]);
   });
 
   it("steps through Rounds, wrapping", () => {

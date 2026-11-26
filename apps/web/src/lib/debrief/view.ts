@@ -48,7 +48,7 @@ export function record(d: Debrief) {
 export const roundsOf = (d: Debrief, game: DebriefGame) => d.rounds.filter((r) => r.gameId === game.id);
 export const learningsOf = (d: Debrief, ids: readonly string[]) => ids.flatMap((id) => (d.learnings[id] ? [d.learnings[id]!] : []));
 
-/** The map's Rounds: one answer pin each, every placed guess in its Player's colour, and the countries its Learnings name. */
+/** The map's Rounds: one answer pin each, every placed guess in its Player's colour, and the countries said while guessing. */
 export function mapRounds(d: Debrief, rounds: readonly DebriefRound[]): MapRound[] {
   return rounds.flatMap((r) => {
     if (r.lat === null || r.lng === null) return [];
@@ -69,7 +69,6 @@ export function mapRounds(d: Debrief, rounds: readonly DebriefRound[]): MapRound
         },
       ];
     });
-    const learningCountries = [...new Set(learningsOf(d, r.learningIds).flatMap((l) => l.countries.map((c) => c.toUpperCase())))];
     return [
       {
         id: r.id,
@@ -82,8 +81,7 @@ export function mapRounds(d: Debrief, rounds: readonly DebriefRound[]): MapRound
         countryCode: r.countryCode,
         won: r.won,
         guesses,
-        learningCountries,
-        saidAloud: r.saidAloud.length > 0,
+        said: r.saidWhileGuessing.map((c) => c.code),
       },
     ];
   });
@@ -138,16 +136,18 @@ export function countryView(d: Debrief, code: string): CountryView | null {
   };
 }
 
-/** Inside a Round, a clicked country other than the answer: who guessed there and the Learnings naming it. */
+/**
+ * Inside a Round, a clicked country other than the answer: who guessed there and, when the Outcome lens outlines it
+ * (said while guessing, no Duo guess there), the Utterances that named it.
+ */
 export function countryPopup(d: Debrief, round: DebriefRound, code: string) {
   const c = code.toUpperCase();
+  const guessedBy = round.guesses.filter((g) => g.countryCode === c);
   return {
     code: c,
     name: countryName(c),
-    guessedBy: round.guesses.filter((g) => g.countryCode === c),
-    named: [...learningsOf(d, round.learningIds), ...learningsOf(d, d.sessionLearningIds)].filter((l) =>
-      l.countries.some((x) => x.toUpperCase() === c),
-    ),
+    guessedBy,
+    said: guessedBy.some((g) => g.isDuo) ? [] : (round.saidWhileGuessing.find((s) => s.code === c)?.lines ?? []),
     hasRounds: d.rounds.some((r) => r.countryCode === c || r.guesses.some((g) => g.isDuo && g.countryCode === c)),
   };
 }

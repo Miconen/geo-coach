@@ -121,7 +121,6 @@ export function buildGamesList(
             },
           ];
         }),
-        learningCountries: [],
       });
     }
     group.games.push({

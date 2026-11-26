@@ -304,12 +304,18 @@
     const only = (codes: readonly string[]): ExpressionSpecification =>
       codes.length ? ["all", countries.filter, ["in", ["get", "iso_3166_1"], ["literal", codes]]] : NO_COUNTRY;
     m.setFilter(LENS_OUTLINE_LAYER, only([...outlines]));
-    m.setFilter(LENS_LAYER, only([...fills.keys()]));
-    if (fills.size === 0) return;
+    // The Clue lens (#89) swaps the fills only; the outline is the same said-not-guessed rule.
+    const colors = s.clueLens
+      ? s.masked
+        ? []
+        : s.clueLens.fills
+      : [...fills].map(([code, kind]) => [code, LENS_COLOR[kind]] as const);
+    m.setFilter(LENS_LAYER, only(colors.map(([code]) => code)));
+    if (colors.length === 0) return;
     m.setPaintProperty(LENS_LAYER, "fill-color", [
       "match",
       ["get", "iso_3166_1"],
-      ...[...fills].flatMap(([code, kind]) => [code, LENS_COLOR[kind]]),
+      ...colors.flatMap(([code, color]) => [code, color]),
       LENS_COLOR.g,
     ] as unknown as ExpressionSpecification);
   }

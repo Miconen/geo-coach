@@ -1,0 +1,143 @@
+import { expect, test, type Page } from "@playwright/test";
+import { login, seed, withSql } from "./helpers.js";
+
+// #89: the Clue lens on a focused Round. A finished clues run says two Clues in Game 1's Round 1 (answer Spain), and
+// Claims link them to countries; the lens fills countries from those links, one Clue alone or several combined.
+const s = seed();
+const duo = `/duos/${s.duoId}`;
+const game1 = s.games[0]!;
+const round1 = game1.rounds.find((r) => r.roundNumber === 1)!;
+const round2 = game1.rounds.find((r) => r.roundNumber === 2)!;
+
+const ids = {
+  run: crypto.randomUUID(),
+  yellow: crypto.randomUUID(),
+  truck: crypto.randomUUID(),
+  // c1, c3 verified (a Player's ✓); c2, c4 speculated.
+  c1: crypto.randomUUID(),
+  c2: crypto.randomUUID(),
+  c3: crypto.randomUUID(),
+  c4: crypto.randomUUID(),
+  rcYellow: crypto.randomUUID(),
+  rcTruck: crypto.randomUUID(),
+};
+
+test.beforeAll(async () => {
+  await withSql(async (sql) => {
+    const [u1, u2] = await sql<{ id: string }[]>`SELECT u.id FROM utterances u WHERE u.duo_id = ${s.duoId} ORDER BY u.started_at LIMIT 2`;
+    await sql`INSERT INTO processing_runs (id, duo_id, session_id, started_by_player_id, purpose, agent, model, prompt_version, range_start, range_end, status, started_at, finished_at)
+      VALUES (${ids.run}, ${s.duoId}, ${s.sessionId}, ${s.mikoId}, 'clues', 'claude', 'e2e', 'clues-v1', '2026-11-20T19:00:00Z', '2026-11-20T19:01:50Z', 'finished', now(), now())`;
+    await sql`INSERT INTO clues (id, duo_id, family, name, origin) VALUES
+      (${ids.yellow}, ${s.duoId}, 'Road lines', 'Yellow/orange centre line', 'seed'),
+      (${ids.truck}, ${s.duoId}, 'Google car', 'Pickup truck', 'seed')`;
+    await sql`INSERT INTO claims (id, duo_id, text, countries, clues_prompt_version, clues_tagged_at) VALUES
+      (${ids.c1}, ${s.duoId}, 'E2E: only Spain has yellow centre lines, never France.', '["ES"]', 'clue-tag-v1', now()),
+      (${ids.c2}, ${s.duoId}, 'E2E: Italy has yellow centre lines.', '["IT"]', 'clue-tag-v1', now()),
+      (${ids.c3}, ${s.duoId}, 'E2E: Portugal coverage is a pickup truck, Morocco sometimes.', '["PT","MA"]', 'clue-tag-v1', now()),
+      (${ids.c4}, ${s.duoId}, 'E2E: Spain never has truck coverage.', '["ES"]', 'clue-tag-v1', now())`;
+    await sql`INSERT INTO claim_evidence (id, claim_id, duo_id, kind, direction, player_id) VALUES
+      (${crypto.randomUUID()}, ${ids.c1}, ${s.duoId}, 'player', 'for', ${s.mikoId}),
+      (${crypto.randomUUID()}, ${ids.c3}, ${s.duoId}, 'player', 'for', ${s.mikoId})`;
+    await sql`INSERT INTO claim_clues (claim_id, clue_id, duo_id, country, prevalence) VALUES
+      (${ids.c1}, ${ids.yellow}, ${s.duoId}, 'ES', 'typical'),
+      (${ids.c1}, ${ids.yellow}, ${s.duoId}, 'FR', 'lacks'),
+      (${ids.c2}, ${ids.yellow}, ${s.duoId}, 'IT', 'typical'),
+      (${ids.c3}, ${ids.truck}, ${s.duoId}, 'PT', 'typical'),
+      (${ids.c3}, ${ids.truck}, ${s.duoId}, 'MA', 'some'),
+      (${ids.c4}, ${ids.truck}, ${s.duoId}, 'ES', 'lacks')`;
+    await sql`INSERT INTO round_clues (id, duo_id, run_id, round_id, clue_id) VALUES
+      (${ids.rcYellow}, ${s.duoId}, ${ids.run}, ${round1.id}, ${ids.yellow}),
+      (${ids.rcTruck}, ${s.duoId}, ${ids.run}, ${round1.id}, ${ids.truck})`;
+    await sql`INSERT INTO round_clue_utterances (round_clue_id, utterance_id) VALUES (${ids.rcYellow}, ${u1!.id}), (${ids.rcTruck}, ${u2!.id})`;
+  });
+});
+
+test.afterAll(async () => {
+  await withSql(async (sql) => {
+    await sql`DELETE FROM processing_runs WHERE id = ${ids.run}`;
+    await sql`DELETE FROM claims WHERE id = ANY(${[ids.c1, ids.c2, ids.c3, ids.c4]})`;
+    await sql`DELETE FROM clues WHERE id = ANY(${[ids.yellow, ids.truck]})`;
+  });
+});
+
+test.beforeEach(async ({ page }) => {
+  await login(page, s.mikoId);
+  await page.addInitScript((k) => localStorage.setItem(k, "0"), `recall:v1:${s.mikoId}:${s.duoId}`);
+});
+
+const counts = (page: Page) => page.getByTestId("clue-legend-count").allTextContents();
+
+/** Clicks the map at a point, once the shared map draws (dev builds expose the Mapbox instance). */
+async function clickMapAt(page: Page, lng: number, lat: number) {
+  await expect(page.getByTestId("shared-map")).toHaveAttribute("data-ready", "true", { timeout: 20_000 });
+  await page.waitForFunction(() => {
+    const m = (window as unknown as { __sharedMapbox?: { loaded(): boolean; isMoving(): boolean } }).__sharedMapbox;
+    return m?.loaded() && !m.isMoving();
+  });
+  const xy = await page.evaluate(([x, y]) => {
+    const m = (window as unknown as { __sharedMapbox: { project(p: [number, number]): { x: number; y: number }; getCanvas(): HTMLCanvasElement } }).__sharedMapbox;
+    const p = m.project([x!, y!]);
+    const r = m.getCanvas().getBoundingClientRect();
+    return { x: r.left + p.x, y: r.top + p.y };
+  }, [lng, lat]);
+  await page.mouse.click(xy.x, xy.y);
+}
+
+test("a Round's Clue lens: switch to it, solo one Clue, combine two, and open a country popup", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto(`${duo}/games/${game1.id}/rounds/1`);
+  await expect(page.getByRole("navigation", { name: "Duo" })).toHaveAttribute("data-stream", "open");
+  const card = page.getByTestId("clue-lens");
+  await expect(card).toBeVisible();
+  await expect(page.getByTestId("lens-outcome")).toHaveAttribute("aria-pressed", "true");
+
+  // Switch lens: a view param (ADR 0007), and the card lists the Round's Clues with the speech they rest on.
+  await page.getByTestId("lens-clues").click();
+  await expect(page).toHaveURL(/[?&]lens=clues/);
+  await expect(page.getByTestId("lens-clues")).toHaveAttribute("aria-pressed", "true");
+  const clues = page.getByTestId("clue-lens-clue");
+  await expect(clues).toHaveCount(2);
+  await expect(clues.first()).toContainText("Yellow/orange centre line");
+  await expect(clues.first()).toContainText("You go Spain");
+  // Every Clue by default: ruled out FR · typical ES, PT · in some areas IT (speculated), MA.
+  await expect.poll(() => counts(page)).toEqual(["1", "2", "2"]);
+  await expect(page.getByTestId("clue-lens-answer")).toContainText("typical there");
+  await expect(page.getByTestId("shared-map-legend")).toHaveCount(0);
+
+  // Solo the truck: PT typical, MA in some areas; Spain's lacks is speculated, so never rules it out.
+  await clues.nth(1).getByTestId("clue-lens-solo").click();
+  await expect(clues.nth(0)).toHaveAttribute("data-shown", "false");
+  await expect.poll(() => counts(page)).toEqual(["0", "1", "1"]);
+  await expect(page.getByTestId("clue-lens-answer")).toContainText("neutral");
+
+  // Tick the yellow line back in: combined, each country takes its strongest fill.
+  await clues.nth(0).getByTestId("clue-lens-combine").check();
+  await expect.poll(() => counts(page)).toEqual(["1", "2", "2"]);
+
+  // The answer country opens a popup with every shown Claim that links it.
+  await clickMapAt(page, -0.88, 41.65);
+  const popup = page.getByTestId("country-popup");
+  await expect(popup).toBeVisible();
+  await expect(popup).toContainText("Spain");
+  await expect(page.getByTestId("clue-popup-fill")).toContainText("Typical there");
+  const rows = page.getByTestId("clue-popup-claim");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText("typical · Yellow/orange centre line · verified");
+  await expect(rows.nth(1)).toContainText("lacks · Pickup truck · speculated");
+});
+
+test("with no Clues said, the lens is unavailable", async ({ page }) => {
+  await page.goto(`${duo}/games/${game1.id}/rounds/${round2.roundNumber}?lens=clues`);
+  await expect(page.getByTestId("clue-lens-none")).toHaveText("No Clues said this Round");
+  await expect(page.getByTestId("lens-clues")).toBeDisabled();
+  await expect(page.getByTestId("lens-outcome")).toHaveAttribute("aria-pressed", "true");
+});
+
+test("under Recall the lens stays hidden until Reveal", async ({ page }) => {
+  await page.addInitScript((k) => localStorage.setItem(k, "1"), `recall:v1:${s.mikoId}:${s.duoId}`);
+  await page.goto(`${duo}/games/${game1.id}/rounds/1?lens=clues`);
+  await expect(page.getByTestId("debrief-reveal")).toBeVisible();
+  await expect(page.getByTestId("clue-lens")).toHaveCount(0);
+  await page.getByTestId("debrief-reveal").click();
+  await expect(page.getByTestId("clue-lens-clue")).toHaveCount(2);
+});

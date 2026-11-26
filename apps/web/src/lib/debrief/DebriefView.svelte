@@ -22,6 +22,8 @@
   import SaidAloud from "./SaidAloud.svelte";
   import { LENS_COLORS, playerInk } from "$lib/player-color.js";
   import { anchoredRoundId, readSelection, select, type DebriefSelection } from "./selection.js";
+  import { updateQuery, viewParams } from "$lib/url-state.js";
+  import { CLUE_FILL_COLOR, CLUE_FILL_LABEL, CLUE_FILL_ORDER, clueFillCounts, clueLensClaims, clueLensFills, type ClueFill } from "./clue-lens.js";
   import type { Debrief, DebriefGame, DebriefRound, DebriefScope } from "./types.js";
   import {
     clock,
@@ -222,6 +224,30 @@
     const placed = points.flatMap((p) => (tileXs[p.roundId] !== undefined ? [{ ...p, x: tileXs[p.roundId]! }] : []));
     return placed.length === points.length ? { points: placed, max } : null;
   });
+  // The Clue lens (#89): ?lens=clues on a focused Round (ADR 0007) swaps the Outcome lens's fills for what the
+  // Round's Clues say about each country, from the Claims. Every Clue shows by default; clicking one shows it alone
+  // and ticking several combines them, until the Round changes.
+  const roundClues = $derived(round?.clues ?? []);
+  const clueOn = $derived(round !== null && roundClues.length > 0 && viewParams().get("lens") === "clues");
+  let picked = $state<{ roundId: string; ids: string[] } | null>(null);
+  const shownClueIds = $derived(round && picked?.roundId === round.id ? picked.ids : roundClues.map((c) => c.clueId));
+  const clueFills = $derived(clueOn ? clueLensFills(debrief.clueLens.links, new Set(shownClueIds)) : new Map<string, ClueFill>());
+  const clueCounts = $derived(clueFillCounts(clueFills));
+  /** The violet outline's countries (#86): named while guessing, and no Duo guess landed there. */
+  const saidNotGuessed = $derived.by(() => {
+    if (!round) return [];
+    const guessed = new Set(round.guesses.flatMap((g) => (g.isDuo && g.countryCode ? [g.countryCode.toUpperCase()] : [])));
+    return round.saidWhileGuessing.map((c) => c.code).filter((c) => !guessed.has(c));
+  });
+  const claimCountOf = (clueId: string) => new Set(debrief.clueLens.links.filter((l) => l.clueId === clueId).map((l) => l.claimId)).size;
+  const setLens = (lens: "outcome" | "clues") => updateQuery((q) => (lens === "clues" ? q.set("lens", "clues") : q.delete("lens")));
+  const soloClue = (id: string) => round && (picked = { roundId: round.id, ids: [id] });
+  function toggleClue(id: string) {
+    if (!round) return;
+    picked = { roundId: round.id, ids: shownClueIds.includes(id) ? shownClueIds.filter((x) => x !== id) : [...shownClueIds, id] };
+  }
+  const PREVALENCE_LABEL = { typical: "typical", some: "in some areas", lacks: "lacks" } as const;
+
   const scopeRounds = $derived(scope.kind === "session" && !country ? debrief.rounds : country ? country.rounds : gameRounds);
   useMapScene(map, (): MapScene => {
     const focus = round ? [round.id] : country ? country.rounds.map((r) => r.id) : [];
@@ -235,13 +261,17 @@
       labelPins: game !== null || country !== null,
       kmLabels: round === null,
       masked,
+      clueLens: clueOn ? { fills: [...clueFills].map(([code, f]) => [code, CLUE_FILL_COLOR[f]] as const) } : null,
+      // The Clue lens card carries its own legend.
+      legend: clueOn ? "hidden" : undefined,
       onReveal: reveal,
       padding: { top: round ? 290 : 110, bottom: withHpStrip ? 190 : 120, left: 40, right: panelOpen && !drawer ? 470 : drawer ? 500 : 40 },
       onRoundClick: focusRound,
       onCountryClick: (code, lngLat) => {
         // Inside a Round a click explains the country and keeps the Round; the answer country is the Round itself.
         if (round) {
-          pop = code === round.countryCode ? null : { code, ...lngLat, roundId: round.id };
+          // Under the Clue lens the answer country explains itself too.
+          pop = code === round.countryCode && !clueOn ? null : { code, ...lngLat, roundId: round.id };
           return;
         }
         if (countryView(debrief, code)) go({ country: code, round: null });
@@ -315,6 +345,24 @@
         <span class="font-bold">{popup.name}</span>
         <button type="button" class="ml-auto text-white/60 hover:text-white" aria-label="Close" onclick={() => (pop = null)}>×</button>
       </div>
+      {#if clueOn}
+        {@const fill = clueFills.get(popup.code)}
+        {@const said = clueLensClaims(debrief.clueLens.links, new Set(shownClueIds), popup.code)}
+        <p class="mt-1 font-semibold" style="color:{fill ? CLUE_FILL_COLOR[fill] : 'rgb(255 255 255 / 0.6)'}" data-testid="clue-popup-fill">
+          {fill ? CLUE_FILL_LABEL[fill] : "No Claim says"}{saidNotGuessed.includes(popup.code) ? " · said while guessing" : ""}{popup.code === round?.countryCode ? " · the answer" : ""}
+        </p>
+        <ul class="mt-1.5 max-h-56 space-y-1 overflow-auto" data-testid="clue-popup-claims">
+          {#each said as l (`${l.claimId}:${l.clueId}`)}
+            <li class="rounded-lg bg-white/5 px-2 py-1" data-testid="clue-popup-claim">
+              <span class="font-semibold">{PREVALENCE_LABEL[l.prevalence]} · {debrief.clueLens.clues[l.clueId]?.name ?? "Clue"}</span>
+              <span class={l.status === "verified" ? "text-emerald-300" : l.status === "disproved" ? "text-red-300" : "text-amber-300"}> · {l.status}</span>
+              <span class="block text-white/80">{debrief.clueLens.claimText[l.claimId] ?? ""}</span>
+            </li>
+          {:else}
+            <li class="text-white/50">No Claim links {popup.name} to the shown Clues.</li>
+          {/each}
+        </ul>
+      {:else}
       {#each popup.guessedBy as g, i (i)}
         <p class="mt-1 text-red-300">✗ {g.isDuo ? playerName(debrief, g) : "An Opponent"} guessed here</p>
       {/each}
@@ -331,10 +379,81 @@
       {:else if !popup.guessedBy.length}
         <p class="mt-1 text-white/50">No one guessed or named {popup.name} while guessing.</p>
       {/if}
+      {/if}
       {#if popup.hasRounds && scope.kind !== "round"}
         <button type="button" class="mt-1.5 text-[11px] font-semibold text-sky-300 hover:underline" onclick={() => go({ country: popup.code, round: null })}>
           Every Round with {popup.name} tonight →
         </button>
+      {/if}
+    </div>
+  {/if}
+
+  <!-- The focused Round's lens card (#89): Outcome or Clues; under the Clue lens, the Round's Clues and the legend. -->
+  {#if round && !masked}
+    <div class="absolute left-3 top-[5.5rem] z-10 max-h-[calc(100%-14rem)] w-[300px] max-w-[calc(100%-1.5rem)] overflow-y-auto {panel} p-2.5 text-xs" data-testid="clue-lens">
+      <div class="flex rounded-lg border border-[var(--border)] p-0.5 text-[11px]" role="group" aria-label="Lens">
+        <button
+          type="button"
+          aria-pressed={!clueOn}
+          class="flex-1 rounded-md px-2 py-0.5 {!clueOn ? 'bg-[var(--accent-soft)] font-semibold text-[var(--accent-soft-ink)]' : 'hover:bg-[var(--surface-hover)]'}"
+          data-testid="lens-outcome"
+          onclick={() => setLens("outcome")}>Outcome</button
+        >
+        <button
+          type="button"
+          aria-pressed={clueOn}
+          disabled={roundClues.length === 0}
+          title={roundClues.length === 0 ? "No Clues said this Round" : undefined}
+          class="flex-1 rounded-md px-2 py-0.5 disabled:cursor-not-allowed disabled:opacity-50 {clueOn ? 'bg-[var(--accent-soft)] font-semibold text-[var(--accent-soft-ink)]' : 'hover:bg-[var(--surface-hover)]'}"
+          data-testid="lens-clues"
+          onclick={() => setLens("clues")}>Clues{roundClues.length ? ` (${roundClues.length})` : ""}</button
+        >
+      </div>
+      {#if roundClues.length === 0}
+        <p class="mt-2 text-[var(--muted)]" data-testid="clue-lens-none">No Clues said this Round</p>
+      {:else if clueOn}
+        <p class="mt-2 text-[var(--muted)]">Click a Clue to see it alone; tick more to combine them.</p>
+        <ul class="mt-1.5 space-y-1">
+          {#each roundClues as c (c.clueId)}
+            {@const clue = debrief.clueLens.clues[c.clueId]}
+            {@const on = shownClueIds.includes(c.clueId)}
+            <li
+              class="flex items-start gap-1.5 rounded-lg border px-2 py-1 {on ? 'border-sky-400 bg-sky-400/10' : 'border-[var(--border)] hover:bg-[var(--surface-hover)]'}"
+              data-testid="clue-lens-clue"
+              data-clue-id={c.clueId}
+              data-shown={on}
+            >
+              <input type="checkbox" class="mt-0.5" checked={on} aria-label="Combine {clue?.name ?? 'Clue'}" data-testid="clue-lens-combine" onchange={() => toggleClue(c.clueId)} />
+              <button type="button" class="flex-1 text-left" data-testid="clue-lens-solo" onclick={() => soloClue(c.clueId)}>
+                <span class="text-[10px] uppercase text-[var(--muted)]">{clue?.family}</span>
+                <span class="font-semibold">{clue?.name}</span>
+                <span class="text-[var(--muted)]">· {claimCountOf(c.clueId)} Claims</span>
+                {#each c.lines as l (l.id)}
+                  <span class="block italic text-[var(--muted)]">{debrief.players[l.playerId]?.name ?? "Player"}: “{l.text}”</span>
+                {/each}
+              </button>
+            </li>
+          {/each}
+        </ul>
+        <div class="mt-2 space-y-0.5 border-t border-[var(--border)] pt-1.5" data-testid="clue-legend">
+          {#each CLUE_FILL_ORDER as f (f)}
+            <p class="flex items-center gap-1.5" data-testid="clue-legend-entry" data-fill={f}>
+              <span class="inline-block size-2.5 rounded-sm" style="background:{CLUE_FILL_COLOR[f]}"></span>{CLUE_FILL_LABEL[f]}
+              <span class="ml-auto tabular-nums text-[var(--muted)]" data-testid="clue-legend-count">{clueCounts[f]}</span>
+            </p>
+          {/each}
+          <p class="flex items-center gap-1.5">
+            <span class="inline-block size-2.5 rounded-sm" style="box-shadow: inset 0 0 0 1.5px {LENS_COLORS.saidAloud}"></span>Said while guessing, not guessed
+            <span class="ml-auto tabular-nums text-[var(--muted)]">{saidNotGuessed.length}</span>
+          </p>
+          {#if round.countryCode}
+            {@const ans = clueFills.get(round.countryCode.toUpperCase())}
+            <p class="pt-1 text-[var(--muted)]" data-testid="clue-lens-answer">
+              The answer, {flag(round.countryCode)} {round.countryName ?? round.countryCode}, reads
+              <span class="font-semibold text-[var(--ink)]">{ans ? CLUE_FILL_LABEL[ans].toLowerCase() : "neutral: no Claim covers it"}</span>.
+            </p>
+          {/if}
+        </div>
       {/if}
     </div>
   {/if}

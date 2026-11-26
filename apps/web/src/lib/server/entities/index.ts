@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import type { AppDb } from "../db/index.js";
 import { games, rounds, sessions } from "../db/schema.js";
-import { roundInDuo } from "../services/index.js";
+import { loadClueLens, roundInDuo } from "../services/index.js";
 import { loadWorkbench } from "../workbench/cache.js";
 import {
   type WorkbenchData,
@@ -198,12 +198,14 @@ async function gameDebrief(
     roundsById[rid] = { ...r, utteranceIds: sp.utteranceIds };
     Object.assign(utterancesById, sp.utterancesById);
   }
+  const [meta, clueLens] = await Promise.all([loadDebriefMeta(db, duoId, [game.id]), loadClueLens(db, duoId, game.roundIds)]);
   const debrief = buildDebrief({
     wb: { ...full, roundsById, utterancesById },
     games: [{ id: game.id, number }],
-    meta: await loadDebriefMeta(db, duoId, [game.id]),
+    meta,
     sessionId: null,
     recorded: home !== null,
+    clueLens,
   });
   return { debrief, homeSession: home ? sessionChip(full, home) : null };
 }
@@ -344,11 +346,16 @@ export async function loadSessionPayload(
   const sessionGames = [...overlap].flatMap((id) => (full.gamesById[id] ? [full.gamesById[id]!] : []));
   // A Session page numbers every Game of the Session in play order, as the Games list does (#81).
   const numbers = numberInPlayOrder(sessionGames);
+  const [meta, clueLens] = await Promise.all([
+    loadDebriefMeta(db, duoId, [...overlap]),
+    loadClueLens(db, duoId, sessionGames.flatMap((g) => g.roundIds)),
+  ]);
   const debrief = buildDebrief({
     wb: full,
     games: sessionGames.map((g) => ({ id: g.id, number: numbers.get(g.id)! })),
-    meta: await loadDebriefMeta(db, duoId, [...overlap]),
+    meta,
     sessionId,
+    clueLens,
   });
   return {
     kind: "session",

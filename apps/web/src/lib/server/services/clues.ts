@@ -23,6 +23,7 @@ import {
 } from "../db/schema.js";
 import { roundGuessingInterval } from "./calls.js";
 import { DomainError } from "./recordings.js";
+import { loadTranscriptCorrector } from "./transcript-corrections.js";
 import { evidenceInDuo, roundInDuo, runInDuo, speechInDuo } from "./scope.js";
 
 // Clues (GLOSSARY: Clue; ADR 0009, #89): the Duo's Clue records, the Claim–Clue links Claim tagging writes, and the
@@ -418,9 +419,17 @@ export async function deriveCurrentRoundClues(
 
 // --- the Clue lens's data ----------------------------------------------------------------------------------------
 
+/** An Utterance a Round Clue rests on, with its corrected text (#88), for the lens card to quote. */
+export interface ClueQuote {
+  id: string;
+  playerId: string;
+  text: string;
+  startedAt: Date;
+}
+
 export interface ClueLensData {
-  /** Each Round's Clues in effect. */
-  byRound: Map<string, CurrentRoundClue[]>;
+  /** Each Round's Clues in effect, with the speech they rest on. */
+  byRound: Map<string, Array<CurrentRoundClue & { quotes: ClueQuote[] }>>;
   /** The Clues those Rounds said. */
   clues: Array<Pick<ClueRow, "id" | "family" | "name">>;
   /** Every Claim link of those Clues. */
@@ -429,12 +438,13 @@ export interface ClueLensData {
   claims: Array<{ id: string; text: string; status: ClaimStatus }>;
 }
 
-/** What the Clue lens needs for a set of Rounds: their Clues, those Clues' Claim links, and the linked Claims. */
+/** What the Clue lens needs for a set of Rounds: their Clues and quotes, those Clues' Claim links, and the Claims. */
 export async function loadClueLens(db: AppDb, duoId: string, roundIds: readonly string[]): Promise<ClueLensData> {
-  const byRound = await deriveCurrentRoundClues(db, duoId, roundIds);
-  const clueIds = [...new Set([...byRound.values()].flat().map((c) => c.clueId))];
-  if (clueIds.length === 0) return { byRound, clues: [], links: [], claims: [] };
-  const [clueRows, links] = await Promise.all([
+  const current = await deriveCurrentRoundClues(db, duoId, roundIds);
+  const clueIds = [...new Set([...current.values()].flat().map((c) => c.clueId))];
+  if (clueIds.length === 0) return { byRound: new Map(), clues: [], links: [], claims: [] };
+  const quoteIds = [...new Set([...current.values()].flat().flatMap((c) => c.utteranceIds))];
+  const [clueRows, links, quoteRows, correct] = await Promise.all([
     db
       .select({ id: clues.id, family: clues.family, name: clues.name })
       .from(clues)
@@ -444,7 +454,29 @@ export async function loadClueLens(db: AppDb, duoId: string, roundIds: readonly 
       .from(claimClues)
       .innerJoin(claims, eq(claims.id, claimClues.claimId))
       .where(and(eq(claimClues.duoId, duoId), eq(claims.duoId, duoId), inArray(claimClues.clueId, clueIds))),
+    quoteIds.length > 0
+      ? db
+          .select({ id: utterances.id, playerId: utterances.playerId, text: utterances.text, startedAt: utterances.startedAt, recordingId: utterances.recordingId, words: utterances.words, startSampleMs: utterances.startSampleMs, endedAt: utterances.endedAt })
+          .from(utterances)
+          .where(and(inArray(utterances.id, quoteIds), speechInDuo(duoId)))
+      : Promise.resolve([]),
+    loadTranscriptCorrector(db, duoId),
   ]);
+  const quoteById = new Map(
+    quoteRows.map((u) => [u.id, { id: u.id, playerId: u.playerId, text: correct(u).text, startedAt: u.startedAt }]),
+  );
+  const byRound: ClueLensData["byRound"] = new Map();
+  // A Round's Clues read in the order they were said.
+  const firstSaid = (c: { quotes: ClueQuote[] }) => c.quotes[0]?.startedAt.getTime() ?? Infinity;
+  for (const [roundId, list] of current) {
+    const quoted = list.map((c) => ({
+      ...c,
+      quotes: c.utteranceIds
+        .flatMap((id) => (quoteById.has(id) ? [quoteById.get(id)!] : []))
+        .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime()),
+    }));
+    byRound.set(roundId, quoted.sort((a, b) => firstSaid(a) - firstSaid(b)));
+  }
   const claimIds = [...new Set(links.map((l) => l.claimId))];
   const [claimRows, evidence] =
     claimIds.length > 0

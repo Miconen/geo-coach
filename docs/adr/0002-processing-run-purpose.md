@@ -11,3 +11,4 @@ ADR 0001 has a later finished run replace every Learning whose source span its r
 
 - "Current", "unprocessed" and "stale" queries all gain a purpose filter, and a range can be up to date for `extract` but unprocessed for `tips`.
 - A third purpose, `calls` (#41), labels each Split or Spread Round as a Call or not, with the Utterances it rests on. Its output is per-Round labels, not Learnings, but replacement and staleness follow the same per-purpose rule, so Calls can be relabelled or backfilled without redoing extraction.
+- A fourth purpose, `clues` (#89), links each Round to the Clues the Duo said while guessing. Tagging Claims with Clues is not a run: a Claim has no Session, so each Claim records the prompt version that tagged it, and untagged, edited or out-of-date Claims form a queue the worker works through.

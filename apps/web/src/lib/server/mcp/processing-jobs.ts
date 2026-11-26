@@ -65,21 +65,27 @@ function overlaps(a: { start: Date; end: Date }, b: { start: Date; end: Date }):
   );
 }
 
-async function assertSessionNotRecording(db: AppDb, duoId: string, sessionId: string) {
+/** The Duo's Sessions a Recording is still live in: the cached heartbeats, less Recordings already stopped. */
+async function recordingSessionIds(db: AppDb, duoId: string, sessionIds: readonly string[]): Promise<Set<string>> {
   const liveIds = duoEventBus
     .getLiveStatuses(duoId)
     .flatMap((s) => (s.recording && s.recordingId ? [s.recordingId] : []));
-  if (liveIds.length === 0) return;
-  const live = await db.query.recordings.findFirst({
+  if (liveIds.length === 0 || sessionIds.length === 0) return new Set();
+  const live = await db.query.recordings.findMany({
     // A committed stop wins over cached heartbeats (kept up to 90 s): only Recordings not yet stopped count.
     where: and(
-      eq(recordings.sessionId, sessionId),
+      inArray(recordings.sessionId, [...sessionIds]),
       eq(recordings.duoId, duoId),
       inArray(recordings.id, liveIds),
       isNull(recordings.stoppedAt),
     ),
+    columns: { sessionId: true },
   });
-  if (live) {
+  return new Set(live.map((r) => r.sessionId));
+}
+
+async function assertSessionNotRecording(db: AppDb, duoId: string, sessionId: string) {
+  if ((await recordingSessionIds(db, duoId, [sessionId])).size > 0) {
     throw new DomainError(
       "RECORDING_IN_PROGRESS",
       "This Session is still recording. Process it after you stop.",
@@ -88,7 +94,16 @@ async function assertSessionNotRecording(db: AppDb, duoId: string, sessionId: st
   }
 }
 
-/** Queues the clicked range, one job per ~25k-token chunk, skipping chunks already queued. */
+type WorkRange = Awaited<ReturnType<typeof mcpListWork>>["ranges"][number];
+type Span = { start: Date; end: Date };
+const spanOf = (r: WorkRange): Span => ({ start: new Date(r.startUtc), end: new Date(r.endUtc) });
+type QueueCounts = { queued: number; alreadyActive: number };
+
+/**
+ * Queues the clicked range, one job per ~25k-token chunk, skipping chunks already queued. Queueing extract also
+ * queues Round tagging (#95): a `clues` job for each `clues` range overlapping the same part, under the same skip
+ * rule. A part whose Rounds are already tagged is skipped, not an error.
+ */
 export async function enqueueProcessingJobs(
   db: AppDb,
   playerId: string,
@@ -99,21 +114,75 @@ export async function enqueueProcessingJobs(
     startUtc: Date;
     endUtc: Date;
   },
-): Promise<{ queued: number; alreadyActive: number }> {
+): Promise<QueueCounts & { rounds?: QueueCounts }> {
   await assertPlayerInDuo(db, playerId, input.duoId);
   await assertSessionNotRecording(db, input.duoId, input.sessionId);
 
   const clicked = { start: input.startUtc, end: input.endUtc };
+  const wantedOf = (ranges: WorkRange[]) =>
+    ranges
+      .filter((r) => r.sessionId === input.sessionId)
+      .map(spanOf)
+      .filter((r) => overlaps(r, clicked));
   const { ranges } = await mcpListWork(db, playerId, { purpose: input.purpose, duo: input.duoId });
-  const wanted = ranges
-    .filter((r) => r.sessionId === input.sessionId)
-    .map((r) => ({ start: new Date(r.startUtc), end: new Date(r.endUtc) }))
-    .filter((r) => overlaps(r, clicked));
+  const wanted = wantedOf(ranges);
   if (wanted.length === 0) {
     throw new DomainError("NOTHING_TO_PROCESS", "This range is already up to date.", 409);
   }
 
-  const result = await db.transaction(async (tx) => {
+  const result = await queueSessionJobs(db, playerId, input, wanted);
+  let rounds: QueueCounts | undefined;
+  if (input.purpose === "extract") {
+    const clues = await mcpListWork(db, playerId, { purpose: "clues", duo: input.duoId });
+    rounds = await queueSessionJobs(db, playerId, { ...input, purpose: "clues" }, wantedOf(clues.ranges));
+  }
+
+  if (result.queued > 0 || (rounds?.queued ?? 0) > 0) {
+    duoEventBus.emitChanged(input.duoId, "processing", input.sessionId);
+  }
+  return rounds ? { ...result, rounds } : result;
+}
+
+/**
+ * The Clues page's backfill (#95): queues Round tagging for every unprocessed or stale `clues` range of the Duo,
+ * across its Sessions, skipping Sessions still recording and ranges an active job already covers. `sessions` counts
+ * the Sessions it queued jobs in; `skippedRecording`, the Sessions with work it left because they're recording.
+ */
+export async function enqueueAllRoundTagging(
+  db: AppDb,
+  playerId: string,
+  duoId: string,
+): Promise<QueueCounts & { sessions: number; skippedRecording: number }> {
+  await assertPlayerInDuo(db, playerId, duoId);
+  const { ranges } = await mcpListWork(db, playerId, { purpose: "clues", duo: duoId });
+  const bySession = new Map<string, Span[]>();
+  for (const r of ranges) bySession.set(r.sessionId, [...(bySession.get(r.sessionId) ?? []), spanOf(r)]);
+  const recordingNow = await recordingSessionIds(db, duoId, [...bySession.keys()]);
+
+  const out = { queued: 0, alreadyActive: 0, sessions: 0, skippedRecording: recordingNow.size };
+  for (const [sessionId, wanted] of bySession) {
+    if (recordingNow.has(sessionId)) continue;
+    const res = await queueSessionJobs(db, playerId, { duoId, sessionId, purpose: "clues" }, wanted);
+    out.queued += res.queued;
+    out.alreadyActive += res.alreadyActive;
+    if (res.queued > 0) {
+      out.sessions += 1;
+      duoEventBus.emitChanged(duoId, "processing", sessionId);
+    }
+  }
+  if (out.queued > 0) duoEventBus.emitChanged(duoId, "clue");
+  return out;
+}
+
+/** Queues one job per wanted range of one Session, skipping ranges an active job of the purpose overlaps. */
+async function queueSessionJobs(
+  db: AppDb,
+  playerId: string,
+  input: { duoId: string; sessionId: string; purpose: ProcessingJobPurpose },
+  wanted: Span[],
+): Promise<QueueCounts> {
+  if (wanted.length === 0) return { queued: 0, alreadyActive: 0 };
+  return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${input.sessionId}))`);
     const active = await tx
       .select()
@@ -144,9 +213,6 @@ export async function enqueueProcessingJobs(
     }
     return { queued: fresh.length, alreadyActive: wanted.length - fresh.length };
   });
-
-  if (result.queued > 0) duoEventBus.emitChanged(input.duoId, "processing", input.sessionId);
-  return result;
 }
 
 async function closeJob(

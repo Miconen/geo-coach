@@ -4,6 +4,7 @@
   import type { WorkbenchLearning } from "$lib/server/workbench/view-model.js";
   import EntityChip from "./EntityChip.svelte";
   import Masked from "./Masked.svelte";
+  import { anchor } from "$lib/anchors.js";
   import { entityHref } from "$lib/links.js";
 
   let {
@@ -22,7 +23,7 @@
   } = $props();
 </script>
 
-<li class="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs" data-testid="learning-row" data-learning-id={learning.id}>
+<li id={anchor.learning(learning.id)} class="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs" data-testid="learning-row" data-learning-id={learning.id}>
   <div class="flex flex-wrap items-center gap-1.5">
     <span class="rounded bg-[var(--surface-subtle)] px-1.5 py-0.5 font-semibold uppercase">{learning.kind}</span>
     {#if learning.status !== "current"}

@@ -9,7 +9,9 @@
   import Masked from "$lib/components/Masked.svelte";
   import RoundCoachingCard from "$lib/components/RoundCoachingCard.svelte";
   import UtteranceText from "$lib/components/UtteranceText.svelte";
+  import { SECTION } from "$lib/anchors.js";
   import { entityHref, links } from "$lib/links.js";
+  import { urlDisclosure } from "$lib/url-disclosure.js";
   import { gameTitle, sessionTitle } from "$lib/entity-titles.js";
   import { useEntityRefresh } from "$lib/live/entity-refresh.svelte.js";
   import type { RoundPayload } from "$lib/server/entities/index.js";
@@ -72,7 +74,7 @@
     </section>
   {/if}
 
-  <section class="space-y-1.5" aria-label="Learnings">
+  <section id={SECTION.learnings} class="space-y-1.5" aria-label="Learnings">
     <h2 class="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Learnings</h2>
     <ul class="space-y-1">
       {#each learnings as l (l.id)}
@@ -89,7 +91,12 @@
     </ul>
   </section>
 
-  <details class="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3" data-testid="round-speech">
+  <details
+    id={SECTION.speech}
+    use:urlDisclosure={SECTION.speech}
+    class="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3"
+    data-testid="round-speech"
+  >
     <summary class="cursor-pointer text-xs font-semibold">Speech</summary>
     {#if slice}
       <div class="mt-2">
@@ -119,7 +126,12 @@
     {/if}
   </details>
 
-  <details class="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3" data-testid="round-claims">
+  <details
+    id={SECTION.claims}
+    use:urlDisclosure={SECTION.claims}
+    class="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3"
+    data-testid="round-claims"
+  >
     <summary class="cursor-pointer text-xs font-semibold">Citing Claims ({claims.length})</summary>
     <ul class="mt-2 space-y-1">
       {#each claims as c (c.id)}

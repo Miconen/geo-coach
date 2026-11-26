@@ -33,6 +33,23 @@ describe("links", () => {
     expect(links.session(D, "S", { run: R })).toBe(`/duos/${D}/sessions/S?run=${R}#run-${R}`);
   });
 
+  it("anchors Rounds, Learnings and sections (#73)", () => {
+    expect(links.game(D, "G", { round: R })).toBe(`/duos/${D}/games/G#round-${R}`);
+    expect(links.game(D, "G", { learning: R })).toBe(`/duos/${D}/games/G#learning-${R}`);
+    expect(links.game(D, "G", { section: "runs" })).toBe(`/duos/${D}/games/G#runs`);
+    expect(links.round(D, "G", 3, { learning: R })).toBe(`/duos/${D}/games/G/rounds/3#learning-${R}`);
+    expect(links.round(D, "G", 3, { section: "speech" })).toBe(`/duos/${D}/games/G/rounds/3#speech`);
+    expect(links.session(D, "S", { round: R })).toBe(`/duos/${D}/sessions/S#round-${R}`);
+    expect(links.session(D, "S", { learning: R })).toBe(`/duos/${D}/sessions/S#learning-${R}`);
+  });
+
+  it("builds Stats with a Map view focus and a Rankings row (#73)", () => {
+    expect(links.stats(D, { smooth: "light" }, { map: { country: "BG", regions: ["BG-22"], roundId: R, allRounds: true } })).toBe(
+      `/duos/${D}/stats?smooth=light&focus=BG&region=BG-22&round=${R}&allRounds=1`,
+    );
+    expect(links.stats(D, {}, { rank: "ES", section: "rankings" })).toBe(`/duos/${D}/stats?rank=ES#rankings`);
+  });
+
   it("builds Settings and login", () => {
     expect(links.settings()).toBe("/settings");
     expect(links.login()).toBe("/login");

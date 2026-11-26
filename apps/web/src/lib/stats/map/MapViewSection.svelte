@@ -3,8 +3,9 @@
   // shows Round dots and a smoothed Areas or Countries overlay with hover cards; a
   // click focuses a country (its Regions, answer pins and guess avatars); a pin opens
   // the Round card; Lasso and Box select an area. Esc steps back one thing at a time.
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { env } from "$env/dynamic/public";
+  import { pushQuery, viewParams } from "$lib/url-state.js";
   import type { Map as MapboxMap, MapMouseEvent } from "mapbox-gl";
   import type { FeatureCollection, Polygon } from "geojson";
   import "mapbox-gl/dist/mapbox-gl.css";
@@ -62,10 +63,15 @@
     backToWorld,
     clickRegion,
     focusCountry,
+    mapUrlViewOf,
+    parseMapView,
+    sameMapUrlView,
     stepBack,
+    writeMapView,
     type AreaTarget,
     type DrawTool,
     type ExplorerView,
+    type MapUrlView,
   } from "./view-state.js";
 
   let { duoId, payload, rounds }: { duoId: string; payload: StatsPayload; rounds: StatsRound[] } = $props();
@@ -83,7 +89,9 @@
   let worldRounds = $state<WorldRounds>("all");
   let show = $state<ShowMode>("answers");
   let who = $state<GuessWho>("best");
-  let view = $state<ExplorerView>({ ...WORLD_VIEW });
+  // The focus is in the URL (#73): a reload or a shared link opens the same country, Regions and Round card.
+  const urlView = $derived(parseMapView(viewParams()));
+  let view = $state<ExplorerView>(untrack(() => explorerViewOf(urlView, { ...WORLD_VIEW })));
   let areaTarget = $state<AreaTarget>("answers");
   let hover = $state<{ kind: "country" | "region"; code: string; name: string; x: number; y: number } | null>(null);
   let zoomedIn = $state(false);
@@ -222,10 +230,62 @@
 
   // --- view changes -----------------------------------------------------------
 
+  /**
+   * The explorer view a URL asks for, on top of `base` (which keeps its tool and area). A Round the payload
+   * doesn't hold is dropped, as a malformed param would be.
+   */
+  function explorerViewOf(u: MapUrlView, base: ExplorerView): ExplorerView {
+    const round = u.roundId ? payload.rounds.find((r) => r.id === u.roundId && isPlacedRound(r)) : undefined;
+    return {
+      ...base,
+      country: u.country,
+      regions: u.regions,
+      roundId: round?.id ?? null,
+      gameId: round && u.allRounds ? round.gameId : null,
+    };
+  }
+
+  /** A focus change (country, Regions, Round, its Game) adds a history entry, so Back undoes it (#73). */
+  function commit(next: ExplorerView) {
+    const u = mapUrlViewOf(next);
+    if (!sameMapUrlView(u, urlView)) pushQuery((params) => writeMapView(params, u));
+  }
+
+  // Back, Forward or a link changed the URL's focus: follow it, framing the camera from the new selection.
+  $effect(() => {
+    const u = urlView;
+    untrack(() => {
+      if (sameMapUrlView(u, mapUrlViewOf(view))) return;
+      const prev = view;
+      view = explorerViewOf(u, view);
+      hover = null;
+      frame(prev);
+    });
+  });
+
+  /** Frames the camera on the current selection (the camera is never in the URL). */
+  function frame(prev: ExplorerView | null) {
+    if (!ready || !map) {
+      pendingFrame = true;
+      return;
+    }
+    if (openRound) {
+      const cam = view.gameId ? gameCamera(gameRoundsOf(view.gameId)) : null;
+      if (cam) map.flyTo({ ...cam, pitch: 0, padding: { top: 60, bottom: 40, left: 0, right: 360 }, duration: 1000 });
+      else fitRound(openRound);
+    } else if (view.country) {
+      if (view.regions.length) fitRegions(view.regions);
+      else fit(focusBounds(countryRounds), 6);
+    } else if (prev?.country) {
+      flyToWorld();
+    }
+  }
+
   /** Moves to a new view, with the camera and drawing side effects of the change. */
   function setView(next: ExplorerView) {
     const prev = view;
     view = next;
+    commit(next);
     if (next.tool !== prev.tool) drawing?.setTool(next.tool);
     if (prev.country && !next.country) flyToWorld();
     else if (next.country && prev.regions.length && !next.regions.length && !next.roundId) {
@@ -242,6 +302,7 @@
   function selectRegion(code: string, add: boolean) {
     const next = clickRegion(view, code, add);
     view = next;
+    commit(next);
     if (next.regions.length) fitRegions(next.regions);
     else fit(focusBounds(countryRounds), 6);
   }
@@ -253,7 +314,7 @@
     // The card derives from view.roundId at once (#56 2b); only the camera waits for the map.
     setView({ ...view, roundId, gameId });
     if (ready && map) fitRound(r);
-    else pendingRoundId = roundId;
+    else pendingFrame = true;
   }
 
   function fitRound(r: PlacedRound) {
@@ -274,8 +335,8 @@
     if (cam) map?.flyTo({ ...cam, pitch: 0, padding: { top: 60, bottom: 40, left: 0, right: 360 }, duration: 1000 });
   }
 
-  /** A Round whose camera fit waits for the map (opened before it loaded). */
-  let pendingRoundId: string | null = null;
+  /** A selection whose camera framing waits for the map (from the URL, or opened before the map loaded). */
+  let pendingFrame = untrack(() => view.country !== null || view.roundId !== null);
 
   /**
    * Scrolls the Map view into sight and opens a Round's card, for other sections
@@ -284,11 +345,6 @@
   export function showRound(roundId: string, opts: { scroll?: boolean } = {}) {
     if (opts.scroll !== false) wrapper?.scrollIntoView({ behavior: "smooth", block: "end" });
     openRoundById(roundId);
-  }
-
-  /** The open Round, for the page's Back snapshot. */
-  export function openRoundId(): string | null {
-    return view.roundId;
   }
 
   function setTool(tool: DrawTool) {
@@ -362,10 +418,9 @@
         payload.players.map((p, i) => ({ initial: initial(p.displayName), color: colors[i]! })),
       );
       ready = true;
-      if (pendingRoundId) {
-        const r = view.roundId === pendingRoundId ? allPlaced.find((x) => x.id === pendingRoundId) : undefined;
-        if (r) fitRound(r);
-        pendingRoundId = null;
+      if (pendingFrame) {
+        pendingFrame = false;
+        frame(null);
       }
     });
     drawing = attachDrawing(m, {

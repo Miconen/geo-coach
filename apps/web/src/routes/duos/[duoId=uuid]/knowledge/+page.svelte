@@ -14,7 +14,7 @@
   import { recall } from "$lib/recall.svelte.js";
   import type { ClaimDetails, KnowledgeLookups, KnowledgePayload } from "$lib/server/entities/index.js";
   import type { WorkbenchClaim } from "$lib/server/workbench/view-model.js";
-  import { updateQuery } from "$lib/stats/url-query.js";
+  import { updateQuery } from "$lib/url-state.js";
   import {
     CLAIM_CARD_PAGE,
     CLAIM_STATUSES,

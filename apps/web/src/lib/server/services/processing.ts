@@ -13,6 +13,7 @@ import {
 import type { AppDb } from "../db/index.js";
 import {
   callLabels,
+  roundClues,
   learnings,
   learningReactions,
   learningRounds,
@@ -578,7 +579,7 @@ export async function finishProcessingRun(
   db: AppDb,
   runId: string,
   now: Date = new Date(),
-): Promise<{ runId: string; inputCount: number; learningCount: number; callLabelCount: number }> {
+): Promise<{ runId: string; inputCount: number; learningCount: number; callLabelCount: number; roundClueCount: number }> {
   const run = await db.query.processingRuns.findFirst({
     where: eq(processingRuns.id, runId),
   });
@@ -619,9 +620,10 @@ export async function finishProcessingRun(
     .set({ status: "finished", finishedAt: now })
     .where(eq(processingRuns.id, run.id));
 
-  const [runLearnings, runCallLabels] = await Promise.all([
+  const [runLearnings, runCallLabels, runRoundClues] = await Promise.all([
     db.query.learnings.findMany({ where: eq(learnings.runId, run.id) }),
     db.query.callLabels.findMany({ where: eq(callLabels.runId, run.id) }),
+    db.query.roundClues.findMany({ where: eq(roundClues.runId, run.id), columns: { id: true } }),
   ]);
 
   return {
@@ -629,6 +631,7 @@ export async function finishProcessingRun(
     inputCount: overlapping.length,
     learningCount: runLearnings.length,
     callLabelCount: runCallLabels.length,
+    roundClueCount: runRoundClues.length,
   };
 }
 

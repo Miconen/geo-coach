@@ -173,7 +173,7 @@ export async function loadSessionRunsPage(
   // No-op groups for the main list's first page; the newest no-op of each purpose is the listed row.
   let noOps: RunTimelineNoOp[] = [];
   if (firstPage) {
-    const groups = await query<{ purpose: "extract" | "tips"; n: number; newest_id: string; newest_at: string }>(db, sql`
+    const groups = await query<{ purpose: "extract" | "tips" | "clues"; n: number; newest_id: string; newest_at: string }>(db, sql`
       ${unified}
       select purpose, count(*)::int as n,
         (array_agg(id order by sort_key desc, id desc))[1] as newest_id,

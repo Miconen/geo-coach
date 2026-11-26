@@ -18,7 +18,7 @@ const WORKER_AGENT = "geo-coach-worker";
 /** The cancellation note for a job whose range was already processed; the run history collapses these. */
 export const ALREADY_UP_TO_DATE = "Already up to date.";
 
-export type ProcessingJobPurpose = "extract" | "tips";
+export type ProcessingJobPurpose = "extract" | "tips" | "clues";
 type JobRow = typeof processingJobs.$inferSelect;
 
 /**

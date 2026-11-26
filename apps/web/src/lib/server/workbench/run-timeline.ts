@@ -76,7 +76,7 @@ export interface RunTimelineRow {
 }
 
 export interface RunTimelineNoOp {
-  purpose: "extract" | "tips";
+  purpose: "extract" | "tips" | "clues";
   count: number;
   newestJobId: string;
   newestAt: string;
@@ -155,7 +155,7 @@ export async function buildRunTimeline(
   const runRows = runs.map((run) => runRow(run, jobOfRun.get(run.id) ?? null, counts));
 
   const jobRows: RunTimelineRow[] = [];
-  const noOps = new Map<"extract" | "tips", RunTimelineNoOp>();
+  const noOps = new Map<"extract" | "tips" | "clues", RunTimelineNoOp>();
   for (const job of runlessJobs) {
     if (job.status === "cancelled" && job.error === ALREADY_UP_TO_DATE) {
       const at = (job.finishedAt ?? job.createdAt).toISOString();

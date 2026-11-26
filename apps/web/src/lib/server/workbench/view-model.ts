@@ -610,6 +610,7 @@ export async function buildWorkbenchData(
     {
       extract: Awaited<ReturnType<typeof deriveSessionWorkRanges>>;
       tips: Awaited<ReturnType<typeof deriveSessionWorkRanges>>;
+      clues: Awaited<ReturnType<typeof deriveSessionWorkRanges>>;
     }
   >();
   let totalPendingRanges = 0;
@@ -618,11 +619,11 @@ export async function buildWorkbenchData(
   const workBySession = await deriveWorkRangesBySession(
     db,
     duoId,
-    ["extract", "tips"] as const,
+    ["extract", "tips", "clues"] as const,
     allSessions.map((ses) => ses.id),
   );
   for (const ses of allSessions) {
-    const work = workBySession.get(ses.id) ?? { extract: [], tips: [] };
+    const work = workBySession.get(ses.id) ?? { extract: [], tips: [], clues: [] };
     workRangesBySession.set(ses.id, work);
     totalPendingRanges += work.extract.length;
   }
@@ -689,7 +690,7 @@ export async function buildWorkbenchData(
       }
     }
 
-    const work = workRangesBySession.get(ses.id) ?? { extract: [], tips: [] };
+    const work = workRangesBySession.get(ses.id) ?? { extract: [], tips: [], clues: [] };
     const status: WorkbenchSession["status"] = work.extract.some((w) => w.reason === "unprocessed")
       ? "unprocessed"
       : work.extract.some((w) => w.reason === "stale")
@@ -711,7 +712,7 @@ export async function buildWorkbenchData(
       extractWorkCount: work.extract.length,
       tipsWorkCount: work.tips.length,
       status,
-      workRanges: [...work.extract, ...work.tips].map((w) => describeWorkRange(w, playersMap)),
+      workRanges: [...work.extract, ...work.tips, ...work.clues].map((w) => describeWorkRange(w, playersMap)),
       deletedRanges,
     });
   }

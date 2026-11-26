@@ -12,6 +12,7 @@ import type { AppDb } from "../db/index.js";
 import { extractBearerToken, verifyApiToken } from "../auth/index.js";
 import {
   mcpAddCallLabels,
+  mcpAddRoundClues,
   mcpAddClaims,
   mcpAddLearnings,
   mcpAddSource,
@@ -36,8 +37,10 @@ import { DomainError } from "../services/index.js";
 import { duoEventBus } from "../events/bus.js";
 
 /** All a site-started job may use, by kind. New tools stay unavailable to jobs unless added here. */
-const JOB_TOOLS: Record<ProcessingJobScope["kind"], ReadonlySet<string>> = {
+const JOB_TOOLS: Record<ProcessingJobScope["kind"] | "clues-run", ReadonlySet<string>> = {
   run: new Set(["get_instructions", "read_range", "search_claims", "add_claims", "add_learnings", "finish_run"]),
+  // A clues run's job (#89) links its Rounds to Clues and makes no Learnings or Claims.
+  "clues-run": new Set(["get_instructions", "read_range", "list_clues", "add_round_clues", "finish_run"]),
   // A Claim tagging job (#89) touches only Clues and the Claims it took from the queue.
   "tag-claims": new Set(["get_instructions", "list_clues", "list_claims_to_tag", "tag_claims"]),
 };
@@ -129,13 +132,22 @@ export function createGeoCoachMcpServer(
 
   server.tool(
     "read_range",
-    "Read an open Processing run's range. extract/tips: compact transcript, Round markers, ±2 min uncitable context, existing Learnings, topic tags, and the Duo's Claims (with derived status) for every country in the range's Rounds. calls: the Split and Spread Rounds with both teams' guessed countries and Regions and the Utterances spoken while guessing.",
+    "Read an open Processing run's range. clues: each Round with only the Utterances spoken while it was guessed and its current Clues. extract/tips: compact transcript, Round markers, ±2 min uncitable context, existing Learnings, topic tags, and the Duo's Claims (with derived status) for every country in the range's Rounds. calls: the Split and Spread Rounds with both teams' guessed countries and Regions and the Utterances spoken while guessing.",
     {
       runId: z.string().uuid(),
     },
     async ({ runId }) => {
       assertJobRun(job, runId);
       const res = await mcpReadRange(db, playerId, runId);
+      if (res.purpose === "clues") {
+        const text = [
+          `Run: ${res.runId} (clues)`,
+          `Range: ${res.rangeStart} .. ${res.rangeEnd} (${res.rounds.length} Rounds, ${res.citableUtteranceCount} citable utterances; only speech while guessing is listed)`,
+          "",
+          res.transcript,
+        ].join("\n");
+        return { content: [{ type: "text", text }] };
+      }
       if (res.purpose === "calls") {
         const text = [
           `Run: ${res.runId} (calls)`,
@@ -324,7 +336,7 @@ export function createGeoCoachMcpServer(
       duo: z.string().optional(),
     },
     async (args) => {
-      const res = await mcpListClues(db, playerId, args, tagScope(job));
+      const res = await mcpListClues(db, playerId, job ? { ...args, duo: job.duoId } : args, tagScope(job));
       return { content: [{ type: "text", text: JSON.stringify(res, null, job ? undefined : 2) }] };
     },
   );
@@ -356,6 +368,20 @@ export function createGeoCoachMcpServer(
   );
 
   server.tool(
+    "add_round_clues",
+    "Add a batch of Round Clues to an open clues Processing run: { roundId, clues: [{ clueId | family + name, utteranceRefs, note? }] } per Round, citing only Utterances spoken while it was guessed. Each item replaces what this run said about that Round; clues: [] says none was said. Returns the Clues created. Valid items are saved even if other items fail validation.",
+    {
+      runId: z.string().uuid(),
+      items: z.array(z.record(z.unknown())).min(1),
+    },
+    async ({ runId, items }) => {
+      assertJobRun(job, runId);
+      const res = await mcpAddRoundClues(db, playerId, runId, items);
+      return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }] };
+    },
+  );
+
+  server.tool(
     "finish_run",
     "Finish a Processing run so its Learnings or Call labels take effect and inputs are snapshotted.",
     {
@@ -372,7 +398,8 @@ export function createGeoCoachMcpServer(
 
   if (job) {
     for (const [name, tool] of registeredTools) {
-      if (!JOB_TOOLS[job.kind].has(name)) tool.remove();
+      const allowed = JOB_TOOLS[job.kind === "run" && job.purpose === "clues" ? "clues-run" : job.kind];
+      if (!allowed.has(name)) tool.remove();
     }
     // Jobs have no file tools, so a result Claude Code moves to a file would be lost.
     registeredTools.get("read_range")?.update({
@@ -398,6 +425,13 @@ export function createGeoCoachMcpServer(
 
   server.prompt("calls", "Label Calls on Split and Spread Rounds in a geo-coach Session", async () => {
     const { instructions } = await mcpGetInstructions("calls");
+    return {
+      messages: [{ role: "user", content: { type: "text", text: instructions } }],
+    };
+  });
+
+  server.prompt("clues", "Link each Round of a geo-coach Session to the Clues said while guessing", async () => {
+    const { instructions } = await mcpGetInstructions("clues");
     return {
       messages: [{ role: "user", content: { type: "text", text: instructions } }],
     };

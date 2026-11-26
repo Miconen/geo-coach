@@ -12,6 +12,7 @@ import {
   isMissingTime,
   roundWindowsById,
   learningItemInputSchema,
+  roundCluesItemInputSchema,
   regionName,
   roundHedge,
   type DerivedGuess,
@@ -62,6 +63,11 @@ import {
   finishProcessingRun,
   getCurrentTranscriptVersionIds,
   insertRunCallLabels,
+  insertRunRoundClues,
+  clueResolver,
+  deriveCurrentRoundClues,
+  listDuoClues,
+  seedDuoClues,
   insertRunLearnings,
   isCallableRound,
   queueTaggingOfChangedClaims,
@@ -71,7 +77,7 @@ import {
   startProcessingRun,
 } from "../services/index.js";
 import { duoEventBus } from "../events/bus.js";
-import { getCurrentPromptVersion, loadPromptInstructions } from "./prompts.js";
+import { getCurrentPromptVersion, loadClueVocabulary, loadPromptInstructions } from "./prompts.js";
 
 const CONTEXT_PADDING_MS = 2 * 60 * 1000;
 const MAX_RANGE_TOKENS = 25_000;
@@ -341,6 +347,9 @@ export async function mcpReadRange(db: AppDb, playerId: string, runId: string) {
   await resolveDuoForPlayer(db, playerId, run.duoId);
   if (run.purpose === "calls") {
     return readCallsRange(db, run);
+  }
+  if (run.purpose === "clues") {
+    return readCluesRange(db, run);
   }
 
   const padStart = new Date(run.rangeStart.getTime() - CONTEXT_PADDING_MS);
@@ -1093,6 +1102,152 @@ export async function mcpAddCallLabels(
 
   const savedIds = valid.length > 0 ? await insertRunCallLabels(db, run.id, run.duoId, valid) : [];
   return { savedCount: savedIds.length, savedIds, errors };
+}
+
+/**
+ * `read_range` for a `clues` run (#89): the range's Rounds, each with only the citable Utterances spoken while
+ * guessing (#80: nothing after guessing ends), and the Round's current Clues. The answer and the guesses are left
+ * out, so the tagger reads what was said, not what the Round turned out to be.
+ */
+async function readCluesRange(db: AppDb, run: RunRow) {
+  const [{ inRange, utteranceToRef }, rangeRounds, allPlayers, correctTranscript] = await Promise.all([
+    getRunInRangeUtterances(db, run),
+    loadRunRangeRounds(db, run),
+    db.query.players.findMany(),
+    loadTranscriptCorrector(db, run.duoId),
+  ]);
+  const [current, duoClues] = await Promise.all([
+    deriveCurrentRoundClues(db, run.duoId, rangeRounds.map((r) => r.id)),
+    listDuoClues(db, run.duoId),
+  ]);
+  const clueById = new Map(duoClues.map((c) => [c.id, c]));
+  const playerNameById = new Map(allPlayers.map((p) => [p.id, p.displayName]));
+  const gameIds = [...new Set(rangeRounds.map((r) => r.gameId))];
+  const rangeGames =
+    gameIds.length > 0 ? await db.query.games.findMany({ where: inArray(games.id, gameIds) }) : [];
+  const ggGameIdById = new Map(rangeGames.map((g) => [g.id, g.geoguessrGameId]));
+
+  const roundsOut = rangeRounds.map((r) => {
+    const guessing = roundGuessingInterval(r);
+    const said = inRange
+      .filter((u) => u.startedAt < guessing.endedAt && intervalsOverlap({ startedAt: u.startedAt, endedAt: u.endedAt }, guessing))
+      .map((u) => ({
+        ref: utteranceToRef.get(u.id)!,
+        at: formatHmsUtc(u.startedAt),
+        speaker: playerNameById.get(u.playerId) ?? "Player",
+        text: correctTranscript(u).text,
+      }));
+    return {
+      roundId: r.id,
+      game: ggGameIdById.get(r.gameId) ?? r.gameId,
+      roundNumber: r.roundNumber,
+      utterances: said,
+      currentClues: (current.get(r.id) ?? []).flatMap((c) => {
+        const clue = clueById.get(c.clueId);
+        return clue ? [`${clue.family}: ${clue.name}`] : [];
+      }),
+    };
+  });
+
+  const lines: string[] = [];
+  for (const r of roundsOut) {
+    lines.push(
+      `--- Game ${r.game} Round ${r.roundNumber} [roundId=${r.roundId}]${r.currentClues.length ? ` | Current Clues: ${r.currentClues.join("; ")}` : ""} ---`,
+    );
+    if (r.utterances.length === 0) lines.push("(no speech while guessing)");
+    for (const u of r.utterances) lines.push(`[${u.at}] ${u.ref} ${u.speaker}: ${u.text}`);
+  }
+
+  return {
+    runId: run.id,
+    purpose: "clues" as const,
+    rangeStart: run.rangeStart.toISOString(),
+    rangeEnd: run.rangeEnd.toISOString(),
+    citableUtteranceCount: inRange.length,
+    rounds: roundsOut,
+    transcript: lines.join("\n") || "(no Rounds in this range)",
+  };
+}
+
+/**
+ * `add_round_clues`: saves a `clues` run's Clues for some Rounds. Each item is every Clue said in one Round of the
+ * run's range (it replaces what this run said about that Round earlier), citing only Utterances spoken while that
+ * Round's guessing was on. Clues are reused by id or by family and name, and created only inside a vocabulary
+ * family; the Clues created are reported. Invalid items are reported and the rest saved.
+ */
+export async function mcpAddRoundClues(db: AppDb, playerId: string, runId: string, rawItems: unknown[]) {
+  const run = await findScopedRun(db, runId);
+  if (!run) {
+    throw new DomainError("NOT_FOUND", "Processing run not found", 404);
+  }
+  await resolveDuoForPlayer(db, playerId, run.duoId);
+  if (run.status !== "open") {
+    throw new DomainError("CONFLICT", `Processing run is already ${run.status}`, 409);
+  }
+  if (run.purpose !== "clues") {
+    throw new DomainError("WRONG_PURPOSE", `A ${run.purpose} Processing run doesn't link Rounds to Clues`, 400);
+  }
+
+  const vocabulary = await loadClueVocabulary();
+  await seedDuoClues(db, run.duoId, vocabulary);
+  const [{ refToUtterance }, rangeRounds, resolver] = await Promise.all([
+    getRunInRangeUtterances(db, run),
+    loadRunRangeRounds(db, run),
+    clueResolver(db, run.duoId, vocabulary),
+  ]);
+  const roundById = new Map(rangeRounds.map((r) => [r.id, r]));
+
+  const valid: Parameters<typeof insertRunRoundClues>[3][number][] = [];
+  const errors: Array<{ index: number; message: string }> = [];
+  for (let i = 0; i < rawItems.length; i++) {
+    const parsed = roundCluesItemInputSchema.safeParse(rawItems[i]);
+    if (!parsed.success) {
+      errors.push({
+        index: i,
+        message: parsed.error.issues.map((iss) => `${iss.path.join(".")}: ${iss.message}`).join("; "),
+      });
+      continue;
+    }
+    const item = parsed.data;
+    const round = roundById.get(item.roundId);
+    if (!round) {
+      errors.push({ index: i, message: `Round ${item.roundId} is not in this run's range` });
+      continue;
+    }
+    // Speech after guessing ends reacts to the reveal (#80): it never names a Round's Clue.
+    const guessing = roundGuessingInterval(round);
+    const problems: string[] = [];
+    const roundClueItems: Array<{ clueId: string; note: string | null; utteranceIds: string[] }> = [];
+    for (const c of item.clues) {
+      const badRefs = c.utteranceRefs.filter((ref) => {
+        const u = refToUtterance.get(ref);
+        return !u || u.startedAt >= guessing.endedAt || !intervalsOverlap({ startedAt: u.startedAt, endedAt: u.endedAt }, guessing);
+      });
+      if (badRefs.length > 0) {
+        problems.push(`utteranceRefs not spoken while Round ${round.roundNumber} was guessed: ${badRefs.join(", ")}`);
+        continue;
+      }
+      const clue = await resolver.resolve(c);
+      if ("error" in clue) {
+        problems.push(clue.error);
+        continue;
+      }
+      roundClueItems.push({ clueId: clue.id, note: c.note ?? null, utteranceIds: c.utteranceRefs.map((ref) => refToUtterance.get(ref)!.id) });
+    }
+    if (problems.length > 0) {
+      errors.push({ index: i, message: problems.join("; ") });
+      continue;
+    }
+    valid.push({ roundId: round.id, clues: roundClueItems });
+  }
+
+  const savedCount = valid.length > 0 ? await insertRunRoundClues(db, run.id, run.duoId, valid) : 0;
+  return {
+    savedRounds: valid.length,
+    savedCount,
+    createdClues: resolver.created.map((c) => ({ clueId: c.id, family: c.family, name: c.name })),
+    errors,
+  };
 }
 
 /**

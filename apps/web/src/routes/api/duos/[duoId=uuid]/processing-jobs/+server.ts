@@ -8,7 +8,7 @@ import { enqueueProcessingJobs, isProcessorOnline } from "$lib/server/mcp/proces
 const enqueueSchema = z
   .object({
     sessionId: z.string().uuid(),
-    purpose: z.enum(["extract", "tips"]),
+    purpose: z.enum(["extract", "tips", "clues"]),
     startUtc: z.string().datetime(),
     endUtc: z.string().datetime(),
   })

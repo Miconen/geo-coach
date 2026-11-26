@@ -200,7 +200,7 @@ describe("knowledge bank: Claims, Evidence and MCP tools (#46)", () => {
 
     const run = await startExtract();
     const view = await mcpReadRange(handle.db, mikoId, run.runId);
-    if (view.purpose === "calls") throw new Error("expected an extract range");
+    if (view.purpose === "calls" || view.purpose === "clues") throw new Error("expected an extract range");
     // True country BG and the Duo's guess RO; PA appears nowhere
     expect(view.claimCountries).toEqual(["BG", "RO"]);
     expect(view.claims.map((c) => c.text).sort()).toEqual([
@@ -339,7 +339,7 @@ describe("knowledge bank: Claims, Evidence and MCP tools (#46)", () => {
     expect(claim!.learningIds).toEqual([learning!.id]);
 
     const view = await mcpReadRange(handle.db, mikoId, (await startExtract()).runId);
-    if (view.purpose === "calls") throw new Error("expected an extract range");
+    if (view.purpose === "calls" || view.purpose === "clues") throw new Error("expected an extract range");
     expect(view.existingLearnings[0]!.claimId).toBe(claimId);
     expect(view.claims[0]!.learningCount).toBe(1);
   });

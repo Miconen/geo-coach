@@ -755,7 +755,7 @@ export const processingJobs = pgTable(
     requestedByPlayerId: uuid("requested_by_player_id")
       .notNull()
       .references(() => players.id, { onDelete: "cascade" }),
-    purpose: text("purpose").$type<"extract" | "tips">().notNull(),
+    purpose: text("purpose").$type<"extract" | "tips" | "clues">().notNull(),
     rangeStart: timestamp("range_start", { withTimezone: true }).notNull(),
     rangeEnd: timestamp("range_end", { withTimezone: true }).notNull(),
     status: text("status")

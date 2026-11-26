@@ -43,50 +43,68 @@ const round = (over: Partial<MapRound>): MapRound => ({
   countryCode: "DK",
   won: false,
   guesses: [],
-  learningCountries: [],
   ...over,
 });
 
 const scene = (over: Partial<MapScene>): MapScene => ({ header: "", rounds: [], focusRoundIds: [], masked: false, ...over });
 
 describe("lensCategories", () => {
-  it("paints a Duo wrong guess red, but never an Opponent's", () => {
-    const r = round({
-      countryCode: "DK",
-      guesses: [guess({ countryCode: "DE" }), guess({ countryCode: "PL", isDuo: false, playerId: null })],
-    });
-    const cats = lensCategories([r], false);
-    expect(cats.get("DE")).toEqual(["r"]);
-    expect(cats.has("PL")).toBe(false);
-    expect(cats.get("DK")).toEqual(["g"]);
+  it("fills the answer plain green with no outline when a Duo guess landed there", () => {
+    const r = round({ countryCode: "DK", said: ["DK"], guesses: [guess({ countryCode: "DK" })] });
+    const lens = lensCategories([r], false);
+    expect(lens.fills.get("DK")).toBe("g");
+    expect(lens.outlines.has("DK")).toBe(false);
   });
 
-  it("keeps the answer plain green when Learnings name it", () => {
-    const r = round({ countryCode: "DK", learningCountries: ["DK"] });
-    expect(lensCategories([r], false).get("DK")).toEqual(["g"]);
+  it("fills the answer green and outlines it when it was said but missed", () => {
+    const r = round({ countryCode: "DK", said: ["DK"], guesses: [guess({ countryCode: "DE" })] });
+    const lens = lensCategories([r], false);
+    expect(lens.fills.get("DK")).toBe("g");
+    expect(lens.outlines.has("DK")).toBe(true);
   });
 
-  it("stripes a wrong-guess country also named in Learnings red and yellow", () => {
-    const r = round({ countryCode: "DK", guesses: [guess({ countryCode: "DE" })], learningCountries: ["DE"] });
-    expect(lensCategories([r], false).get("DE")).toEqual(["r", "y"]);
+  it("fills a Duo wrong guess that was also said plain red, with no outline", () => {
+    const r = round({ countryCode: "DK", said: ["DE"], guesses: [guess({ countryCode: "DE" })] });
+    const lens = lensCategories([r], false);
+    expect(lens.fills.get("DE")).toBe("r");
+    expect(lens.outlines.has("DE")).toBe(false);
   });
 
-  it("stripes a country that's an answer in one focused Round and a wrong guess in another green and red", () => {
+  it("only outlines a country said while guessing that was neither guessed nor the answer", () => {
+    const r = round({ countryCode: "DK", said: ["SE"], guesses: [guess({ countryCode: "DE" })] });
+    const lens = lensCategories([r], false);
+    expect(lens.fills.has("SE")).toBe(false);
+    expect(lens.outlines.has("SE")).toBe(true);
+  });
+
+  it("paints nothing for an Opponent-only guess", () => {
+    const r = round({ countryCode: "DK", guesses: [guess({ countryCode: "PL", isDuo: false, playerId: null })] });
+    const lens = lensCategories([r], false);
+    expect(lens.fills.has("PL")).toBe(false);
+    expect(lens.outlines.has("PL")).toBe(false);
+    // Said aloud too: an Opponent landing there isn't the Duo guessing it, so it's outlined, never filled.
+    const said = lensCategories([round({ ...r, said: ["PL"] })], false);
+    expect(said.fills.has("PL")).toBe(false);
+    expect(said.outlines.has("PL")).toBe(true);
+  });
+
+  it("paints nothing under Recall", () => {
+    const r = round({ guesses: [guess({ countryCode: "DE" })], said: ["SE", "DK"] });
+    const lens = lensCategories([r], true);
+    expect(lens.fills.size).toBe(0);
+    expect(lens.outlines.size).toBe(0);
+  });
+
+  it("outlines nothing for a Round with no transcript (the Games list)", () => {
+    const r = round({ countryCode: "DK", guesses: [guess({ countryCode: "DE" })] });
+    expect(lensCategories([r], false).outlines.size).toBe(0);
+  });
+
+  it("fills a country green when it's the answer in one focused Round and a wrong guess in another", () => {
     const a = round({ id: "a", countryCode: "CZ" });
     const b = round({ id: "b", countryCode: "AT", guesses: [guess({ countryCode: "CZ" })] });
-    expect(lensCategories([a, b], false).get("CZ")).toEqual(["g", "r"]);
-  });
-
-  it("stripes the answer green and violet when said aloud but missed, never when guessed", () => {
-    const missed = round({ countryCode: "DK", saidAloud: true, guesses: [guess({ countryCode: "DE" })] });
-    expect(lensCategories([missed], false).get("DK")).toEqual(["g", "s"]);
-    const hit = round({ countryCode: "DK", saidAloud: true, guesses: [guess({ countryCode: "DK" })] });
-    expect(lensCategories([hit], false).get("DK")).toEqual(["g"]);
-  });
-
-  it("fills nothing under Recall", () => {
-    const r = round({ guesses: [guess({ countryCode: "DE" })], learningCountries: ["SE"] });
-    expect(lensCategories([r], true).size).toBe(0);
+    expect(lensCategories([a, b], false).fills.get("CZ")).toBe("g");
+    expect(lensCategories([b, a], false).fills.get("CZ")).toBe("g");
   });
 });
 

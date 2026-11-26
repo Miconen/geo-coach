@@ -181,3 +181,23 @@ export function placeCallouts<T>(
   }
   return out;
 }
+
+/** One point of the Game page's HP-over-Rounds strip (#82): both teams' HP after a Round. */
+export interface HpPoint {
+  roundId: string;
+  roundNumber: number;
+  us: number;
+  them: number;
+}
+
+/** The HP strip's points in play order, and the HP its scale tops out at (the Game's starting HP). */
+export function hpStrip(rounds: readonly DebriefRound[]): { points: HpPoint[]; max: number } {
+  const points = rounds.map((r) => ({ roundId: r.id, roundNumber: r.roundNumber, us: r.hpAfter.duo, them: r.hpAfter.opponents }));
+  const max = Math.max(1, ...rounds.flatMap((r) => [r.hpBefore.duo, r.hpBefore.opponents, r.hpAfter.duo, r.hpAfter.opponents]));
+  return { points, max };
+}
+
+/** The y of `hp` in a strip `height` tall: 0 HP at the bottom, `max` at the top, `pad` inside both edges. */
+export function hpY(hp: number, max: number, height: number, pad = 4): number {
+  return pad + (height - 2 * pad) * (1 - Math.max(0, Math.min(hp, max)) / max);
+}

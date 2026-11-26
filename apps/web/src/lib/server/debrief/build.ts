@@ -25,6 +25,8 @@ export interface DebriefInput {
   meta: ReadonlyMap<string, DebriefGameMeta>;
   /** The Session shown, for its Learnings that cite no Round; null for a Game with no Session. */
   sessionId: string | null;
+  /** Whether the Games were recorded, when no Session is shown: a Game or Round page (#82) of a recorded Game. */
+  recorded?: boolean;
 }
 
 const ms = (iso: string | Date) => new Date(iso).getTime();
@@ -125,7 +127,7 @@ export function buildDebrief(input: DebriefInput): Debrief {
       sessionLearningIds.push(l.id);
     }
   }
-  return { players: debriefPlayers(wb), games, rounds, learnings, sessionLearningIds, recorded: input.sessionId !== null };
+  return { players: debriefPlayers(wb), games, rounds, learnings, sessionLearningIds, recorded: input.recorded ?? input.sessionId !== null };
 }
 
 function debriefRound(

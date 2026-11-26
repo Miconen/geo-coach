@@ -17,6 +17,8 @@ export interface RoundSpeech {
   utterancesById: Record<string, WorkbenchUtterance>;
 }
 
+const noSpeech = (): RoundSpeech => ({ utteranceIds: [], utterancesById: {} });
+
 /**
  * One Round's full speech, loaded on demand (#72) so the Round page can read the cited-speech derivation the Games
  * list and Game page share. Same rules as buildWorkbenchData: current Transcript versions only, Utterances
@@ -28,9 +30,33 @@ export async function loadRoundSpeech(
   roundId: string,
   wb: Pick<WorkbenchData, "learnings">,
 ): Promise<RoundSpeech> {
-  const empty: RoundSpeech = { utteranceIds: [], utterancesById: {} };
   const [own] = await db.select({ gameId: rounds.gameId }).from(rounds).where(and(eq(rounds.id, roundId), roundInDuo(duoId)));
-  if (!own) return empty;
+  if (!own) return noSpeech();
+  return (await loadSpeech(db, duoId, own.gameId, new Set([roundId]), wb)).get(roundId) ?? noSpeech();
+}
+
+/**
+ * The full speech of every Round in one Game, by Round id (#82): what the Game page's transcript panel shows for a
+ * focused Round. One Game's speech, not the Duo's, so the page still reads the shared cited-speech derivation.
+ * Rounds without speech are absent.
+ */
+export async function loadGameSpeech(
+  db: AppDb,
+  duoId: string,
+  gameId: string,
+  wb: Pick<WorkbenchData, "learnings">,
+): Promise<Map<string, RoundSpeech>> {
+  return loadSpeech(db, duoId, gameId, null, wb);
+}
+
+async function loadSpeech(
+  db: AppDb,
+  duoId: string,
+  gameId: string,
+  only: ReadonlySet<string> | null,
+  wb: Pick<WorkbenchData, "learnings">,
+): Promise<Map<string, RoundSpeech>> {
+  const out = new Map<string, RoundSpeech>();
   // A window depends on its siblings (the successor's start), so pass every Round of the Game.
   const siblings = await db
     .select({
@@ -42,31 +68,31 @@ export async function loadRoundSpeech(
       resultsEndTime: rounds.resultsEndTime,
     })
     .from(rounds)
-    .where(and(eq(rounds.gameId, own.gameId), roundInDuo(duoId)));
-  const window = roundWindowsById(siblings).get(roundId)?.full;
-  if (!window) return empty;
+    .where(and(eq(rounds.gameId, gameId), roundInDuo(duoId)));
+  const windows = [...roundWindowsById(siblings)].flatMap(([id, w]) =>
+    w?.full && (!only || only.has(id)) ? [{ id, window: w.full }] : [],
+  );
+  if (windows.length === 0) return out;
+  const from = new Date(Math.min(...windows.map((w) => w.window.startedAt.getTime())));
+  const to = new Date(Math.max(...windows.map((w) => w.window.endedAt.getTime())));
 
   // A superset in SQL; intervalsOverlap below is the exact check.
   const candidates = await db
     .select(UTTERANCE_COLUMNS)
     .from(utterances)
-    .where(
-      and(
-        lte(utterances.startedAt, window.endedAt),
-        gte(utterances.endedAt, window.startedAt),
-        speechInDuo(duoId),
-      ),
-    )
+    .where(and(lte(utterances.startedAt, to), gte(utterances.endedAt, from), speechInDuo(duoId)))
     .orderBy(asc(utterances.startedAt), asc(utterances.id));
   const recordingIds = [...new Set(candidates.map((u) => u.recordingId))];
-  if (recordingIds.length === 0) return empty;
+  if (recordingIds.length === 0) return out;
   const [currentVersions, recs] = await Promise.all([
     getCurrentTranscriptVersionIds(db, recordingIds),
     db.select({ id: recordings.id, sessionId: recordings.sessionId }).from(recordings).where(inArray(recordings.id, recordingIds)),
   ]);
   const current = new Set(currentVersions.values());
-  const rows = candidates.filter((u) => current.has(u.transcriptVersionId) && intervalsOverlap(u, window));
-  if (rows.length === 0) return empty;
+  const live = candidates.filter((u) => current.has(u.transcriptVersionId));
+  const byRound = windows.map((w) => ({ id: w.id, rows: live.filter((u) => intervalsOverlap(u, w.window)) }));
+  const rows = [...new Map(byRound.flatMap((r) => r.rows.map((u) => [u.id, u] as const))).values()];
+  if (rows.length === 0) return out;
 
   const recSessionById = new Map(recs.map((r) => [r.id, r.sessionId]));
   const sessionIds = [...new Set(rows.flatMap((u) => recSessionById.get(u.recordingId) ?? []))];
@@ -80,10 +106,15 @@ export async function loadRoundSpeech(
     loadTranscriptCorrector(db, duoId),
   ]);
   const toWorkbenchUtterance = utteranceMapper({ recSessionById, workRangesBySession, citedByUtterance, correctTranscript });
-  const out: RoundSpeech = { utteranceIds: [], utterancesById: {} };
-  for (const row of rows) {
-    out.utteranceIds.push(row.id);
-    out.utterancesById[row.id] = toWorkbenchUtterance(row, false);
+  const mapped = new Map(rows.map((row) => [row.id, toWorkbenchUtterance(row, false)]));
+  for (const r of byRound) {
+    if (r.rows.length === 0) continue;
+    const speech = noSpeech();
+    for (const row of r.rows) {
+      speech.utteranceIds.push(row.id);
+      speech.utterancesById[row.id] = mapped.get(row.id)!;
+    }
+    out.set(r.id, speech);
   }
   return out;
 }

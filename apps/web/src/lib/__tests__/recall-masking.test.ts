@@ -38,7 +38,8 @@ const ANSWER_FIELDS: Array<{ file: string; fields: string[] }> = [
     fields: [
       "<RoundCoachingCard round={slice.round} utterances={slice.utterances} players={slice.players} />",
       "slice.utterances as u",
-      "p.round.lat.toFixed",
+      // The exact location renders only under ?location=1, which opens the Round already revealed (#82).
+      "<ClaimCard claim={c}",
     ],
   },
 ];

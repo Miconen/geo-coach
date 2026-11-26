@@ -4,8 +4,8 @@
   // drills from the Games into a Game's Rounds. A focused Round lives on the map (callouts at its pins, a card on
   // its answer) with its transcript in the right panel; a country opens its own view. The selection is in the URL
   // (selection.ts): focusing pushes, drawers replace, and nothing reruns the page's server load.
-  import { onMount, type Snippet } from "svelte";
-  import { afterNavigate } from "$app/navigation";
+  import { onMount, untrack, type Snippet } from "svelte";
+  import { afterNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import { fly, slide } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
@@ -36,7 +36,9 @@
     roundsOf,
     signed,
     stepRound,
+    hpStrip,
   } from "./view.js";
+  import HpStrip from "./HpStrip.svelte";
 
   let {
     debrief,
@@ -46,6 +48,11 @@
     details,
     defaultDrawer = null,
     back = null,
+    roundHref,
+    upHref = null,
+    hpStrip: withHpStrip = false,
+    roundTab,
+    startRevealed = false,
   }: {
     debrief: Debrief;
     duoId: string;
@@ -58,6 +65,16 @@
     back?: { label: string; href: string } | null;
     /** The drawer a cold load opens when the URL names none (a ?run= pin opens the details). */
     defaultDrawer?: "learnings" | "details" | null;
+    /** In a Round scope (#82), each Round's own page: focusing another Round navigates there. */
+    roundHref?: (r: DebriefRound) => string | null;
+    /** In a Round scope, where Esc and the panel's × lead (the Round's Game page). */
+    upHref?: string | null;
+    /** The Game page's HP-over-Rounds strip above the Round tiles (#82). */
+    hpStrip?: boolean;
+    /** A second tab beside a Round's transcript (#82: the Round page's Claims and Evidence), told whether Recall has revealed the Round. Its key is its anchor. */
+    roundTab?: { key: string; label: string; content: Snippet<[revealed: boolean]> };
+    /** Open already revealed under Recall (the Round page's ?location=1). */
+    startRevealed?: boolean;
   } = $props();
 
   const map = getSharedMap();
@@ -96,7 +113,7 @@
   let pop = $state<{ code: string; lng: number; lat: number; roundId: string } | null>(null);
 
   // Recall: the scope in view stays masked until revealed. Revealing a Game reveals its Rounds.
-  let revealed = $state<Record<string, boolean>>({});
+  let revealed = $state<Record<string, boolean>>(untrack((): Record<string, boolean> => (startRevealed ? { all: true } : {})));
   const scopeKey = $derived(round?.id ?? (country ? `c:${country.code}` : (game?.id ?? "all")));
   const isRevealed = (...keys: string[]) => !recall.on || revealed.all === true || keys.some((k) => revealed[k] === true);
   const masked = $derived(!isRevealed(scopeKey, round?.gameId ?? ""));
@@ -108,7 +125,20 @@
   };
   const focusRound = (id: string) => {
     const r = roundsById.get(id);
-    if (r) go({ round: id, game: country ? sel.game : r.gameId });
+    if (!r) return;
+    // A Round scope is that Round's page: another Round is another page (a new history entry).
+    if (scope.kind === "round") {
+      const href = r.id === round?.id ? null : roundHref?.(r);
+      if (href) void goto(href);
+      return;
+    }
+    go({ round: id, game: country ? sel.game : r.gameId });
+  };
+  /** Out of the focused Round: its Game or country, or, on a Round's own page, its Game page. */
+  const closeRound = () => {
+    if (scope.kind === "round") {
+      if (upHref) void goto(upHref);
+    } else go({ round: null });
   };
   function step(delta: 1 | -1) {
     const id = stepRound(seq, round?.id ?? null, delta);
@@ -119,7 +149,7 @@
     if (pop) pop = null;
     else if (missedOpen) missedOpen = false;
     else if (drawer) go({ drawer: null }, { replace: true });
-    else if (round) go({ round: null });
+    else if (round) closeRound();
     else if (country) go({ country: null });
     else if (game && scope.kind === "session") go({ game: null });
   }
@@ -134,6 +164,7 @@
   // A Round anchor (#round-<id>) focuses that Round instead of scrolling to it. No element here carries a Round's
   // id, so the Duo layout's anchor scrolling (followHash) finds nothing and leaves the map alone.
   function focusAnchor() {
+    if (scope.kind === "round") return;
     const id = anchoredRoundId(location.hash);
     const r = id ? roundsById.get(id) : undefined;
     if (r) select({ round: r.id, game: r.gameId, country: null }, { replace: true });
@@ -146,6 +177,45 @@
   });
 
   const panelOpen = $derived(round !== null || country !== null);
+  // The Round panel's tab (#82), in the URL; a cold load on the tab's anchor (#claims) opens it too.
+  const tab = $derived(
+    roundTab && (sel.tab === roundTab.key || (sel.tab === null && page.url.hash === `#${roundTab.key}`)) ? roundTab.key : "transcript",
+  );
+  const setTab = (key: string) => go({ tab: key === "transcript" ? null : key }, { replace: true });
+
+  // The HP strip (#82) puts each point over its Round tile: measure the tiles' centres in the bar.
+  let tilesEl = $state<HTMLElement | null>(null);
+  let tileXs = $state<Record<string, number>>({});
+  let barWidth = $state(0);
+  function measureTiles() {
+    if (!tilesEl) return;
+    const xs: Record<string, number> = {};
+    for (const t of tilesEl.querySelectorAll<HTMLElement>("[data-testid=round-tile]")) {
+      xs[t.dataset.roundId ?? ""] = t.offsetLeft - tilesEl.scrollLeft + t.offsetWidth / 2;
+    }
+    tileXs = xs;
+    barWidth = tilesEl.clientWidth;
+  }
+  $effect(() => {
+    const el = tilesEl;
+    if (!withHpStrip || !el) return;
+    void gameRounds;
+    measureTiles();
+    const ro = new ResizeObserver(measureTiles);
+    ro.observe(el);
+    for (const t of el.children) ro.observe(t);
+    el.addEventListener("scroll", measureTiles, { passive: true });
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("scroll", measureTiles);
+    };
+  });
+  const strip = $derived.by(() => {
+    if (!withHpStrip || !game) return null;
+    const { points, max } = hpStrip(gameRounds);
+    const placed = points.flatMap((p) => (tileXs[p.roundId] !== undefined ? [{ ...p, x: tileXs[p.roundId]! }] : []));
+    return placed.length === points.length ? { points: placed, max } : null;
+  });
   const scopeRounds = $derived(scope.kind === "session" && !country ? debrief.rounds : country ? country.rounds : gameRounds);
   useMapScene(map, (): MapScene => {
     const focus = round ? [round.id] : country ? country.rounds.map((r) => r.id) : [];
@@ -160,7 +230,7 @@
       kmLabels: round === null,
       masked,
       onReveal: reveal,
-      padding: { top: round ? 290 : 110, bottom: 120, left: 40, right: panelOpen && !drawer ? 470 : drawer ? 500 : 40 },
+      padding: { top: round ? 290 : 110, bottom: withHpStrip ? 190 : 120, left: 40, right: panelOpen && !drawer ? 470 : drawer ? 500 : 40 },
       onRoundClick: focusRound,
       onCountryClick: (code, lngLat) => {
         // Inside a Round a click explains the country and keeps the Round; the answer country is the Round itself.
@@ -250,7 +320,7 @@
       {:else}
         <p class="mt-1 text-white/50">No Learning names {popup.name}.</p>
       {/if}
-      {#if popup.hasRounds}
+      {#if popup.hasRounds && scope.kind !== "round"}
         <button type="button" class="mt-1.5 text-[11px] font-semibold text-sky-300 hover:underline" onclick={() => go({ country: popup.code, round: null })}>
           Every Round with {popup.name} tonight →
         </button>
@@ -291,8 +361,13 @@
 
     <div class="pointer-events-auto flex flex-wrap justify-end gap-1.5" data-testid="stat-chips">
       <div class="{panel} px-3 py-1.5">
-        <p class="text-[10px] uppercase text-[var(--muted)]">Record</p>
-        <p class="text-lg font-bold leading-tight tabular-nums {tally.won >= tally.lost ? 'text-[var(--ok)]' : 'text-[var(--danger)]'}">{tally.won}–{tally.lost}</p>
+        {#if scope.kind === "session"}
+          <p class="text-[10px] uppercase text-[var(--muted)]">Record</p>
+          <p class="text-lg font-bold leading-tight tabular-nums {tally.won >= tally.lost ? 'text-[var(--ok)]' : 'text-[var(--danger)]'}">{tally.won}–{tally.lost}</p>
+        {:else}
+          <p class="text-[10px] uppercase text-[var(--muted)]">Result</p>
+          <p class="text-lg font-bold leading-tight {resultTone(game?.won ?? null)}" data-testid="chip-result">{game?.won ? "Win" : game?.won === false ? "Loss" : "–"}</p>
+        {/if}
       </div>
       <div class="{panel} px-3 py-1.5">
         <p class="text-[10px] uppercase text-[var(--muted)]">Rating</p>
@@ -377,12 +452,36 @@
       {#if round}
         <div class="flex items-start justify-between gap-2">
           <div>
-            <h2 class="text-sm font-bold">{roundName(round)} · transcript</h2>
-            <p class="text-[11px] text-[var(--muted)]">{round.transcript.length} lines</p>
+            <h2 class="text-sm font-bold">{roundName(round)} · {tab === "transcript" ? "transcript" : roundTab?.label}</h2>
+            {#if tab === "transcript" && debrief.recorded}<p class="text-[11px] text-[var(--muted)]">{round.transcript.length} lines</p>{/if}
           </div>
-          <button type="button" class="text-lg leading-none text-[var(--muted)] hover:text-[var(--ink)]" aria-label="Close" onclick={() => go({ round: null })}>×</button>
+          {#if scope.kind !== "round" || upHref}
+            <button type="button" class="text-lg leading-none text-[var(--muted)] hover:text-[var(--ink)]" aria-label="Close" onclick={closeRound}>×</button>
+          {/if}
         </div>
-        <RoundTranscript {debrief} {round} revealed={!masked} onHover={(id) => (hoverPlayer = id)} />
+        {#if roundTab}
+          <div class="flex gap-1 border-b border-[var(--border)] text-xs" role="tablist" aria-label="Round panel">
+            {#each [{ key: "transcript", label: "Transcript" }, { key: roundTab.key, label: roundTab.label }] as t (t.key)}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === t.key}
+                class="-mb-px border-b-2 px-2 py-1 {tab === t.key ? 'border-[var(--accent)] font-semibold' : 'border-transparent text-[var(--muted)] hover:text-[var(--ink)]'}"
+                data-testid="round-tab-{t.key}"
+                onclick={() => setTab(t.key)}>{t.label}</button
+              >
+            {/each}
+          </div>
+        {/if}
+        {#if roundTab && tab === roundTab.key}
+          <div id={roundTab.key} role="tabpanel" data-testid="round-tabpanel-{roundTab.key}">{@render roundTab.content(!masked)}</div>
+        {:else if !debrief.recorded}
+          <p class="rounded-lg bg-[var(--surface-subtle)] px-2 py-1.5 text-xs text-[var(--muted)]" data-testid="not-recorded">
+            No one recorded this Game, so there's no transcript.
+          </p>
+        {:else}
+          <RoundTranscript {debrief} {round} revealed={!masked} onHover={(id) => (hoverPlayer = id)} />
+        {/if}
         <h3 class="pt-1 text-[11px] font-semibold uppercase text-[var(--muted)]">Learnings</h3>
         <ul class="space-y-1.5">
           {#each learningsOf(debrief, round.learningIds) as l (l.id)}
@@ -391,8 +490,8 @@
             <li class="text-xs text-[var(--muted)]">No Learnings on this Round.</li>
           {/each}
         </ul>
-        {@const roundHref = links.round(duoId, round.gameId, round.roundNumber)}
-        {#if roundHref}<a class="inline-block text-xs font-semibold text-[var(--accent)] hover:underline" href={roundHref}>Open Round page →</a>{/if}
+        {@const roundPage = links.round(duoId, round.gameId, round.roundNumber)}
+        {#if roundPage && scope.kind !== "round"}<a class="inline-block text-xs font-semibold text-[var(--accent)] hover:underline" href={roundPage}>Open Round page →</a>{/if}
       {:else if country}
         <div class="flex items-start justify-between gap-2" data-testid="country-card">
           <div>
@@ -418,9 +517,29 @@
 
   <!-- Bottom: the Games tonight; a Game opens in the same bar, its Rounds sliding in. Above the map legend. -->
   <div class="absolute inset-x-3 bottom-9 z-10" data-testid="debrief-bar">
+    {#if strip}
+      <div class="pointer-events-none absolute inset-x-0 bottom-full mb-2">
+        <HpStrip
+          points={strip.points}
+          max={strip.max}
+          width={barWidth}
+          activeId={round?.id ?? null}
+          hoverId={hoverRound}
+          onHover={(id) => (hoverRound = id)}
+          onFocus={focusRound}
+        />
+      </div>
+    {/if}
     {#if game}
       {#key game.id}
-        <div role="group" aria-label="Rounds of Game" class="flex items-stretch gap-1 overflow-x-auto {panel} p-1.5" in:fly={{ y: 16, duration: 220, easing: cubicOut }} onmouseleave={() => (hoverRound = null)}>
+        <div
+          bind:this={tilesEl}
+          role="group"
+          aria-label="Rounds of Game"
+          class="relative flex items-stretch gap-1 overflow-x-auto {panel} p-1.5"
+          in:fly={{ y: 16, duration: 220, easing: cubicOut }}
+          onmouseleave={() => (hoverRound = null)}
+        >
           <div class="flex shrink-0 items-center gap-2 border-r border-[var(--border)] pr-2">
             {#if scope.kind === "session"}
               <button type="button" class={chipBtn} data-testid="games-back" onclick={() => go({ game: null, round: null })}>‹ Games</button>

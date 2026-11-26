@@ -13,9 +13,9 @@ import {
 } from "../workbench/view-model.js";
 import { loadSessionRunsPage, type SessionRunsPage } from "./session-runs.js";
 import { loadGameRuns, type GameRun } from "./game-runs.js";
-import { loadRoundSpeech } from "./round-speech.js";
+import { loadGameSpeech, loadRoundSpeech, type RoundSpeech } from "./round-speech.js";
 import { buildDebrief, loadDebriefMeta } from "../debrief/load.js";
-import { numberInPlayOrder } from "$lib/game-number.js";
+import { gameNumbers, homeSessionId, numberInPlayOrder } from "$lib/game-number.js";
 import type { Debrief } from "$lib/debrief/types.js";
 
 export * from "./session-runs.js";
@@ -59,6 +59,10 @@ export interface GamePayload {
   /** Runs listed on the Game page, with run-wide and Game-scoped counts. */
   runs: GameRun[];
   wb: EntityWorkbench;
+  /** The map-first debrief scoped to this Game (#82), with its Rounds' full speech. */
+  debrief: Debrief;
+  /** The Session the Game is numbered under (#81), or null when no one recorded it. */
+  homeSession: SessionChip | null;
 }
 
 export interface RoundPayload {
@@ -71,6 +75,9 @@ export interface RoundPayload {
   citingClaimIds: string[];
   sessions: SessionChip[];
   wb: EntityWorkbench;
+  /** The map-first debrief of the Round's Game (#82), with this Round's full speech. */
+  debrief: Debrief;
+  homeSession: SessionChip | null;
 }
 
 export interface SessionPayload {
@@ -163,6 +170,44 @@ function sessionChip(full: WorkbenchData, id: string, fallbackStartedAt?: string
   return fallbackStartedAt ? { id, startedAt: fallbackStartedAt } : null;
 }
 
+/** The Game and Round pages name no Opponent team (#82), as the Session page doesn't (#79). */
+const anonymousGame = (g: WorkbenchGame): WorkbenchGame => ({ ...g, opponentTeamName: null });
+
+function anonymize(wb: EntityWorkbench): EntityWorkbench {
+  return { ...wb, gamesById: Object.fromEntries(Object.entries(wb.gamesById).map(([id, g]) => [id, anonymousGame(g)])) };
+}
+
+/**
+ * One Game's debrief (#82): the Session page's view scoped to it, numbered as on the Session page and the Games list
+ * (#81). `speech` is the Rounds' full speech, merged into the shared cited-speech derivation.
+ */
+async function gameDebrief(
+  db: AppDb,
+  duoId: string,
+  full: WorkbenchData,
+  game: WorkbenchGame,
+  speech: ReadonlyMap<string, RoundSpeech>,
+): Promise<{ debrief: Debrief; homeSession: SessionChip | null }> {
+  const home = homeSessionId(game, new Set(full.sessions.map((s) => s.id)));
+  const number = gameNumbers(Object.values(full.gamesById), full.sessions).get(game.id) ?? 1;
+  const roundsById = { ...full.roundsById };
+  const utterancesById = { ...full.utterancesById };
+  for (const [rid, sp] of speech) {
+    const r = roundsById[rid];
+    if (!r) continue;
+    roundsById[rid] = { ...r, utteranceIds: sp.utteranceIds };
+    Object.assign(utterancesById, sp.utterancesById);
+  }
+  const debrief = buildDebrief({
+    wb: { ...full, roundsById, utterancesById },
+    games: [{ id: game.id, number }],
+    meta: await loadDebriefMeta(db, duoId, [game.id]),
+    sessionId: null,
+    recorded: home !== null,
+  });
+  return { debrief, homeSession: home ? sessionChip(full, home) : null };
+}
+
 /** Null when the Game is not this Duo's. */
 export async function loadGamePayload(
   db: AppDb,
@@ -184,13 +229,15 @@ export async function loadGamePayload(
     if (!l.roundIds.some((rid) => roundIds.has(rid))) continue;
     for (const sid of l.sessionIds) if (!overlapSet.has(sid)) cited.add(sid);
   }
+  const [runs, speech] = await Promise.all([loadGameRuns(db, duoId, game, full), loadGameSpeech(db, duoId, gameId, full)]);
   return {
     kind: "game",
-    game,
+    game: anonymousGame(game),
     sessions: overlap.flatMap((id) => sessionChip(full, id) ?? []),
     relatedSessions: [...cited].flatMap((id) => sessionChip(full, id) ?? []),
-    runs: await loadGameRuns(db, duoId, game, full),
-    wb: slice(full, { gameIds: new Set([gameId]), sessionIds: new Set(overlap) }),
+    runs,
+    wb: anonymize(slice(full, { gameIds: new Set([gameId]), sessionIds: new Set(overlap) })),
+    ...(await gameDebrief(db, duoId, full, game, speech)),
   };
 }
 
@@ -221,12 +268,13 @@ export async function loadRoundPayload(
   wb.utterances = [...wb.utterances, ...Object.values(speech.utterancesById).filter((u) => !known.has(u.id))];
   return {
     kind: "round",
-    game,
+    game: anonymousGame(game),
     round,
     linkable: round.roundNumber > 0,
     citingClaimIds: wb.claims.filter((c) => c.evidence.some((e) => e.roundId === roundId)).map((c) => c.id),
     sessions: sessionIds.flatMap((id) => sessionChip(full, id) ?? []),
-    wb,
+    wb: anonymize(wb),
+    ...(await gameDebrief(db, duoId, full, game, new Map([[roundId, speech]]))),
   };
 }
 

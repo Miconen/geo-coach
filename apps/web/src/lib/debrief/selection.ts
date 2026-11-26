@@ -3,16 +3,16 @@ import { parseAnchor } from "$lib/anchors.js";
 import { setParam } from "$lib/view-url.js";
 
 // The debrief view's selection in the URL (#66, #73, ADR 0007): which Game, Round and country are in focus, and which
-// drawer is open. Focusing pushes a history entry, so Back steps out; toggling a drawer replaces. Neither reruns the
-// page's server load.
+// drawer and Round panel tab (#82) are open. Focusing pushes a history entry, so Back steps out; toggling a drawer or
+// a tab replaces. Neither reruns the page's server load.
 
-export const SELECTION_KEYS = ["game", "round", "country", "drawer"] as const;
+export const SELECTION_KEYS = ["game", "round", "country", "drawer", "tab"] as const;
 export type DebriefSelection = Record<(typeof SELECTION_KEYS)[number], string | null>;
 
 /** The selection on screen (reactive inside `$derived`). */
 export function readSelection(): DebriefSelection {
   const q = viewParams();
-  return { game: q.get("game"), round: q.get("round"), country: q.get("country"), drawer: q.get("drawer") };
+  return { game: q.get("game"), round: q.get("round"), country: q.get("country"), drawer: q.get("drawer"), tab: q.get("tab") };
 }
 
 /** Moves the selection: a new history entry, or `replace` for a drawer toggle. */

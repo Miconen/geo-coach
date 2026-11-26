@@ -175,15 +175,12 @@ test("with Recall on, an Evidence chip to a Round masks its answers when hydrate
   await expect(page.getByTestId("round-utterances")).toBeHidden();
 });
 
-test("Home lists the latest Games and Sessions, routes X2 params, and the breadcrumb links it", async ({ page }) => {
+test("Home routes X2 params, and the breadcrumb links it", async ({ page }) => {
   const home = `/duos/${s.duoId}`;
   await page.goto(`/duos/${s.duoId}/review`);
   await page.getByTestId("crumb-duo").click();
   await expect(page).toHaveURL(new RegExp(`${home}$`));
-  await expect(page.getByTestId("home-games").locator('[data-entity-chip="game"]')).toHaveCount(2);
-  await expect(page.getByTestId("home-sessions").locator('[data-entity-chip="session"]')).toHaveCount(2);
-  await page.getByTestId("home-knowledge").click();
-  await expect(page).toHaveURL(new RegExp(`${knowledge}$`));
+  await expect(page.getByTestId("home-latest-session")).toBeVisible();
 
   await page.goto(`${home}?run=${s.runId}`);
   await expect(page).toHaveURL(new RegExp(`/sessions/${s.sessionId}\\?run=${s.runId}#run-${s.runId}$`));
@@ -198,19 +195,6 @@ test("Home lists the latest Games and Sessions, routes X2 params, and the breadc
   for (const q of ["run=nope", "learning=nope", "country=zz"]) {
     expect((await page.goto(`${home}?${q}`))!.status()).toBe(200);
     await expect(page.getByTestId("home-missing")).toHaveCount(0);
-  }
-});
-
-test("bare Home with Recall on shows no Learning or Claim text, at first paint and hydrated", async ({ page }) => {
-  await recallOn(page);
-  for (const cold of [true, false]) {
-    if (cold) await blockScripts(page);
-    await page.goto(`/duos/${s.duoId}`);
-    await expect(page.locator("html")).toHaveAttribute("data-recall", "on");
-    await expect(page.getByTestId("home-games")).toBeVisible();
-    const html = await page.content();
-    for (const text of ["Split Spain and Portugal", "Toledo region", "Spanish bollards", "Portuguese poles"]) expect(html).not.toContain(text);
-    if (cold) await page.unrouteAll();
   }
 });
 

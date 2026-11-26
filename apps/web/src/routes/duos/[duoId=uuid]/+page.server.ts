@@ -5,17 +5,17 @@ import { assertDuoAccess } from "$lib/server/auth/guards.js";
 import { getDb } from "$lib/server/db/index.js";
 import { learnings } from "$lib/server/db/schema.js";
 import { findRunInDuo } from "$lib/server/services/index.js";
+import { buildHome } from "$lib/server/home.js";
 import { loadWorkbench } from "$lib/server/workbench/cache.js";
 import { parseCountryParam } from "$lib/country-param.js";
 import { links } from "$lib/links.js";
 import { isUuid } from "$lib/uuid.js";
 
-const LATEST = 6;
-
 /**
  * Home (#56 3a) routes X2 params: ?run= to its Session page, ?country= (shared ISO check) to Review's country,
  * ?learning= to Review's pin. Malformed params render Home (never 400); a missing or cross-Duo run or Learning
- * says it no longer exists. Bare Home lists the latest Games and Sessions, with no Learning or Claim text.
+ * says it no longer exists. Otherwise Home is lookup first (#84). The picked country (?look=) is shallow view state
+ * the page reads (page.state, then ?look=); this load never reads it, so picking never reruns it.
  */
 export const load: PageServerLoad = async ({ locals, params, url }) => {
   const db = getDb();
@@ -42,10 +42,5 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
   if (country) redirect(302, links.review(params.duoId, { country }));
 
   const wb = await loadWorkbench(db, params.duoId, player.id, { speech: "cited" });
-  const games = Object.values(wb.gamesById)
-    .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
-    .slice(0, LATEST)
-    .map((g) => ({ id: g.id, startedAt: g.startedAt, opponentTeamName: g.opponentTeamName, won: g.won }));
-  const sessions = wb.sessions.slice(0, LATEST).map((s) => ({ id: s.id, startedAt: s.startedAt }));
-  return { home: { games, sessions }, missing };
+  return { home: buildHome(wb, params.duoId), missing };
 };

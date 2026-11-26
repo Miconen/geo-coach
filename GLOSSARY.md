@@ -77,6 +77,10 @@ _Avoid_: todo, goal
 One statement about the world that the Duo keeps in its knowledge bank ("Panama has truck coverage"). It is *speculated* until Evidence verifies it, and *disproved* when Evidence shows it's wrong. A speculated Claim is never treated as fact.
 _Avoid_: fact, knowledge item
 
+**Clue**
+Something visible in a Round that narrows down the countries, such as truck coverage or yellow-top bollards. Claims tie a Clue to countries: some have it, some lack it. A Clue rules a country out only through a verified Claim that the country lacks it.
+_Avoid_: topic, tag, meta
+
 **Evidence**
 Something that counts for or against a Claim: a *Round* whose true location confirms it, a *Player* confirming or rejecting it, or *Documentation*. A Round only ever counts for a Claim, since a country can be covered by several vehicles and generations.
 _Avoid_: proof, source (for Evidence itself)

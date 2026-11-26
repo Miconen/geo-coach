@@ -90,6 +90,8 @@ test.describe("entity pages", () => {
   });
 
   test("two clicks from any Duo page reach a Game, a Round and a Session", async ({ page }) => {
+    // Each pass waits for the shared map to load before clicking an answer pin.
+    test.setTimeout(120_000);
     for (const start of [`${duo}/review`, `${duo}/stats`, `${duo}/sessions/${s.session2Id}`]) {
       await page.goto(start);
       await page.getByTestId("section-games").click();

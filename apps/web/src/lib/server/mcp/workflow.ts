@@ -64,6 +64,7 @@ import {
   insertRunCallLabels,
   insertRunLearnings,
   isCallableRound,
+  queueTaggingOfChangedClaims,
   loadTranscriptCorrector,
   resolveDocumentationCitation,
   roundGuessingInterval,
@@ -648,6 +649,7 @@ export async function mcpAddClaims(
   }
 
   if (saved.length > 0) duoEventBus.emitChanged(duoId, "claim");
+  await queueTaggingOfChangedClaims(db, playerId, duoId, saved.filter((x) => x.created).length);
   return { savedCount: saved.length, saved, errors };
 }
 
@@ -720,6 +722,7 @@ export async function mcpEditClaims(
   }
 
   if (saved.length > 0) duoEventBus.emitChanged(duoId, "claim");
+  await queueTaggingOfChangedClaims(db, playerId, duoId, saved.length);
   return { savedCount: saved.length, saved, errors };
 }
 

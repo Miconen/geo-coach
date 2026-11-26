@@ -295,6 +295,7 @@ export const duoSseEventSchema = z.discriminatedUnion("type", [
       "processing",
       "replay",
       "player",
+      "clue",
     ]),
     id: z.string().optional(),
     /** Scope hints (#56 X5): the Session and Recording a change touched, and what kind of Session change it was. */

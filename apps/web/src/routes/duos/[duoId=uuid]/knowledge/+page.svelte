@@ -149,7 +149,10 @@
 
 <main class="mx-auto max-w-[1400px] space-y-3 px-[clamp(16px,3vw,64px)] py-4">
   <header class="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-    <h1 class="text-base font-bold tracking-tight">Knowledge</h1>
+    <div class="flex items-center justify-between gap-2">
+      <h1 class="text-base font-bold tracking-tight">Knowledge</h1>
+      <a class="text-xs font-semibold text-[var(--accent)] hover:underline" href={links.clues(duoId)} data-testid="clues-link">Clues →</a>
+    </div>
     <p class="mt-0.5 text-[11px] text-[var(--muted)]">
       A Claim's status comes only from its Evidence: Rounds whose location confirms it, your ✓/✗, and Source sections.
       Unconfirmed Claims are guesses, not facts.

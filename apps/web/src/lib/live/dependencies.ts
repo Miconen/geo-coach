@@ -9,14 +9,14 @@ export type Consumer = "review" | "pending-work" | "game" | "round" | "session" 
 
 /** X5 Consumers, by event type (learning and reaction name no Game, Round or Session: pages refresh Duo-wide). */
 const CONSUMES: Record<Exclude<Consumer, "review" | "pending-work" | "stats">, ReadonlySet<ChangedEntity>> = {
-  game: new Set(["game", "replay", "learning", "reaction", "run", "processing", "session", "claim", "source", "corrections", "player"]),
-  round: new Set(["game", "replay", "learning", "reaction", "run", "processing", "session", "claim", "source", "corrections", "player"]),
-  session: new Set(["session", "game", "run", "learning", "processing", "reaction", "claim", "corrections", "player"]),
+  game: new Set(["game", "replay", "learning", "reaction", "run", "processing", "session", "claim", "source", "corrections", "player", "clue"]),
+  round: new Set(["game", "replay", "learning", "reaction", "run", "processing", "session", "claim", "source", "corrections", "player", "clue"]),
+  session: new Set(["session", "game", "run", "learning", "processing", "reaction", "claim", "corrections", "player", "clue"]),
   // Events that change RunTimeline rows or counts: they reset the paged history to page one.
   "session-runs": new Set(["run", "processing", "claim", "learning", "session"]),
   // /knowledge and Claim drawers (#56 3a): Evidence labels read the Round's country and the Game's date; linked
   // current Learnings change on run.
-  knowledge: new Set(["claim", "source", "learning", "run", "game"]),
+  knowledge: new Set(["claim", "source", "learning", "run", "game", "clue"]),
 };
 
 /** True when the batch needs one refresh for this consumer: always after a (re)connection, else per event type. */

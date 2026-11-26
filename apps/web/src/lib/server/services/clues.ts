@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import {
   deriveClaimStatus,
   intervalsOverlap,
@@ -12,6 +12,7 @@ import type { AppDb } from "../db/index.js";
 import {
   claimClues,
   claimEvidence,
+  claimTaggingJobs,
   claims,
   clues,
   processingRuns,
@@ -182,6 +183,9 @@ export async function mergeClues(db: AppDb, duoId: string, fromId: string, intoI
 
 // --- Claim tagging ----------------------------------------------------------------------------------------------
 
+/** How many Claims one Claim tagging job takes from the queue: one worker run of the model. */
+export const CLAIM_TAGGING_BATCH = 100;
+
 export interface QueueClaim {
   id: string;
   createdAt: Date;
@@ -266,6 +270,37 @@ export async function replaceClaimClues(
       .where(and(eq(claims.id, claimId), eq(claims.duoId, duoId)));
   });
   return unique.size;
+}
+
+/**
+ * After an agent creates or edits Claims, queue their tagging, but only once the Duo's tagging has started (some
+ * Claim is tagged): before the maintainer's test run nothing is tagged on its own. The queue serves the newest
+ * Claims first, so a job for `count` Claims takes these. A queued job with room just takes more.
+ */
+export async function queueTaggingOfChangedClaims(db: AppDb, playerId: string, duoId: string, count: number): Promise<void> {
+  if (count <= 0) return;
+  const started = await db.query.claims.findFirst({
+    where: and(eq(claims.duoId, duoId), isNotNull(claims.cluesTaggedAt)),
+    columns: { id: true },
+  });
+  if (!started) return;
+  const queued = await db.query.claimTaggingJobs.findFirst({
+    where: and(eq(claimTaggingJobs.duoId, duoId), eq(claimTaggingJobs.status, "queued")),
+    orderBy: [desc(claimTaggingJobs.createdAt)],
+  });
+  if (queued && queued.claimLimit + count <= CLAIM_TAGGING_BATCH) {
+    await db
+      .update(claimTaggingJobs)
+      .set({ claimLimit: queued.claimLimit + count })
+      .where(and(eq(claimTaggingJobs.id, queued.id), eq(claimTaggingJobs.status, "queued")));
+    return;
+  }
+  await db.insert(claimTaggingJobs).values({
+    id: uuidv7(),
+    duoId,
+    requestedByPlayerId: playerId,
+    claimLimit: Math.min(count, CLAIM_TAGGING_BATCH),
+  });
 }
 
 // --- Round Clues ----------------------------------------------------------------------------------------------------

@@ -26,6 +26,7 @@ import {
   mcpSearchClaims,
   mcpStartRun,
 } from "./workflow.js";
+import { mcpListClaimsToTag, mcpListClues, mcpTagClaims } from "./clue-tagging.js";
 import {
   JOB_TOKEN_PREFIX,
   verifyProcessingJobToken,
@@ -34,15 +35,12 @@ import {
 import { DomainError } from "../services/index.js";
 import { duoEventBus } from "../events/bus.js";
 
-/** All a site-started job may use. New tools stay unavailable to jobs unless added here. */
-const JOB_TOOLS = new Set([
-  "get_instructions",
-  "read_range",
-  "search_claims",
-  "add_claims",
-  "add_learnings",
-  "finish_run",
-]);
+/** All a site-started job may use, by kind. New tools stay unavailable to jobs unless added here. */
+const JOB_TOOLS: Record<ProcessingJobScope["kind"], ReadonlySet<string>> = {
+  run: new Set(["get_instructions", "read_range", "search_claims", "add_claims", "add_learnings", "finish_run"]),
+  // A Claim tagging job (#89) touches only Clues and the Claims it took from the queue.
+  "tag-claims": new Set(["get_instructions", "list_clues", "list_claims_to_tag", "tag_claims"]),
+};
 
 function trackRegisteredTools(server: McpServer): Map<string, RegisteredTool> {
   const registered = new Map<string, RegisteredTool>();
@@ -59,12 +57,14 @@ function trackRegisteredTools(server: McpServer): Map<string, RegisteredTool> {
 }
 
 function assertJobRun(job: ProcessingJobScope | null, runId: string | undefined) {
-  if (job && runId !== job.runId) {
+  if (job && (job.kind !== "run" || runId !== job.runId)) {
     throw new DomainError("FORBIDDEN", "This job can only use its own Processing run", 403);
   }
 }
 
-/** With a job scope, only the tools for that one run are exposed. */
+const tagScope = (job: ProcessingJobScope | null) => (job?.kind === "tag-claims" ? job : null);
+
+/** With a job scope, only the tools for that one run, or that Claim tagging job, are exposed. */
 export function createGeoCoachMcpServer(
   db: AppDb,
   playerId: string,
@@ -78,7 +78,7 @@ export function createGeoCoachMcpServer(
 
   server.tool(
     "get_instructions",
-    "Return the versioned instructions for extract, tips or calls Processing runs, or for ingesting a Source into the knowledge bank (ingest).",
+    "Return the versioned instructions for extract, tips, calls or clues Processing runs, for ingesting a Source into the knowledge bank (ingest), or for tagging Claims with Clues (clue-tag).",
     {
       purpose: instructionPurposeSchema,
     },
@@ -317,6 +317,45 @@ export function createGeoCoachMcpServer(
   );
 
   server.tool(
+    "list_clues",
+    "List the Duo's Clues by family (a Duo with none starts from the seed vocabulary). Reuse a listed Clue before creating one.",
+    {
+      family: z.string().max(80).optional(),
+      duo: z.string().optional(),
+    },
+    async (args) => {
+      const res = await mcpListClues(db, playerId, args, tagScope(job));
+      return { content: [{ type: "text", text: JSON.stringify(res, null, job ? undefined : 2) }] };
+    },
+  );
+
+  server.tool(
+    "list_claims_to_tag",
+    "List the next Claims of the Clue tagging queue: untagged, edited since tagging, or tagged by an older prompt version. Tag each with tag_claims.",
+    {
+      limit: z.number().int().min(1).max(100).optional(),
+      duo: z.string().optional(),
+    },
+    async (args) => {
+      const res = await mcpListClaimsToTag(db, playerId, args, tagScope(job));
+      return { content: [{ type: "text", text: JSON.stringify(res, null, job ? undefined : 2) }] };
+    },
+  );
+
+  server.tool(
+    "tag_claims",
+    "Tag Claims with Clues: items of { claimId, clues: [{ clueId | family + name, prevalence: typical|some|lacks, countries }] }. Each item replaces all of that Claim's Clue links; clues: [] tags it as having none. Returns the Clues created. Valid items are saved even if other items fail validation.",
+    {
+      items: z.array(z.record(z.unknown())).min(1).max(50),
+      duo: z.string().optional(),
+    },
+    async (args) => {
+      const res = await mcpTagClaims(db, playerId, args, tagScope(job));
+      return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }] };
+    },
+  );
+
+  server.tool(
     "finish_run",
     "Finish a Processing run so its Learnings or Call labels take effect and inputs are snapshotted.",
     {
@@ -333,7 +372,7 @@ export function createGeoCoachMcpServer(
 
   if (job) {
     for (const [name, tool] of registeredTools) {
-      if (!JOB_TOOLS.has(name)) tool.remove();
+      if (!JOB_TOOLS[job.kind].has(name)) tool.remove();
     }
     // Jobs have no file tools, so a result Claude Code moves to a file would be lost.
     registeredTools.get("read_range")?.update({
@@ -359,6 +398,13 @@ export function createGeoCoachMcpServer(
 
   server.prompt("calls", "Label Calls on Split and Spread Rounds in a geo-coach Session", async () => {
     const { instructions } = await mcpGetInstructions("calls");
+    return {
+      messages: [{ role: "user", content: { type: "text", text: instructions } }],
+    };
+  });
+
+  server.prompt("clue-tag", "Tag the geo-coach knowledge bank's Claims with Clues", async () => {
+    const { instructions } = await mcpGetInstructions("clue-tag");
     return {
       messages: [{ role: "user", content: { type: "text", text: instructions } }],
     };

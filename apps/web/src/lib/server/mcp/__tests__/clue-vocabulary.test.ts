@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parseClueVocabulary } from "../prompts.js";
+import { loadClueVocabulary, loadPromptInstructions, parseClueVocabulary } from "../prompts.js";
 
 const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../../prompts");
 
@@ -32,5 +32,13 @@ describe("the Clue vocabulary prompt (#90)", () => {
     const vocab = parseClueVocabulary(readFileSync(path.join(dir, "clue-vocabulary-v1.md"), "utf8"), "clue-vocabulary-v1");
     expect(vocab.families.map((f) => f.family)).toEqual(Object.keys(FROM_90));
     expect(Object.fromEntries(vocab.families.map((f) => [f.family, f.seeds]))).toEqual(FROM_90);
+  });
+
+  it("is what the Claim tagger prompt includes and get_instructions serves", async () => {
+    const { promptVersion, instructions } = await loadPromptInstructions("clue-tag");
+    expect(promptVersion).toBe("clue-tag-v1");
+    expect(instructions).not.toContain("{{include");
+    expect(instructions).toContain("17. **Vegetation and landscape:** Eucalyptus");
+    expect((await loadClueVocabulary()).families).toHaveLength(17);
   });
 });

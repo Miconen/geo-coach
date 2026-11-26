@@ -42,6 +42,8 @@ export const links = {
   /** Knowledge: Claims and Sources. ?country= filters; ?claim= opens a Claim drawer in place. */
   knowledge: (duoId: string, q: { country?: string | null; claim?: string | null } = {}) =>
     withQuery(`/duos/${duoId}/knowledge`, { country: q.country, claim: q.claim }),
+  /** The Duo's Clues to rename and merge, and Claim tagging (#89). */
+  clues: (duoId: string) => `/duos/${duoId}/knowledge/clues`,
   /** A Source; ?v= pins a version (else the current one), ?section= one excerpt (#anchor). */
   source: (duoId: string, sourceId: string, q: { v?: number | null; section?: string | null } = {}) =>
     withQuery(`/duos/${duoId}/knowledge/sources/${sourceId}`, { v: q.v, section: q.section }, q.section),

@@ -140,7 +140,7 @@ describe("Clue records and links (#89)", () => {
         purpose: "clues",
         agent: "test",
         model: "test",
-        promptVersion: "clues-v1",
+        promptVersion: "clues-v2",
         rangeStart: at(start),
         rangeEnd: at(end),
         status: finished ? "finished" : "open",
@@ -183,14 +183,14 @@ describe("Clue records and links (#89)", () => {
     it("a later clues run replaces only earlier clues links for its part of the Session", async () => {
       const whole = await run("19:00:00", "19:06:00", "20:00:00");
       await insertRunRoundClues(handle.db, whole, duoId, [
-        { roundId: r1, clues: [{ clueId: yellowId, note: null, utteranceIds: [] }] },
-        { roundId: r2, clues: [{ clueId: whiteId, note: null, utteranceIds: [] }] },
+        { roundId: r1, clues: [{ clueId: yellowId, polarity: "seen", note: null, utteranceIds: [] }] },
+        { roundId: r2, clues: [{ clueId: whiteId, polarity: "seen", note: null, utteranceIds: [] }] },
       ]);
       // A later run over Round 1's part only, which found nothing there.
       await run("18:59:00", "19:02:30", "21:00:00");
       // An open run never takes effect.
       const open = await run("19:02:30", "19:06:00", null);
-      await insertRunRoundClues(handle.db, open, duoId, [{ roundId: r2, clues: [{ clueId: yellowId, note: null, utteranceIds: [] }] }]);
+      await insertRunRoundClues(handle.db, open, duoId, [{ roundId: r2, clues: [{ clueId: yellowId, polarity: "seen", note: null, utteranceIds: [] }] }]);
 
       const current = await deriveCurrentRoundClues(handle.db, duoId, [r1, r2]);
       expect(current.get(r1)).toBeUndefined();
@@ -199,8 +199,8 @@ describe("Clue records and links (#89)", () => {
 
     it("saying a Round again in one run replaces that run's earlier Clues for it", async () => {
       const id = await run("19:00:00", "19:06:00", "20:00:00");
-      await insertRunRoundClues(handle.db, id, duoId, [{ roundId: r1, clues: [{ clueId: yellowId, note: null, utteranceIds: [] }] }]);
-      await insertRunRoundClues(handle.db, id, duoId, [{ roundId: r1, clues: [{ clueId: whiteId, note: "white", utteranceIds: [] }] }]);
+      await insertRunRoundClues(handle.db, id, duoId, [{ roundId: r1, clues: [{ clueId: yellowId, polarity: "seen", note: null, utteranceIds: [] }] }]);
+      await insertRunRoundClues(handle.db, id, duoId, [{ roundId: r1, clues: [{ clueId: whiteId, polarity: "seen", note: "white", utteranceIds: [] }] }]);
       expect((await handle.db.select().from(roundClues)).map((l) => l.clueId)).toEqual([whiteId]);
     });
   });

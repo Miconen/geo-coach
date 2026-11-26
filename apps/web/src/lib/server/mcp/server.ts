@@ -369,7 +369,7 @@ export function createGeoCoachMcpServer(
 
   server.tool(
     "add_round_clues",
-    "Add a batch of Round Clues to an open clues Processing run: { roundId, clues: [{ clueId | family + name, utteranceRefs, note? }] } per Round, citing only Utterances spoken while it was guessed. Each item replaces what this run said about that Round; clues: [] says none was said. Returns the Clues created. Valid items are saved even if other items fail validation.",
+    "Add a batch of Round Clues to an open clues Processing run: { roundId, clues: [{ clueId | family + name, polarity?, utteranceRefs, note? }] } per Round, citing only Utterances spoken while it was guessed. polarity is \"seen\" (the default) or \"not_seen\" when the Duo says this Round doesn't have the Clue (never for a question or a remark about another country). Each item replaces what this run said about that Round; clues: [] says none was said. Returns the Clues created. Valid items are saved even if other items fail validation.",
     {
       runId: z.string().uuid(),
       items: z.array(z.record(z.unknown())).min(1),

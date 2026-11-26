@@ -1,0 +1,1 @@
+ALTER TABLE "round_clues" ADD COLUMN "polarity" text DEFAULT 'seen' NOT NULL;

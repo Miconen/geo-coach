@@ -19,3 +19,9 @@ A Round's Clues come only from what the Duo said while guessing, tagged by an ag
 Tagging reads each Claim and tags its Clues; it never searches Claims by a Clue's wording. The #85 prototype searched by keyword and missed most of South America's centre lines, which Claims call "double yellow", "inner lines" or "middle lines can be all-yellow". The tagger reads how common a Clue is off the Claim's wording ("all", "most" → typical; a region, "sometimes" → in some areas; "never", "extremely uncommon" → lacks), and may link countries a Claim doesn't list when its wording rules them out ("only Peru, Brazil and Argentina in South America have smallcam"). A speculated Claim never says more than *in some areas*.
 
 The lens is only as good as the Claims: a country no Claim covers stays neutral, even when it's the answer.
+
+## Vocabulary (#90)
+
+Tagging starts from a seed vocabulary: 17 families and about 100 Clues, kept in a versioned prompt beside the other agent prompts. Once Clues exist, the Duo's own Clues win and the tagger lists them before creating one. The tagger may add a Clue inside a family, never a new family, and each run reports the Clues it created so a Player can rename or merge them. A tagger left free to name Clues splits one Clue across spellings ("double yellow", "inner lines") and lumps different ones together ("striped poles"), and the lens then paints the wrong countries.
+
+A Claim rules out only the countries it names, or a scope it states ("in South America"), and never more than about 15 countries; "unique to Panama" would otherwise write some 150 *lacks* links. Landscape Clues are things you can point at (red soil, rice paddies, eucalyptus, wind turbines); general terrain and place recognition get none, since a Clue that broad lights up half the map. Clues link to countries only; Clues linked to Regions (US, Canada and Brazil first) are a follow-up.

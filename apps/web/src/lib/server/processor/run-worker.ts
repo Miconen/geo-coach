@@ -8,7 +8,9 @@ async function main() {
     return;
   }
 
-  console.log(`Processor started with model ${config.model}`);
+  console.log(
+    `Processor started with model ${config.model}${config.clueTagModel ? `, ${config.clueTagModel} for Claim tagging` : ""}`,
+  );
   for (;;) {
     let worked = false;
     try {

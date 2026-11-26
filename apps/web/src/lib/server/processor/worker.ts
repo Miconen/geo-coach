@@ -2,21 +2,58 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type { ClaudeRunUsage, ClaudeTokenCounts } from "./usage.js";
+
+export type { ClaudeRunUsage } from "./usage.js";
 
 export interface ProcessorConfig {
   webUrl: string;
   secret: string;
   model: string;
+  /** PROCESSOR_CLUE_TAG_MODEL (#94): Claim tagging jobs' model when the job names none; else `model`. */
+  clueTagModel: string | null;
   claudeBin: string;
   maxTurns: number;
   timeoutMs: number;
   pollMs: number;
 }
 
-/** A Session job with its started run, or a Claim tagging job (#89), which has no run. */
+/**
+ * A Session job with its started run, or a Claim tagging job (#89), which has no run. A tagging job may name its
+ * model (#94).
+ */
 export type ClaimedJob =
   | { jobId: string; runId: string; purpose: "extract" | "tips" | "clues"; mcpToken: string }
-  | { jobId: string; runId: null; purpose: "tag-claims"; mcpToken: string; claimCount: number };
+  | { jobId: string; runId: null; purpose: "tag-claims"; mcpToken: string; claimCount: number; model?: string | null };
+
+/** The models a Claim tagging job may run with (#94): a job, or PROCESSOR_CLUE_TAG_MODEL, naming another fails. */
+export const CLAIM_TAGGING_MODELS = [
+  "claude-haiku-4-5",
+  "claude-haiku-5-5",
+  "claude-sonnet-5",
+  "claude-sonnet-5-5",
+  "claude-opus-5",
+  "claude-opus-5-5",
+] as const;
+export type ClaimTaggingModel = (typeof CLAIM_TAGGING_MODELS)[number];
+
+export function isClaimTaggingModel(model: string): model is ClaimTaggingModel {
+  return (CLAIM_TAGGING_MODELS as readonly string[]).includes(model);
+}
+
+/**
+ * The model a job runs with. A Claim tagging job uses its own model, else PROCESSOR_CLUE_TAG_MODEL, else
+ * PROCESSOR_MODEL; the first two must be known models. Session jobs always use PROCESSOR_MODEL.
+ */
+export function pickJobModel(job: ClaimedJob, config: ProcessorConfig): { model: string } | { error: string } {
+  if (job.purpose !== "tag-claims") return { model: config.model };
+  const chosen = job.model || config.clueTagModel;
+  if (!chosen) return { model: config.model };
+  if (!isClaimTaggingModel(chosen)) {
+    return { error: `Unknown model "${chosen}"; use one of ${CLAIM_TAGGING_MODELS.join(", ")}.` };
+  }
+  return { model: chosen };
+}
 
 const HEARTBEAT_MS = 30_000;
 const CHILD_ENV_KEYS = [
@@ -39,6 +76,7 @@ export function loadProcessorConfig(env: NodeJS.ProcessEnv): ProcessorConfig | n
     webUrl: (env.WEB_URL ?? "http://web:3000").replace(/\/$/, ""),
     secret,
     model: env.PROCESSOR_MODEL || "claude-haiku-5-5",
+    clueTagModel: env.PROCESSOR_CLUE_TAG_MODEL || null,
     claudeBin: env.PROCESSOR_CLAUDE_BIN || "claude",
     maxTurns: Number(env.PROCESSOR_MAX_TURNS) || 40,
     timeoutMs: Number(env.PROCESSOR_TIMEOUT_MS) || 20 * 60 * 1000,
@@ -86,11 +124,11 @@ export function buildPrompt(job: ClaimedJob): string {
   ].join("\n");
 }
 
-export function buildClaudeArgs(config: ProcessorConfig, mcpConfigPath: string): string[] {
+export function buildClaudeArgs(config: ProcessorConfig, mcpConfigPath: string, model: string = config.model): string[] {
   return [
     "-p",
     "--model",
-    config.model,
+    model,
     "--output-format",
     "json",
     "--no-session-persistence",
@@ -133,6 +171,54 @@ function parseClaudeResult(
   }
 }
 
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+/** Usage from Claude Code's JSON result, an error result included; null when the output isn't one. */
+export function parseClaudeUsage(stdout: string): ClaudeRunUsage | null {
+  const result = parseClaudeResult(stdout) as Record<string, unknown> | null;
+  if (!result || typeof result !== "object") return null;
+  const byModel = Object.entries((result.modelUsage ?? {}) as Record<string, Record<string, unknown> | null>)
+    .flatMap(([model, u]) =>
+      u && typeof u === "object"
+        ? [
+            {
+              model,
+              inputTokens: num(u.inputTokens) ?? 0,
+              outputTokens: num(u.outputTokens) ?? 0,
+              cacheReadTokens: num(u.cacheReadInputTokens) ?? 0,
+              cacheCreationTokens: num(u.cacheCreationInputTokens) ?? 0,
+              costUsd: num(u.costUSD),
+            },
+          ]
+        : [],
+    )
+    .sort((a, b) => b.outputTokens - a.outputTokens);
+  const usage = (result.usage ?? {}) as Record<string, unknown>;
+  const sum = (key: keyof ClaudeTokenCounts) => byModel.reduce((n, m) => n + m[key], 0);
+  const totals: ClaudeTokenCounts =
+    byModel.length > 0
+      ? {
+          inputTokens: sum("inputTokens"),
+          outputTokens: sum("outputTokens"),
+          cacheReadTokens: sum("cacheReadTokens"),
+          cacheCreationTokens: sum("cacheCreationTokens"),
+        }
+      : {
+          inputTokens: num(usage.input_tokens) ?? 0,
+          outputTokens: num(usage.output_tokens) ?? 0,
+          cacheReadTokens: num(usage.cache_read_input_tokens) ?? 0,
+          cacheCreationTokens: num(usage.cache_creation_input_tokens) ?? 0,
+        };
+  return {
+    models: byModel.map((m) => m.model),
+    numTurns: num(result.num_turns),
+    durationMs: num(result.duration_ms),
+    costUsd: num(result.total_cost_usd),
+    ...totals,
+    byModel,
+  };
+}
+
 export function summarizeClaudeResult(
   stdout: string,
   exitCode: number | null,
@@ -169,11 +255,15 @@ async function callWeb<T>(config: ProcessorConfig, body: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** How a job's run ended, with the model it ran and, for a Claim tagging job, what it used (#94). */
+type JobOutcome = { ok: boolean; error: string | null; model?: string; usage?: ClaudeRunUsage | null };
+
 async function runClaude(
   config: ProcessorConfig,
   job: ClaimedJob,
   env: NodeJS.ProcessEnv,
-): Promise<{ ok: boolean; error: string | null }> {
+  model: string,
+): Promise<JobOutcome> {
   const workDir = await mkdtemp(path.join(os.tmpdir(), "geo-coach-job-"));
   const mcpConfigPath = path.join(workDir, "mcp.json");
   await writeFile(
@@ -194,7 +284,7 @@ async function runClaude(
   let timeout: NodeJS.Timeout | undefined;
   try {
     return await new Promise((resolve) => {
-      const child = spawn(config.claudeBin, buildClaudeArgs(config, mcpConfigPath), {
+      const child = spawn(config.claudeBin, buildClaudeArgs(config, mcpConfigPath, model), {
         cwd: workDir,
         env: buildChildEnv(env),
         stdio: ["pipe", "pipe", "pipe"],
@@ -227,11 +317,8 @@ async function runClaude(
 
       child.on("error", () => resolve({ ok: false, error: "Could not start Claude Code." }));
       child.on("close", (code) => {
-        resolve(
-          stoppedFor
-            ? { ok: false, error: stoppedFor }
-            : summarizeClaudeResult(stdout, code, config.maxTurns),
-        );
+        const outcome = stoppedFor ? { ok: false, error: stoppedFor } : summarizeClaudeResult(stdout, code, config.maxTurns);
+        resolve(job.purpose === "tag-claims" ? { ...outcome, model, usage: parseClaudeUsage(stdout) } : outcome);
       });
     });
   } finally {
@@ -241,11 +328,7 @@ async function runClaude(
   }
 }
 
-async function reportFinished(
-  config: ProcessorConfig,
-  job: ClaimedJob,
-  outcome: { ok: boolean; error: string | null },
-) {
+async function reportFinished(config: ProcessorConfig, job: ClaimedJob, outcome: JobOutcome) {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const res = await callWeb<{ status: string | null }>(config, {
@@ -253,6 +336,8 @@ async function reportFinished(
         jobId: job.jobId,
         ok: outcome.ok,
         error: outcome.error,
+        ...(outcome.model ? { model: outcome.model } : {}),
+        ...(outcome.usage ? { usage: outcome.usage } : {}),
       });
       console.log(`Job ${job.jobId} ${job.purpose}: ${res.status ?? "unknown"}`);
       return;
@@ -274,12 +359,17 @@ export async function processNextJob(
   });
   if (!job) return false;
 
-  console.log(`Job ${job.jobId} ${job.purpose}: started`);
-  let outcome: { ok: boolean; error: string | null };
-  try {
-    outcome = await runClaude(config, job, env);
-  } catch {
-    outcome = { ok: false, error: "The worker failed while running this job." };
+  const picked = pickJobModel(job, config);
+  let outcome: JobOutcome;
+  if ("error" in picked) {
+    outcome = { ok: false, error: picked.error };
+  } else {
+    console.log(`Job ${job.jobId} ${job.purpose}: started with ${picked.model}`);
+    try {
+      outcome = await runClaude(config, job, env, picked.model);
+    } catch {
+      outcome = { ok: false, error: "The worker failed while running this job.", model: picked.model };
+    }
   }
   if (!outcome.ok && outcome.error) console.error(`Job ${job.jobId}: ${outcome.error}`);
   await reportFinished(config, job, outcome);

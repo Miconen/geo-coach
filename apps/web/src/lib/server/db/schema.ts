@@ -28,6 +28,7 @@ import type {
   RoundPhaseInterval,
   WordTiming,
 } from "@geo-coach/shared";
+import type { ClaudeRunUsage } from "../processor/usage.js";
 
 export interface DeletedSpeechRange {
   startUtc: string;
@@ -884,7 +885,8 @@ export const roundClueUtterances = pgTable(
 /**
  * A request to tag up to `claimLimit` of a Duo's Claims with Clues (#89), picked up by the processor worker beside
  * the Session-scoped processing jobs. It has no Session: when claimed it takes the next Claims of the tagging queue
- * (`claimIds`), and its token may tag only those.
+ * (`claimIds`), or the Claims it names (`requestedClaimIds`, #94), and its token may tag only those. A trial job
+ * (#94) writes its links to the trial store instead of the live ones.
  */
 export const claimTaggingJobs = pgTable(
   "claim_tagging_jobs",
@@ -898,7 +900,23 @@ export const claimTaggingJobs = pgTable(
       .references(() => players.id, { onDelete: "cascade" }),
     claimLimit: integer("claim_limit").notNull(),
     claimIds: jsonb("claim_ids").$type<string[]>().notNull().default([]),
+    /** The Claims a job was asked to tag (#94), instead of the next ones of the queue. */
+    requestedClaimIds: jsonb("requested_claim_ids").$type<string[]>(),
     taggedCount: integer("tagged_count").notNull().default(0),
+    /** The model the job asked for, then the one it ran with; null runs the worker's default (#94). */
+    model: text("model"),
+    /** The `clue-tag` prompt version the job tags with; null on jobs from before #94. */
+    promptVersion: text("prompt_version"),
+    /** A trial tags into `claim_clue_trials` and leaves live links, tagging marks and Clues alone (#94). */
+    trial: boolean("trial").notNull().default(false),
+    /** What the worker's Claude Code run used, from its JSON result (#94). */
+    usage: jsonb("usage").$type<ClaudeRunUsage>(),
+    /** The run's API-equivalent cost (Claude Code's total_cost_usd): production is billed by subscription. */
+    costUsd: doublePrecision("cost_usd"),
+    /** The Clues the job created, or a trial would have created (clueId null). */
+    createdClues: jsonb("created_clues").$type<Array<{ clueId: string | null; family: string; name: string }>>().notNull().default([]),
+    /** When a Player promoted the trial's links to the live ones. */
+    promotedAt: timestamp("promoted_at", { withTimezone: true }),
     status: text("status")
       .$type<"queued" | "running" | "succeeded" | "failed" | "cancelled">()
       .notNull()
@@ -914,5 +932,56 @@ export const claimTaggingJobs = pgTable(
     index("claim_tagging_jobs_status_created_idx").on(table.status, table.createdAt),
     index("claim_tagging_jobs_duo_idx").on(table.duoId, table.status),
     uniqueIndex("claim_tagging_jobs_token_uidx").on(table.tokenHash),
+  ],
+);
+
+/**
+ * The Claims a trial tagging job (#94) has tagged, links or none, so a Claim with no Clue counts as tagged too.
+ * Live tagging marks the Claim itself instead.
+ */
+export const claimTaggingTrialClaims = pgTable(
+  "claim_tagging_trial_claims",
+  {
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => claimTaggingJobs.id, { onDelete: "cascade" }),
+    claimId: uuid("claim_id")
+      .notNull()
+      .references(() => claims.id, { onDelete: "cascade" }),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    taggedAt: timestamp("tagged_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.jobId, table.claimId] }), index("claim_tagging_trial_claims_claim_idx").on(table.claimId)],
+);
+
+/**
+ * A trial tagging job's Claim–Clue link (#94), kept beside the live `claim_clues` until a Player promotes the trial.
+ * A Clue the trial would have created has no `clueId`, only its family and name; promotion creates it.
+ */
+export const claimClueTrials = pgTable(
+  "claim_clue_trials",
+  {
+    id: uuid("id").primaryKey(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => claimTaggingJobs.id, { onDelete: "cascade" }),
+    claimId: uuid("claim_id")
+      .notNull()
+      .references(() => claims.id, { onDelete: "cascade" }),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    clueId: uuid("clue_id").references(() => clues.id, { onDelete: "set null" }),
+    family: text("family").notNull(),
+    name: text("name").notNull(),
+    country: text("country").notNull(),
+    regionCode: text("region_code"),
+    prevalence: text("prevalence").$type<CluePrevalence>().notNull(),
+  },
+  (table) => [
+    index("claim_clue_trials_job_claim_idx").on(table.jobId, table.claimId),
+    index("claim_clue_trials_claim_idx").on(table.claimId),
   ],
 );

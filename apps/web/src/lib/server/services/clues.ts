@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import {
   deriveClaimStatus,
   intervalsOverlap,
@@ -12,8 +12,10 @@ import {
 import type { AppDb } from "../db/index.js";
 import {
   claimClues,
+  claimClueTrials,
   claimEvidence,
   claimTaggingJobs,
+  claimTaggingTrialClaims,
   claims,
   clues,
   processingRuns,
@@ -94,20 +96,13 @@ const norm = (s: string) => s.trim().toLowerCase();
  * Clues it creates are remembered in `created`, so the pass can report them.
  */
 export async function clueResolver(db: AppDb, duoId: string, vocabulary: ClueVocabulary) {
-  const families = new Map(vocabulary.families.map((f) => [norm(f.family), f.family]));
-  const existing = await db.query.clues.findMany({ where: eq(clues.duoId, duoId) });
-  const byId = new Map(existing.map((c) => [c.id, c]));
-  const byKey = new Map(existing.map((c) => [`${norm(c.family)}\u0000${norm(c.name)}`, c]));
+  const { byId, byKey, lookup } = await clueIndex(db, duoId, vocabulary);
   const created: ClueRow[] = [];
 
-  async function resolve(ref: { clueId?: string; family?: string; name?: string }): Promise<ClueRow | { error: string }> {
-    if (ref.clueId) return byId.get(ref.clueId) ?? { error: `Unknown or other Duo's clueId: ${ref.clueId}` };
-    const family = families.get(norm(ref.family ?? ""));
-    if (!family) return { error: `"${ref.family}" is not a Clue family; use one of the vocabulary's families` };
-    const name = ref.name!.trim();
-    const key = `${norm(family)}\u0000${norm(name)}`;
-    const held = byKey.get(key);
-    if (held) return held;
+  async function resolve(ref: ClueRef): Promise<ClueRow | { error: string }> {
+    const found = lookup(ref);
+    if ("error" in found || "id" in found) return found;
+    const { family, name, key } = found;
     const row: ClueRow = { id: uuidv7(), duoId, family, name, origin: "agent", createdAt: new Date() };
     const [inserted] = await db.insert(clues).values(row).onConflictDoNothing().returning();
     // Another pass created it a moment ago: use that one.
@@ -121,6 +116,52 @@ export async function clueResolver(db: AppDb, duoId: string, vocabulary: ClueVoc
   }
 
   return { resolve, created };
+}
+
+type ClueRef = { clueId?: string; family?: string; name?: string };
+
+/** The Duo's Clues by id and by family and name, and how a tagger's reference finds one or names a new one. */
+async function clueIndex(db: AppDb, duoId: string, vocabulary: ClueVocabulary) {
+  const families = new Map(vocabulary.families.map((f) => [norm(f.family), f.family]));
+  const existing = await db.query.clues.findMany({ where: eq(clues.duoId, duoId) });
+  const byId = new Map(existing.map((c) => [c.id, c]));
+  const byKey = new Map(existing.map((c) => [clueKey(c.family, c.name), c]));
+  function lookup(ref: ClueRef): ClueRow | { error: string } | { family: string; name: string; key: string } {
+    if (ref.clueId) return byId.get(ref.clueId) ?? { error: `Unknown or other Duo's clueId: ${ref.clueId}` };
+    const family = families.get(norm(ref.family ?? ""));
+    if (!family) return { error: `"${ref.family}" is not a Clue family; use one of the vocabulary's families` };
+    const name = ref.name!.trim();
+    const key = clueKey(family, name);
+    return byKey.get(key) ?? { family, name, key };
+  }
+  return { byId, byKey, lookup };
+}
+
+const clueKey = (family: string, name: string) => `${norm(family)}\u0000${norm(name)}`;
+
+/** A Clue a trial (#94) names: one the Duo has, or one it would create (no id). */
+export interface TrialClue {
+  id: string | null;
+  family: string;
+  name: string;
+}
+
+/**
+ * Resolves Clues like clueResolver for a trial tagging job (#94), but never creates one: a Clue it would create is
+ * returned without an id and remembered in `proposed`.
+ */
+export async function trialClueResolver(db: AppDb, duoId: string, vocabulary: ClueVocabulary) {
+  const { lookup } = await clueIndex(db, duoId, vocabulary);
+  const proposed = new Map<string, TrialClue>();
+  function resolve(ref: ClueRef): TrialClue | { error: string } {
+    const found = lookup(ref);
+    if ("error" in found) return found;
+    if ("id" in found) return { id: found.id, family: found.family, name: found.name };
+    const held = proposed.get(found.key) ?? { id: null, family: found.family, name: found.name };
+    proposed.set(found.key, held);
+    return held;
+  }
+  return { resolve, proposed };
 }
 
 /** Renames a Clue within its family. A name another Clue of the family already has is a merge, not a rename. */
@@ -179,6 +220,8 @@ export async function mergeClues(db: AppDb, duoId: string, fromId: string, intoI
         ),
       )
       .returning({ id: roundClues.id });
+    // Trial links (#94) follow too, so a later promotion links the kept Clue.
+    await tx.update(claimClueTrials).set({ clueId: intoId }).where(eq(claimClueTrials.clueId, fromId));
     await tx.delete(clues).where(eq(clues.id, fromId));
     return { claimLinksMoved: movedClaims.length, roundLinksMoved: movedRounds.length };
   });
@@ -283,6 +326,188 @@ export async function replaceClaimClues(
   return unique.size;
 }
 
+// --- trial tagging (#94) ------------------------------------------------------------------------------------------
+
+/** A trial's Claim–Clue link: a Clue the Duo has (clueId), or one the trial would create (family and name only). */
+export interface TrialClaimClueLink {
+  clueId: string | null;
+  family: string;
+  name: string;
+  country: string;
+  regionCode?: string | null;
+  prevalence: CluePrevalence;
+}
+
+/**
+ * Tags a Claim in a trial job's side store: replaces the links the trial gave it and marks it tagged by the trial.
+ * The Claim's live links, its tagging mark and the Duo's Clues are never touched.
+ */
+export async function replaceTrialClaimClues(
+  db: AppDb,
+  job: { jobId: string; duoId: string },
+  claimId: string,
+  links: ReadonlyArray<TrialClaimClueLink>,
+): Promise<number> {
+  const unique = new Map(
+    links.map((l) => [`${clueKey(l.family, l.name)}:${l.country}:${l.regionCode ?? ""}`, { ...l, regionCode: l.regionCode ?? null }]),
+  );
+  await db.transaction(async (tx) => {
+    await tx.delete(claimClueTrials).where(and(eq(claimClueTrials.jobId, job.jobId), eq(claimClueTrials.claimId, claimId)));
+    if (unique.size > 0) {
+      await tx
+        .insert(claimClueTrials)
+        .values([...unique.values()].map((l) => ({ id: uuidv7(), jobId: job.jobId, claimId, duoId: job.duoId, ...l })));
+    }
+    await tx
+      .insert(claimTaggingTrialClaims)
+      .values({ jobId: job.jobId, claimId, duoId: job.duoId })
+      .onConflictDoUpdate({ target: [claimTaggingTrialClaims.jobId, claimTaggingTrialClaims.claimId], set: { taggedAt: new Date() } });
+  });
+  return unique.size;
+}
+
+/** A Claim–Clue link as two tagging jobs are compared: by the Clue's family and name, and the place. */
+export interface ComparableLink {
+  family: string;
+  name: string;
+  country: string;
+  regionCode: string | null;
+  prevalence: CluePrevalence;
+}
+
+export type JobLink = ComparableLink & { clueId: string | null };
+
+/** Each Claim a trial job tagged, with its trial links (none is a tagging too). */
+export async function loadTrialLinks(db: AppDb, jobId: string): Promise<Map<string, JobLink[]>> {
+  const [tagged, rows] = await Promise.all([
+    db
+      .select({ claimId: claimTaggingTrialClaims.claimId })
+      .from(claimTaggingTrialClaims)
+      .where(eq(claimTaggingTrialClaims.jobId, jobId))
+      .orderBy(asc(claimTaggingTrialClaims.taggedAt), asc(claimTaggingTrialClaims.claimId)),
+    db
+      .select({
+        claimId: claimClueTrials.claimId,
+        clueId: claimClueTrials.clueId,
+        // A Clue renamed since reads by its new name.
+        family: sql<string>`coalesce(${clues.family}, ${claimClueTrials.family})`,
+        name: sql<string>`coalesce(${clues.name}, ${claimClueTrials.name})`,
+        country: claimClueTrials.country,
+        regionCode: claimClueTrials.regionCode,
+        prevalence: claimClueTrials.prevalence,
+      })
+      .from(claimClueTrials)
+      .leftJoin(clues, eq(clues.id, claimClueTrials.clueId))
+      .where(eq(claimClueTrials.jobId, jobId)),
+  ]);
+  const out = new Map<string, JobLink[]>(tagged.map((t) => [t.claimId, []]));
+  for (const { claimId, ...l } of rows) out.get(claimId)?.push(l);
+  return out;
+}
+
+/** The live links of some of a Duo's Claims, for a live tagging job's report and comparisons. */
+export async function loadLiveLinks(db: AppDb, duoId: string, claimIds: readonly string[]): Promise<Map<string, JobLink[]>> {
+  const out = new Map<string, JobLink[]>(claimIds.map((id) => [id, []]));
+  if (claimIds.length === 0) return out;
+  const rows = await db
+    .select({
+      claimId: claimClues.claimId,
+      clueId: claimClues.clueId,
+      family: clues.family,
+      name: clues.name,
+      country: claimClues.country,
+      regionCode: claimClues.regionCode,
+      prevalence: claimClues.prevalence,
+    })
+    .from(claimClues)
+    .innerJoin(clues, eq(clues.id, claimClues.clueId))
+    .where(and(eq(claimClues.duoId, duoId), inArray(claimClues.claimId, [...claimIds])));
+  for (const { claimId, ...l } of rows) out.get(claimId)?.push(l);
+  return out;
+}
+
+export interface LinkDifference {
+  change: "added" | "removed" | "changed";
+  family: string;
+  name: string;
+  country: string;
+  regionCode: string | null;
+  from: CluePrevalence | null;
+  to: CluePrevalence | null;
+}
+
+const placeKey = (l: ComparableLink) => `${clueKey(l.family, l.name)}\u0000${l.country}\u0000${l.regionCode ?? ""}`;
+
+/**
+ * How one Claim's links differ from job `a` to job `b`: links only `b` has are added, links only `a` has are removed,
+ * and a link both have at another prevalence is changed. Ordered by Clue, then country, the whole country first.
+ */
+export function compareClaimLinks(a: readonly ComparableLink[], b: readonly ComparableLink[]): LinkDifference[] {
+  const before = new Map(a.map((l) => [placeKey(l), l]));
+  const after = new Map(b.map((l) => [placeKey(l), l]));
+  const out: LinkDifference[] = [];
+  const place = (l: ComparableLink) => ({ family: l.family, name: l.name, country: l.country, regionCode: l.regionCode });
+  for (const [key, l] of before) {
+    const now = after.get(key);
+    if (!now) out.push({ change: "removed", ...place(l), from: l.prevalence, to: null });
+    else if (now.prevalence !== l.prevalence) out.push({ change: "changed", ...place(l), from: l.prevalence, to: now.prevalence });
+  }
+  for (const [key, l] of after) {
+    if (!before.has(key)) out.push({ change: "added", ...place(l), from: null, to: l.prevalence });
+  }
+  const order = (d: LinkDifference) => [norm(d.family), norm(d.name), d.country, d.regionCode ?? ""].join("\u0000");
+  return out.sort((x, y) => (order(x) < order(y) ? -1 : order(x) > order(y) ? 1 : 0));
+}
+
+export interface ClaimComparison<L extends ComparableLink = ComparableLink> {
+  claimId: string;
+  /** The Claim's links in each job; null when that job didn't tag it. */
+  a: L[] | null;
+  b: L[] | null;
+  differences: LinkDifference[];
+}
+
+/** Two jobs' links side by side, Claim by Claim (`a`'s Claims first), with the differences of Claims both tagged. */
+export function compareJobLinks<L extends ComparableLink>(
+  a: ReadonlyMap<string, L[]>,
+  b: ReadonlyMap<string, L[]>,
+): Array<ClaimComparison<L>> {
+  const ids = [...new Set([...a.keys(), ...b.keys()])];
+  return ids.map((claimId) => {
+    const left = a.get(claimId) ?? null;
+    const right = b.get(claimId) ?? null;
+    return { claimId, a: left, b: right, differences: left && right ? compareClaimLinks(left, right) : [] };
+  });
+}
+
+/**
+ * Orders two versions of one prompt by number: negative when `a` is older. A Claim with no version (untagged) is
+ * older than any.
+ */
+export function comparePromptVersions(a: string | null, b: string | null): number {
+  const n = (v: string | null) => (v === null ? -1 : Number(/-v(\d+)$/.exec(v)?.[1] ?? -1));
+  return n(a) - n(b);
+}
+
+/**
+ * Which of a trial's Claims its promotion tags: untagged Claims and Claims an older prompt version tagged. A Claim
+ * tagged by the trial's version or a newer one is left alone unless forced.
+ */
+export function trialPromotionPlan(
+  claimRows: ReadonlyArray<Pick<QueueClaim, "id" | "cluesPromptVersion" | "cluesTaggedAt">>,
+  trialVersion: string,
+  force: boolean,
+): { promote: string[]; skipped: Array<{ claimId: string; reason: string }> } {
+  const promote: string[] = [];
+  const skipped: Array<{ claimId: string; reason: string }> = [];
+  for (const c of claimRows) {
+    const untagged = !c.cluesTaggedAt || c.cluesPromptVersion === null;
+    if (force || untagged || comparePromptVersions(c.cluesPromptVersion, trialVersion) < 0) promote.push(c.id);
+    else skipped.push({ claimId: c.id, reason: `Already tagged by ${c.cluesPromptVersion}` });
+  }
+  return { promote, skipped };
+}
+
 /**
  * After an agent creates or edits Claims, queue their tagging, but only once the Duo's tagging has started (some
  * Claim is tagged): before the maintainer's test run nothing is tagged on its own. The queue serves the newest
@@ -295,8 +520,14 @@ export async function queueTaggingOfChangedClaims(db: AppDb, playerId: string, d
     columns: { id: true },
   });
   if (!started) return;
+  // Only a queue job takes more: a trial or a job for named Claims (#94) has its own list.
   const queued = await db.query.claimTaggingJobs.findFirst({
-    where: and(eq(claimTaggingJobs.duoId, duoId), eq(claimTaggingJobs.status, "queued")),
+    where: and(
+      eq(claimTaggingJobs.duoId, duoId),
+      eq(claimTaggingJobs.status, "queued"),
+      eq(claimTaggingJobs.trial, false),
+      isNull(claimTaggingJobs.requestedClaimIds),
+    ),
     orderBy: [desc(claimTaggingJobs.createdAt)],
   });
   if (queued && queued.claimLimit + count <= CLAIM_TAGGING_BATCH) {

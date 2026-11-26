@@ -78,7 +78,7 @@ One statement about the world that the Duo keeps in its knowledge bank ("Panama 
 _Avoid_: fact, knowledge item
 
 **Clue**
-Something visible in a Round that narrows down the countries, such as truck coverage or yellow-top bollards. Claims tie a Clue to countries: some have it, some lack it. A Clue rules a country out only through a verified Claim that the country lacks it.
+Something visible in a Round that narrows down the countries, such as a white pickup truck or a yellow centre line. Each Clue is one value in a family ("Road lines: yellow/orange centre line", not "yellow lines"); close colours like yellow and orange count as one. Claims tie a Clue to countries: it's *typical* there, found *in some areas*, or the country *lacks* it. A Clue rules a country out only through a verified Claim that the country lacks it.
 _Avoid_: topic, tag, meta
 
 **Evidence**

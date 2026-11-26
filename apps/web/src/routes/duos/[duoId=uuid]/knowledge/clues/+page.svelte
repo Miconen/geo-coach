@@ -59,6 +59,32 @@
           : j.status === "cancelled"
             ? (j.error ?? "Cancelled")
             : (j.error ?? "Failed");
+
+  // What a job ran with and used (#94): Claude Code's own numbers; the cost is what the run would cost at API prices,
+  // since the worker runs on a subscription.
+  const compact = (n: number) =>
+    n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+  const duration = (j: CluesPayload["jobs"][number]) => {
+    const ms = j.usage?.durationMs ?? (j.startedAt && j.finishedAt ? Date.parse(j.finishedAt) - Date.parse(j.startedAt) : null);
+    if (ms === null) return null;
+    const s = Math.round(ms / 1000);
+    return s >= 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s} s`;
+  };
+  const jobMetrics = (j: CluesPayload["jobs"][number]) => {
+    const parts = [j.model ?? "default model", j.promptVersion ?? "prompt version unknown"];
+    const took = duration(j);
+    if (took && j.finishedAt) parts.push(took);
+    if (j.usage) {
+      if (j.usage.numTurns !== null) parts.push(`${j.usage.numTurns} turns`);
+      parts.push(
+        `${compact(j.usage.inputTokens)} in · ${compact(j.usage.outputTokens)} out · ${compact(j.usage.cacheReadTokens)} cache read · ${compact(j.usage.cacheCreationTokens)} cache write`,
+      );
+    }
+    if (j.apiEquivalentCostUsd !== null) parts.push(`$${j.apiEquivalentCostUsd.toFixed(2)} API-equivalent`);
+    return parts.join(" · ");
+  };
+  const tokenTitle = (j: CluesPayload["jobs"][number]) =>
+    j.usage?.byModel.map((m) => `${m.model}: ${m.inputTokens} in, ${m.outputTokens} out, ${m.cacheReadTokens} cache read, ${m.cacheCreationTokens} cache write`).join("\n");
 </script>
 
 <svelte:head><title>Clues · {data.duo.name}</title></svelte:head>
@@ -99,8 +125,11 @@
     {#if p.jobs.length}
       <ul class="space-y-0.5 text-[11px]" data-testid="tagging-jobs">
         {#each p.jobs.slice(0, active.length + 5) as j (j.id)}
-          <li class={j.status === "failed" ? "text-[var(--danger)]" : "text-[var(--muted)]"}>
-            {new Date(j.createdAt).toLocaleString()} · {jobLine(j)}
+          <li class={j.status === "failed" ? "text-[var(--danger)]" : "text-[var(--muted)]"} data-testid="tagging-job">
+            {new Date(j.createdAt).toLocaleString()} ·
+            {#if j.trial}<span class="rounded bg-[var(--warn-bg)] px-1 text-[10px] text-[var(--warn)]" title="Tagged into a side store; live links are unchanged until it's promoted">{j.promotedAt ? "trial, promoted" : "trial"}</span>{/if}
+            {jobLine(j)}
+            <span class="block pl-3 text-[10px] text-[var(--muted)]" title={tokenTitle(j)} data-testid="tagging-job-metrics">{jobMetrics(j)}</span>
           </li>
         {/each}
       </ul>

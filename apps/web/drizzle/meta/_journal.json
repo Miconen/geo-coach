@@ -85,6 +85,13 @@
       "when": 1795705339749,
       "tag": "0011_round_clue_polarity",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795706856856,
+      "tag": "0012_claim_clue_regions",
+      "breakpoints": true
     }
   ]
 }

@@ -277,8 +277,8 @@ describe("buildDebrief: the Clue lens's data (#89)", () => {
         { id: "k-other", family: "Poles", name: "Wooden pole" },
       ],
       links: [
-        { claimId: "c1", clueId: "k-white", country: "DK", prevalence: "typical" },
-        { claimId: "c2", clueId: "k-other", country: "US", prevalence: "typical" },
+        { claimId: "c1", clueId: "k-white", country: "DK", regionCode: null, prevalence: "typical" },
+        { claimId: "c2", clueId: "k-other", country: "US", regionCode: null, prevalence: "typical" },
       ],
       claims: [
         { id: "c1", text: "Denmark has white centre lines.", status: "verified" },
@@ -298,7 +298,7 @@ describe("buildDebrief: the Clue lens's data (#89)", () => {
 
   it("ships only the Clues the shown Rounds said, their links with Claim status, and the linked Claims", () => {
     expect(Object.keys(d.clueLens.clues)).toEqual(["k-white", "k-yellow"]);
-    expect(d.clueLens.links).toEqual([{ claimId: "c1", clueId: "k-white", country: "DK", prevalence: "typical", status: "verified" }]);
+    expect(d.clueLens.links).toEqual([{ claimId: "c1", clueId: "k-white", country: "DK", regionCode: null, prevalence: "typical", status: "verified" }]);
     expect(d.clueLens.claimText).toEqual({ c1: "Denmark has white centre lines." });
     expect(buildDebrief(input).clueLens).toEqual({ clues: {}, links: [], claimText: {} });
   });

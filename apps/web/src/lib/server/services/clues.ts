@@ -141,7 +141,8 @@ export async function renameClue(db: AppDb, duoId: string, clueId: string, name:
 
 /**
  * Merges `fromId` into `intoId`: every Claim and Round link moves to `intoId` and `fromId` is deleted. Where both
- * already link the same Claim and country (or the same run and Round), the link `intoId` had is kept.
+ * already link the same Claim and place (country, or Region of it) or the same run and Round, the link `intoId` had
+ * is kept.
  */
 export async function mergeClues(db: AppDb, duoId: string, fromId: string, intoId: string): Promise<{ claimLinksMoved: number; roundLinksMoved: number }> {
   if (fromId === intoId) throw new DomainError("INVALID_MERGE", "Pick two different Clues to merge", 400);
@@ -155,7 +156,7 @@ export async function mergeClues(db: AppDb, duoId: string, fromId: string, intoI
       .where(
         and(
           eq(claimClues.clueId, fromId),
-          sql`not exists (select 1 from ${claimClues} x where x.claim_id = ${claimClues.claimId} and x.clue_id = ${intoId} and x.country = ${claimClues.country})`,
+          sql`not exists (select 1 from ${claimClues} x where x.claim_id = ${claimClues.claimId} and x.clue_id = ${intoId} and x.country = ${claimClues.country} and x.region_code is not distinct from ${claimClues.regionCode})`,
         ),
       )
       .returning({ claimId: claimClues.claimId });
@@ -248,6 +249,14 @@ export async function claimTaggingProgress(db: AppDb, duoId: string, promptVersi
   return { total: all.length, tagged: all.length - queued, queued };
 }
 
+/** A Claim–Clue link: a whole country, or one Region of it by geocoder code (#92). */
+export interface ClaimClueLink {
+  clueId: string;
+  country: string;
+  regionCode?: string | null;
+  prevalence: CluePrevalence;
+}
+
 /**
  * Tags a Claim: replaces every Clue link it had with `links` (none at all is a tagging too) and records the
  * prompt version and when the tagger read it. Other Claims' links, and the Clue records, stay as they are.
@@ -256,11 +265,11 @@ export async function replaceClaimClues(
   db: AppDb,
   duoId: string,
   claimId: string,
-  links: ReadonlyArray<{ clueId: string; country: string; prevalence: CluePrevalence }>,
+  links: ReadonlyArray<ClaimClueLink>,
   mark: { promptVersion: string; taggedAt: Date },
 ): Promise<number> {
-  // One link per Clue and country: a later entry for the same pair wins.
-  const unique = new Map(links.map((l) => [`${l.clueId}:${l.country}`, l]));
+  // One link per Clue and place (a country, or a Region of it): a later entry for the same place wins.
+  const unique = new Map(links.map((l) => [`${l.clueId}:${l.country}:${l.regionCode ?? ""}`, { ...l, regionCode: l.regionCode ?? null }]));
   await db.transaction(async (tx) => {
     await tx.delete(claimClues).where(and(eq(claimClues.claimId, claimId), eq(claimClues.duoId, duoId)));
     if (unique.size > 0) {
@@ -447,8 +456,8 @@ export interface ClueLensData {
   byRound: Map<string, Array<CurrentRoundClue & { quotes: ClueQuote[] }>>;
   /** The Clues those Rounds said. */
   clues: Array<Pick<ClueRow, "id" | "family" | "name">>;
-  /** Every Claim link of those Clues. */
-  links: Array<{ claimId: string; clueId: string; country: string; prevalence: CluePrevalence }>;
+  /** Every Claim link of those Clues, Region links (#92) included. */
+  links: Array<{ claimId: string; clueId: string; country: string; regionCode: string | null; prevalence: CluePrevalence }>;
   /** The linked Claims, with derived status (ADR 0005). */
   claims: Array<{ id: string; text: string; status: ClaimStatus }>;
 }
@@ -465,7 +474,13 @@ export async function loadClueLens(db: AppDb, duoId: string, roundIds: readonly 
       .from(clues)
       .where(and(eq(clues.duoId, duoId), inArray(clues.id, clueIds))),
     db
-      .select({ claimId: claimClues.claimId, clueId: claimClues.clueId, country: claimClues.country, prevalence: claimClues.prevalence })
+      .select({
+        claimId: claimClues.claimId,
+        clueId: claimClues.clueId,
+        country: claimClues.country,
+        regionCode: claimClues.regionCode,
+        prevalence: claimClues.prevalence,
+      })
       .from(claimClues)
       .innerJoin(claims, eq(claims.id, claimClues.claimId))
       .where(and(eq(claimClues.duoId, duoId), eq(claims.duoId, duoId), inArray(claimClues.clueId, clueIds))),

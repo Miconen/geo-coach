@@ -76,9 +76,14 @@ export interface MapScene {
   legend?: "bottom-left" | "bottom-right" | "top-right" | "hidden";
   /**
    * The Clue lens (#89) in place of the Outcome lens's fills: one plain colour per country. The violet
-   * said-not-guessed outline stays as the Outcome lens draws it. Nothing shows under Recall.
+   * said-not-guessed outline stays as the Outcome lens draws it. Countries shaded Region by Region (#92) get their
+   * Regions' boundaries and fills instead of a country fill; a Region left out of `fills` is neutral. Nothing
+   * shows under Recall.
    */
-  clueLens?: { fills: ReadonlyArray<readonly [code: string, color: string]> } | null;
+  clueLens?: {
+    fills: ReadonlyArray<readonly [code: string, color: string]>;
+    regions?: { countries: readonly string[]; fills: ReadonlyArray<readonly [regionCode: string, color: string]> };
+  } | null;
 }
 
 export const OPPONENT_GUESS_COLOR = OPPONENT_COLOR;

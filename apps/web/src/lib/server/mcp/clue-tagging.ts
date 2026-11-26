@@ -1,5 +1,12 @@
 import { and, eq, inArray } from "drizzle-orm";
-import { MAX_LACKS_COUNTRIES, claimTagItemInputSchema, type CluePrevalence } from "@geo-coach/shared";
+import {
+  MAX_LACKS_COUNTRIES,
+  claimTagItemInputSchema,
+  getRegion,
+  namedRegionsIn,
+  resolveRegionName,
+  type LearningRegion,
+} from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
 import { claimTaggingJobs, claims } from "../db/schema.js";
 import { duoEventBus } from "../events/bus.js";
@@ -10,6 +17,7 @@ import {
   needsClueTagging,
   replaceClaimClues,
   seedDuoClues,
+  type ClaimClueLink,
 } from "../services/index.js";
 import { getCurrentPromptVersion, loadClueVocabulary } from "./prompts.js";
 import { resolveDuoForPlayer } from "./workflow.js";
@@ -88,9 +96,46 @@ export async function mcpListClaimsToTag(
     remaining,
     claims: ids.flatMap((id) => {
       const c = byId.get(id);
-      return c ? [{ claimId: c.id, text: c.text, countries: c.countries, regions: c.regions.map((r) => `${r.country}: ${r.name}`) }] : [];
+      return c ? [{ claimId: c.id, text: c.text, countries: c.countries, regions: claimRegions(c) }] : [];
     }),
   };
+}
+
+/**
+ * The Regions a Claim names (#92), for the tagger: its own Regions, each with the geocoder code it resolves to (null
+ * when it doesn't, so it can only be a country link), then Regions its text names that it doesn't list.
+ */
+export function claimRegions(claim: { text: string; countries: readonly string[]; regions: readonly LearningRegion[] }) {
+  const own = claim.regions.map((r) => ({ country: r.country, name: r.name, code: resolveRegionName(r.country, r.name)?.code ?? null }));
+  const listed = new Set(own.map((r) => r.code));
+  const inText = namedRegionsIn(claim)
+    .filter((code) => !listed.has(code))
+    .map((code) => {
+      const info = getRegion(code)!;
+      return { country: info.countryCode, name: info.name, code };
+    });
+  return [...own, ...inText];
+}
+
+/**
+ * A tag item's Region links (#92): each Region resolved to its geocoder code. A name that doesn't resolve, or a
+ * Region the Claim doesn't name in its text or its Regions, is an error: a vague scope stays a country link, never a
+ * guessed list of Regions.
+ */
+export function resolveRegionLinks(
+  claim: { text: string; countries: readonly string[]; regions: readonly LearningRegion[] },
+  regions: readonly LearningRegion[],
+): { codes: Array<{ country: string; regionCode: string }>; problems: string[] } {
+  const named = new Set(namedRegionsIn(claim));
+  const codes: Array<{ country: string; regionCode: string }> = [];
+  const problems: string[] = [];
+  for (const r of regions) {
+    const info = resolveRegionName(r.country, r.name);
+    if (!info) problems.push(`${r.country}: "${r.name}" isn't a Region the geocoder knows; link the country as some instead`);
+    else if (!named.has(info.code)) problems.push(`The Claim doesn't name ${info.name} (${info.code}); link only Regions it names`);
+    else codes.push({ country: info.countryCode, regionCode: info.code });
+  }
+  return { codes, problems };
 }
 
 /**
@@ -111,9 +156,14 @@ export async function mcpTagClaims(
   const resolver = await clueResolver(db, duo.id, vocabulary);
   const parsed = input.items.map((raw) => claimTagItemInputSchema.safeParse(raw));
   const wanted = parsed.flatMap((p) => (p.success ? [p.data.claimId] : []));
-  const known = new Set(
+  const known = new Map(
     wanted.length
-      ? (await db.select({ id: claims.id }).from(claims).where(and(eq(claims.duoId, duo.id), inArray(claims.id, wanted)))).map((c) => c.id)
+      ? (
+          await db
+            .select({ id: claims.id, text: claims.text, countries: claims.countries, regions: claims.regions })
+            .from(claims)
+            .where(and(eq(claims.duoId, duo.id), inArray(claims.id, wanted)))
+        ).map((c) => [c.id, c])
       : [],
   );
   const allowed = job ? new Set(job.claimIds) : null;
@@ -144,12 +194,19 @@ export async function mcpTagClaims(
       });
       continue;
     }
-    const links: Array<{ clueId: string; country: string; prevalence: CluePrevalence }> = [];
+    const links: ClaimClueLink[] = [];
     const problems: string[] = [];
     for (const c of item.clues) {
+      const regions = resolveRegionLinks(known.get(item.claimId)!, c.regions);
+      problems.push(...regions.problems);
+      // Its Clue is not created for links that fail.
+      if (regions.problems.length > 0) continue;
       const clue = await resolver.resolve(c);
       if ("error" in clue) problems.push(clue.error);
-      else for (const country of c.countries) links.push({ clueId: clue.id, country, prevalence: c.prevalence });
+      else {
+        for (const country of c.countries) links.push({ clueId: clue.id, country, prevalence: c.prevalence });
+        for (const r of regions.codes) links.push({ clueId: clue.id, ...r, prevalence: c.prevalence });
+      }
     }
     if (problems.length > 0) {
       errors.push({ index: i, message: problems.join("; ") });

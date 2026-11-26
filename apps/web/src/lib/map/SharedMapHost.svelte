@@ -63,6 +63,10 @@
   const COUNTRY_HIT = "countries-hit";
   const LENS_LAYER = "lens";
   const LENS_OUTLINE_LAYER = "lens-outline";
+  // The Clue lens's Regions (#92): the boundaries of countries shaded Region by Region, and their Regions' fills.
+  const CLUE_REGIONS = "clue-regions";
+  const CLUE_REGION_LINES = "clue-region-lines";
+  const NO_REGION = ["==", ["get", "code"], ""] as ExpressionSpecification;
   const NO_COUNTRY = ["==", ["get", "iso_3166_1"], ""] as ExpressionSpecification;
 
   let park: HTMLDivElement;
@@ -73,6 +77,9 @@
   let error = $state<string | null>(null);
   let loadedStyle: string | null = null;
   let tip = $state<{ x: number; y: number; round: MapRound } | null>(null);
+  /** Each country's Regions as GeoJSON, fetched once per country for the Clue lens. */
+  const regionShapes = new Map<string, Promise<FeatureCollection | null>>();
+  let regionKey = "";
 
   // --- slot -------------------------------------------------------------------
 
@@ -151,6 +158,8 @@
     });
     m.on("style.load", () => {
       loadedStyle = shared.style;
+      // The new style's Region source starts empty.
+      regionKey = "";
       addLayers(m);
       ready = true;
       // The new layers start fully lit; `apply` repaints the dimming as it was.
@@ -215,6 +224,15 @@
       },
       firstSymbol,
     );
+    m.addSource(CLUE_REGIONS, { type: "geojson", data: empty() });
+    m.addLayer(
+      { id: CLUE_REGIONS, type: "fill", source: CLUE_REGIONS, filter: NO_REGION, paint: { "fill-color": LENS_COLOR.g, "fill-opacity": 0.6 } },
+      firstSymbol,
+    );
+    m.addLayer(
+      { id: CLUE_REGION_LINES, type: "line", source: CLUE_REGIONS, paint: { "line-color": "#e2e8f0", "line-width": 0.75, "line-opacity": 0.7 } },
+      firstSymbol,
+    );
     m.addLayer({
       id: "lines",
       type: "line",
@@ -270,6 +288,7 @@
       for (const id of SOURCES) set(id, empty());
       m.setFilter(LENS_LAYER, NO_COUNTRY);
       m.setFilter(LENS_OUTLINE_LAYER, NO_COUNTRY);
+      applyClueRegions(m, null);
       return;
     }
 
@@ -311,6 +330,7 @@
         : s.clueLens.fills
       : [...fills].map(([code, kind]) => [code, LENS_COLOR[kind]] as const);
     m.setFilter(LENS_LAYER, only(colors.map(([code]) => code)));
+    applyClueRegions(m, s.clueLens && !s.masked ? (s.clueLens.regions ?? null) : null);
     if (colors.length === 0) return;
     m.setPaintProperty(LENS_LAYER, "fill-color", [
       "match",
@@ -318,6 +338,44 @@
       ...colors.flatMap(([code, color]) => [code, color]),
       LENS_COLOR.g,
     ] as unknown as ExpressionSpecification);
+  }
+
+  function countryRegions(code: string): Promise<FeatureCollection | null> {
+    let shapes = regionShapes.get(code);
+    if (!shapes) {
+      shapes = fetch(`/api/stats/regions/${code}`)
+        .then((r) => (r.ok ? (r.json() as Promise<FeatureCollection>) : null))
+        .catch(() => null);
+      regionShapes.set(code, shapes);
+      // A failed fetch is tried again next time.
+      void shapes.then((fc) => fc ?? regionShapes.delete(code));
+    }
+    return shapes;
+  }
+
+  /** The Clue lens's Region layer (#92): the shaded countries' Region boundaries, and their Regions' fills. */
+  function applyClueRegions(m: MapboxMap, regions: NonNullable<MapScene["clueLens"]>["regions"] | null) {
+    const countries = regions?.countries ?? [];
+    const fills = regions?.fills ?? [];
+    m.setFilter(CLUE_REGIONS, fills.length ? ["in", ["get", "code"], ["literal", fills.map(([code]) => code)]] : NO_REGION);
+    if (fills.length) {
+      m.setPaintProperty(CLUE_REGIONS, "fill-color", [
+        "match",
+        ["get", "code"],
+        ...fills.flatMap(([code, color]) => [code, color]),
+        LENS_COLOR.g,
+      ] as unknown as ExpressionSpecification);
+    }
+    const key = countries.join(",");
+    if (key === regionKey) return;
+    regionKey = key;
+    const source = () => m.getSource(CLUE_REGIONS) as GeoJSONSource | undefined;
+    if (countries.length === 0) return void source()?.setData(empty());
+    void Promise.all(countries.map(countryRegions)).then((shapes) => {
+      // A newer scene may have moved on, or the style reloaded.
+      if (key !== regionKey || mb !== m) return;
+      source()?.setData({ type: "FeatureCollection", features: shapes.flatMap((fc) => fc?.features ?? []) });
+    });
   }
 
   // --- dimming: a short cross-fade, and a cleared highlight waits a moment so row-to-row moves never flash.

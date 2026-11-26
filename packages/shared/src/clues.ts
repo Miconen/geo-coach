@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isoCountryCodeSchema } from "./contracts.js";
+import { isoCountryCodeSchema, learningRegionSchema } from "./contracts.js";
 
 // GLOSSARY: Clue; ADR 0009. The families and seed values live in the versioned vocabulary prompt
 // (apps/web/prompts/clue-vocabulary-vN.md), not here: the server reads them from there.
@@ -26,14 +26,23 @@ function requireClueRef(val: { clueId?: string; family?: string; name?: string }
   }
 }
 
-/** One Clue of a tagged Claim, with the countries it ties at one prevalence. */
+/**
+ * One Clue of a tagged Claim, with the countries and the Regions (#92) it ties at one prevalence. A Region is
+ * `{ country, name }`, its name as the Claim spells it or the geocoder code `list_claims_to_tag` gives.
+ */
 export const claimClueLinkInputSchema = z
   .object({
     ...clueRefShape,
     prevalence: cluePrevalenceSchema,
-    countries: z.array(isoCountryCodeSchema).min(1).max(60),
+    countries: z.array(isoCountryCodeSchema).max(60).default([]),
+    regions: z.array(learningRegionSchema).max(60).default([]),
   })
-  .superRefine(requireClueRef);
+  .superRefine(requireClueRef)
+  .superRefine((val, ctx) => {
+    if (val.countries.length === 0 && val.regions.length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Pass countries, regions, or both" });
+    }
+  });
 export type ClaimClueLinkInput = z.infer<typeof claimClueLinkInputSchema>;
 
 /** One `tag_claims` item: every Clue link of a Claim. An empty list tags the Claim as having none. */

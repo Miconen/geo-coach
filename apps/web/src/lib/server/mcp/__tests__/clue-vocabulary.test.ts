@@ -36,7 +36,7 @@ describe("the Clue vocabulary prompt (#90)", () => {
 
   it("is what the Claim tagger prompt includes and get_instructions serves", async () => {
     const { promptVersion, instructions } = await loadPromptInstructions("clue-tag");
-    expect(promptVersion).toBe("clue-tag-v1");
+    expect(promptVersion).toBe("clue-tag-v2");
     expect(instructions).not.toContain("{{include");
     expect(instructions).toContain("17. **Vegetation and landscape:** Eucalyptus");
     expect((await loadClueVocabulary()).families).toHaveLength(17);

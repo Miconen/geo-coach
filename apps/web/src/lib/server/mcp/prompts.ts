@@ -31,7 +31,7 @@ const CURRENT_VERSIONS: Record<InstructionPurpose, { version: string; file: stri
   ingest: { version: "ingest-v2", file: "ingest-v2.md" },
   // Each Claim records this version when tagged; a newer one puts every Claim tagged by an older one back in the
   // tagging queue (#89). The prompt pins its vocabulary file, so a new vocabulary needs a new version here too.
-  "clue-tag": { version: "clue-tag-v1", file: "clue-tag-v1.md" },
+  "clue-tag": { version: "clue-tag-v2", file: "clue-tag-v2.md" },
 };
 
 export function getCurrentPromptVersion(purpose: ProcessingRunPurpose | "clue-tag"): string {

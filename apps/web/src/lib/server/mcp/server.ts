@@ -343,7 +343,7 @@ export function createGeoCoachMcpServer(
 
   server.tool(
     "list_claims_to_tag",
-    "List the next Claims of the Clue tagging queue: untagged, edited since tagging, or tagged by an older prompt version. Tag each with tag_claims.",
+    "List the next Claims of the Clue tagging queue: untagged, edited since tagging, or tagged by an older prompt version, each with the Regions it names and their geocoder codes (null when a name does not resolve). Tag each with tag_claims.",
     {
       limit: z.number().int().min(1).max(100).optional(),
       duo: z.string().optional(),
@@ -356,7 +356,7 @@ export function createGeoCoachMcpServer(
 
   server.tool(
     "tag_claims",
-    "Tag Claims with Clues: items of { claimId, clues: [{ clueId | family + name, prevalence: typical|some|lacks, countries }] }. Each item replaces all of that Claim's Clue links; clues: [] tags it as having none. Returns the Clues created. Valid items are saved even if other items fail validation.",
+    "Tag Claims with Clues: items of { claimId, clues: [{ clueId | family + name, prevalence: typical|some|lacks, countries?, regions?: [{ country, name }] }] }, with countries or regions or both; a Region must be one the Claim names (list_claims_to_tag lists them with codes). Each item replaces all of that Claim's Clue links; clues: [] tags it as having none. Returns the Clues created. Valid items are saved even if other items fail validation.",
     {
       items: z.array(z.record(z.unknown())).min(1).max(50),
       duo: z.string().optional(),

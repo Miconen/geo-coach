@@ -1,7 +1,8 @@
 // Which countries an Utterance names (#80): every country's name, its common aliases ("Holland", "USA", "Czech
-// Republic") and its demonyms ("Danish", "Czech", "Ecuadorian"). Case and accents fold; a term only matches whole
-// words, and the longest term at a position wins, so "Nigeria" never reads as Niger and "Papua New Guinea" never as
-// Guinea. Pure.
+// Republic"), its demonyms ("Danish", "Czech", "Ecuadorian") and its nicknames ("ZA", "Bangla", "Aus", #88). Case and
+// accents fold; a term only matches whole words, and the longest term at a position wins, so "Nigeria" never reads as
+// Niger and "Papua New Guinea" never as Guinea. Callers pass the corrected Utterance text (transcript rules and manual
+// edits applied), not the raw transcription. Pure.
 import { ALL_COUNTRIES } from "@geo-coach/shared";
 
 /** Aliases and demonyms beyond the country's own name (ALL_COUNTRIES), by ISO code. */
@@ -242,6 +243,32 @@ const EXTRA_TERMS: Record<string, readonly string[]> = {
   ZW: ["zimbabwean"],
 };
 
+/**
+ * Nicknames Players use in a fast Round (#88): GeoGuessr shorthand, clipped names and codes said as words. Each is a
+ * whole word that is neither a common English word nor another country's term. Left out on purpose: "us", "in", "my",
+ * "per", "can", "chin", "den", "fin", "ice" (English words); "sa" (South Africa, Saudi Arabia or South America);
+ * "para" (also Brazil's Pará); "nam" (also slang for Vietnam); "oz" (ounces); "philly" (Philadelphia); "sk" (South
+ * Korea or Slovakia).
+ */
+const NICKNAMES: Record<string, readonly string[]> = {
+  AR: ["argie"],
+  AU: ["aus", "straya"],
+  BD: ["bangla"],
+  DO: ["domrep", "dom rep"],
+  EC: ["ecua", "equa"],
+  GT: ["guate"],
+  HK: ["hk"],
+  LU: ["lux"],
+  ME: ["monte"],
+  MY: ["malay"],
+  PH: ["phil"],
+  SA: ["ksa"],
+  TT: ["trini"],
+  VN: ["viet"],
+  ZA: ["za"],
+  ZW: ["zim"],
+};
+
 /** Terms naming more than one country. */
 const SHARED_TERMS: Record<string, readonly string[]> = {
   congo: ["CD", "CG"],
@@ -269,6 +296,8 @@ const NON_COUNTRY_TERMS = [
   "new jersey",
   "new england",
   "english channel",
+  "monte carlo",
+  "three card monte",
 ];
 
 /** Lowercase, accents and punctuation folded to spaces: "Côte d'Ivoire" → "cote d ivoire". */
@@ -292,6 +321,7 @@ function buildIndex() {
   };
   for (const c of ALL_COUNTRIES) add(c.name, [c.code]);
   for (const [code, list] of Object.entries(EXTRA_TERMS)) for (const t of list) add(t, [code]);
+  for (const [code, list] of Object.entries(NICKNAMES)) for (const t of list) add(t, [code]);
   for (const [t, codes] of Object.entries(SHARED_TERMS)) add(t, codes);
   for (const t of NON_COUNTRY_TERMS) add(t, []);
   const maxWords = Math.max(...[...terms.keys()].map((t) => t.split(" ").length));

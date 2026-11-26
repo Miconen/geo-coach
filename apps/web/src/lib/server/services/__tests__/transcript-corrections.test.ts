@@ -5,6 +5,7 @@ import { createTestDb, type TestDbHandle } from "../../db/test-db.js";
 import { duoMemberships, duos, players, recordings, rounds, utterances } from "../../db/schema.js";
 import { mcpReadRange, mcpStartRun } from "../../mcp/workflow.js";
 import { buildWorkbenchData } from "../../workbench/view-model.js";
+import { buildDebrief } from "../../debrief/build.js";
 import {
   applySuggestionOnce,
   completeTranscriptVersion,
@@ -177,6 +178,28 @@ describe("Transcript corrections", () => {
     expect(shown?.text).toBe("this is NMPZ today");
 
     expect((await rawRows()).some((u) => u.text === "this is nymphs today")).toBe(true);
+  });
+
+  it.each([
+    ["a nickname", "Bangla"],
+    ["a country name", "Bangladesh"],
+  ])("counts a mishearing a rule fixes into %s as said aloud (#88)", async (_, replacement) => {
+    // The Round answered Bangladesh; the Duo guessed Brazil while saying "Goyaz".
+    await handle.db.update(rounds).set({ countryCode: "BD" });
+    const debrief = (wb: Awaited<ReturnType<typeof buildWorkbenchData>>) =>
+      buildDebrief({
+        wb,
+        games: Object.keys(wb.gamesById).map((id, i) => ({ id, number: i + 1 })),
+        meta: new Map(),
+        sessionId,
+      });
+    const [heard] = debrief(await buildWorkbenchData(handle.db, duoId, playerId)).rounds;
+    expect(heard?.missedAnswer).toBe(true);
+    expect(heard?.saidAloud).toEqual([]);
+
+    await saveTranscriptRule(handle.db, { duoId, playerId, source: "goyaz", replacement });
+    const [fixed] = debrief(await buildWorkbenchData(handle.db, duoId, playerId)).rounds;
+    expect(fixed?.saidAloud.map((l) => l.text)).toEqual([`feels like ${replacement} maybe`]);
   });
 
   it("lets a Duo disable a starter rule", async () => {

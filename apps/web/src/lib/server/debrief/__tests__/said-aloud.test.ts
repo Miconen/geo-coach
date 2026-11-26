@@ -109,6 +109,27 @@ describe("said aloud, not guessed", () => {
     expect(byId("cz6").saidAloud.map((l) => l.id)).toEqual(["cz6-said"]);
   });
 
+  it("reads the corrected text: a nickname a rule restored counts, a raw mishearing doesn't (#88)", () => {
+    const bd = round("bd", "g1", 2, "BD", 300, [guess(CERKIE, "IN"), guess(MICO, "IN")], ["bd-fixed", "bd-raw"]);
+    const corrected = buildDebrief({
+      ...input,
+      wb: {
+        ...input.wb,
+        gamesById: { g1: { ...input.wb.gamesById.g1!, roundIds: ["dk", "bd"] } },
+        roundsById: { ...input.wb.roundsById, bd },
+        utterancesById: {
+          ...input.wb.utterancesById,
+          // A transcript rule turned Whisper's "bungler" back into the "Bangla" Cerkie said.
+          "bd-fixed": { ...u("bd-fixed", CERKIE, 310, "is this Bangla"), rawText: "is this bungler" },
+          // A manual edit took out a country Whisper invented.
+          "bd-raw": { ...u("bd-raw", MICO, 320, "nice bangle"), rawText: "nice Bangladesh" },
+        },
+      },
+      games: [{ id: "g1", number: 1 }],
+    });
+    expect(corrected.rounds.find((r) => r.id === "bd")!.saidAloud.map((l) => l.id)).toEqual(["bd-fixed"]);
+  });
+
   it("marks the map Round so the Outcome lens stripes the answer", () => {
     const flags = Object.fromEntries(mapRounds(d, d.rounds).map((m) => [m.id, m.saidAloud]));
     expect(flags).toEqual({ dk: true, cz5: false, cz6: true });

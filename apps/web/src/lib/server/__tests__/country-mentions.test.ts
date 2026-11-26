@@ -67,6 +67,54 @@ describe("countriesNamed", () => {
     expect(countriesNamed("Congo")).toEqual(["CD", "CG"]);
   });
 
+  it("knows the nicknames Players use in a fast Round (#88)", () => {
+    expect(countriesNamed("is this ZA or Bangla")).toEqual(["ZA", "BD"]);
+    expect(countriesNamed("ECUA")).toEqual(["EC"]);
+    expect(countriesNamed("Equa?")).toEqual(["EC"]);
+    expect(countriesNamed("aus")).toEqual(["AU"]);
+  });
+
+  it.each([
+    ["za", "ZA"],
+    ["ecua", "EC"],
+    ["equa", "EC"],
+    ["bangla", "BD"],
+    ["aus", "AU"],
+    ["straya", "AU"],
+    ["argie", "AR"],
+    ["dom rep", "DO"],
+    ["domrep", "DO"],
+    ["guate", "GT"],
+    ["hk", "HK"],
+    ["lux", "LU"],
+    ["monte", "ME"],
+    ["malay", "MY"],
+    ["phil", "PH"],
+    ["ksa", "SA"],
+    ["trini", "TT"],
+    ["viet", "VN"],
+    ["zim", "ZW"],
+  ])("nickname %s names only %s", (text, code) => {
+    expect(countriesNamed(`hmm ${text} maybe`)).toEqual([code]);
+  });
+
+  it("matches a nickname as a whole word only", () => {
+    expect(countriesNamed("Austria")).toEqual(["AT"]);
+    expect(countriesNamed("Australian")).toEqual(["AU"]);
+    expect(countriesNamed("Ecuadorian")).toEqual(["EC"]);
+    expect(countriesNamed("because of the cause")).toEqual([]);
+    expect(countriesNamed("pizza")).toEqual([]);
+    expect(countriesNamed("equator line")).toEqual([]);
+    expect(countriesNamed("Viet Nam")).toEqual(["VN"]);
+  });
+
+  it.each(["us", "in", "my", "per", "can", "chin", "den", "sa", "para", "fin", "oz", "nam", "philly", "monte carlo"])(
+    "leaves out the ambiguous shorthand %s",
+    (text) => {
+      expect(countriesNamed(`we ${text} here`)).toEqual([]);
+    },
+  );
+
   it("ignores common words that share a spelling with an alias", () => {
     expect(countriesNamed("look at the poles and the car")).toEqual([]);
   });

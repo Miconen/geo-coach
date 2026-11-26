@@ -168,6 +168,7 @@ function debriefRound(
       const u = utterancesById[id];
       if (!u || u.historical) return [];
       const at = ms(u.startedAt);
+      // The corrected text (transcript rules and manual edits applied), never rawText: what said aloud reads (#88).
       return [{ id, playerId: u.playerId, text: u.text, atS: (at - start) / 1000, afterEnd: at >= end }];
     })
     .sort((a, b) => a.atS - b.atS);

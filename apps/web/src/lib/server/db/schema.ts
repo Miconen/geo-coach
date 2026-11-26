@@ -15,6 +15,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import type {
+  CluePrevalence,
   DerivedGuess,
   EvidenceDirection,
   EvidenceKind,
@@ -586,6 +587,12 @@ export const claims = pgTable(
     regions: jsonb("regions").$type<LearningRegion[]>().notNull().default([]),
     topics: jsonb("topics").$type<string[]>().notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** When the Claim was last edited; null if never. An edit after its Clue tagging puts it back in the queue. */
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+    /** The tagger prompt version that last tagged the Claim with Clues (#89); null while untagged. */
+    cluesPromptVersion: text("clues_prompt_version"),
+    /** When that tagging read the Claim. */
+    cluesTaggedAt: timestamp("clues_tagged_at", { withTimezone: true }),
   },
   (table) => [
     index("claims_duo_idx").on(table.duoId, table.createdAt),
@@ -748,7 +755,7 @@ export const processingJobs = pgTable(
     requestedByPlayerId: uuid("requested_by_player_id")
       .notNull()
       .references(() => players.id, { onDelete: "cascade" }),
-    purpose: text("purpose").$type<"extract" | "tips">().notNull(),
+    purpose: text("purpose").$type<"extract" | "tips" | "clues">().notNull(),
     rangeStart: timestamp("range_start", { withTimezone: true }).notNull(),
     rangeEnd: timestamp("range_end", { withTimezone: true }).notNull(),
     status: text("status")
@@ -768,5 +775,136 @@ export const processingJobs = pgTable(
     index("processing_jobs_run_idx").on(table.runId),
     index("processing_jobs_session_idx").on(table.duoId, table.sessionId, table.purpose, table.status),
     uniqueIndex("processing_jobs_token_uidx").on(table.tokenHash),
+  ],
+);
+
+/**
+ * Something visible in a Round that narrows down the countries (GLOSSARY: Clue; ADR 0009): one value in a family,
+ * in a Duo's knowledge bank. A Duo's Clues start from the seed vocabulary; agents add values inside a family and
+ * Players rename and merge them.
+ */
+export const clues = pgTable(
+  "clues",
+  {
+    id: uuid("id").primaryKey(),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    family: text("family").notNull(),
+    name: text("name").notNull(),
+    /** seed: from the vocabulary prompt; agent: created by a tagger, for a Player to review. */
+    origin: text("origin").$type<"seed" | "agent">().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("clues_duo_family_name_uidx").on(table.duoId, table.family, table.name)],
+);
+
+/**
+ * A Claim tying a Clue to a country (ADR 0009). Written by Claim tagging, which replaces all of a Claim's links at
+ * once; the country need not be in the Claim's own country list.
+ */
+export const claimClues = pgTable(
+  "claim_clues",
+  {
+    claimId: uuid("claim_id")
+      .notNull()
+      .references(() => claims.id, { onDelete: "cascade" }),
+    clueId: uuid("clue_id")
+      .notNull()
+      .references(() => clues.id, { onDelete: "cascade" }),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    country: text("country").notNull(),
+    prevalence: text("prevalence").$type<CluePrevalence>().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.claimId, table.clueId, table.country] }),
+    index("claim_clues_clue_idx").on(table.clueId),
+    index("claim_clues_duo_idx").on(table.duoId),
+  ],
+);
+
+/**
+ * A `clues` Processing run's link from a Round to a Clue the Duo said while guessing. Like Call labels, links take
+ * effect when their run finishes and give way to a later finished `clues` run over the Round (ADR 0001, 0002).
+ */
+export const roundClues = pgTable(
+  "round_clues",
+  {
+    id: uuid("id").primaryKey(),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => processingRuns.id, { onDelete: "cascade" }),
+    roundId: uuid("round_id")
+      .notNull()
+      .references(() => rounds.id, { onDelete: "cascade" }),
+    clueId: uuid("clue_id")
+      .notNull()
+      .references(() => clues.id, { onDelete: "cascade" }),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("round_clues_run_round_clue_uidx").on(table.runId, table.roundId, table.clueId),
+    index("round_clues_round_idx").on(table.roundId),
+    index("round_clues_clue_idx").on(table.clueId),
+    index("round_clues_duo_idx").on(table.duoId),
+  ],
+);
+
+/** The Utterances a Round Clue rests on, all spoken while guessing. */
+export const roundClueUtterances = pgTable(
+  "round_clue_utterances",
+  {
+    roundClueId: uuid("round_clue_id")
+      .notNull()
+      .references(() => roundClues.id, { onDelete: "cascade" }),
+    utteranceId: uuid("utterance_id")
+      .notNull()
+      .references(() => utterances.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.roundClueId, table.utteranceId] }),
+    index("round_clue_utterances_utterance_idx").on(table.utteranceId),
+  ],
+);
+
+/**
+ * A request to tag up to `claimLimit` of a Duo's Claims with Clues (#89), picked up by the processor worker beside
+ * the Session-scoped processing jobs. It has no Session: when claimed it takes the next Claims of the tagging queue
+ * (`claimIds`), and its token may tag only those.
+ */
+export const claimTaggingJobs = pgTable(
+  "claim_tagging_jobs",
+  {
+    id: uuid("id").primaryKey(),
+    duoId: uuid("duo_id")
+      .notNull()
+      .references(() => duos.id, { onDelete: "cascade" }),
+    requestedByPlayerId: uuid("requested_by_player_id")
+      .notNull()
+      .references(() => players.id, { onDelete: "cascade" }),
+    claimLimit: integer("claim_limit").notNull(),
+    claimIds: jsonb("claim_ids").$type<string[]>().notNull().default([]),
+    taggedCount: integer("tagged_count").notNull().default(0),
+    status: text("status")
+      .$type<"queued" | "running" | "succeeded" | "failed" | "cancelled">()
+      .notNull()
+      .default("queued"),
+    tokenHash: text("token_hash"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("claim_tagging_jobs_status_created_idx").on(table.status, table.createdAt),
+    index("claim_tagging_jobs_duo_idx").on(table.duoId, table.status),
+    uniqueIndex("claim_tagging_jobs_token_uidx").on(table.tokenHash),
   ],
 );

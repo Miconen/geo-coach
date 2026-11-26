@@ -8,7 +8,18 @@ import {
   type StatsGuess,
   type StatsRound,
 } from "@geo-coach/shared";
-import type { Debrief, DebriefGame, DebriefGuess, DebriefLine, DebriefPlayer, DebriefRound, SaidCountry } from "$lib/debrief/types.js";
+import type {
+  Debrief,
+  DebriefClueLens,
+  DebriefGame,
+  DebriefGuess,
+  DebriefLine,
+  DebriefPlayer,
+  DebriefRound,
+  DebriefRoundClue,
+  SaidCountry,
+} from "$lib/debrief/types.js";
+import type { ClueLensData } from "../services/clues.js";
 import { countriesNamed } from "../country-mentions.js";
 import type { WorkbenchData, WorkbenchLearning, WorkbenchRound } from "../workbench/view-model.js";
 
@@ -28,6 +39,8 @@ export interface DebriefInput {
   sessionId: string | null;
   /** Whether the Games were recorded, when no Session is shown: a Game or Round page (#82) of a recorded Game. */
   recorded?: boolean;
+  /** The Rounds' Clues and their Claim links (#89); none when absent. */
+  clueLens?: ClueLensData;
 }
 
 const ms = (iso: string | Date) => new Date(iso).getTime();
@@ -106,7 +119,8 @@ export function buildDebrief(input: DebriefInput): Debrief {
         learnings[l.id] = l;
         cited.add(l.id);
       }
-      return debriefRound(r, s, stats, number, shown.length, m, own, wb.utterancesById);
+      const said = roundClues(input.clueLens, r.id, ms(r.startTime));
+      return debriefRound(r, s, stats, number, shown.length, m, own, wb.utterancesById, said);
     });
     rounds.push(...gameRounds);
     games.push({
@@ -128,7 +142,39 @@ export function buildDebrief(input: DebriefInput): Debrief {
       sessionLearningIds.push(l.id);
     }
   }
-  return { players: debriefPlayers(wb), games, rounds, learnings, sessionLearningIds, recorded: input.recorded ?? input.sessionId !== null };
+  return {
+    players: debriefPlayers(wb),
+    games,
+    rounds,
+    learnings,
+    sessionLearningIds,
+    recorded: input.recorded ?? input.sessionId !== null,
+    clueLens: debriefClueLens(input.clueLens, rounds),
+  };
+}
+
+function roundClues(data: ClueLensData | undefined, roundId: string, startMs: number): DebriefRoundClue[] {
+  return (data?.byRound.get(roundId) ?? []).map((c) => ({
+    clueId: c.clueId,
+    lines: c.quotes.map((q) => ({ id: q.id, playerId: q.playerId, text: q.text, atS: (q.startedAt.getTime() - startMs) / 1000, afterEnd: false })),
+  }));
+}
+
+/** Only the Clues the shown Rounds said, with their links and the linked Claims' status (ADR 0005). */
+function debriefClueLens(data: ClueLensData | undefined, rounds: readonly DebriefRound[]): DebriefClueLens {
+  const said = new Set(rounds.flatMap((r) => r.clues.map((c) => c.clueId)));
+  if (!data || said.size === 0) return { clues: {}, links: [], claimText: {} };
+  const status = new Map(data.claims.map((c) => [c.id, c]));
+  const links = data.links.flatMap((l) => {
+    const claim = status.get(l.claimId);
+    return said.has(l.clueId) && claim ? [{ ...l, status: claim.status }] : [];
+  });
+  const linked = new Set(links.map((l) => l.claimId));
+  return {
+    clues: Object.fromEntries(data.clues.filter((c) => said.has(c.id)).map((c) => [c.id, c])),
+    links,
+    claimText: Object.fromEntries(data.claims.filter((c) => linked.has(c.id)).map((c) => [c.id, c.text])),
+  };
 }
 
 function debriefRound(
@@ -140,6 +186,7 @@ function debriefRound(
   m: DebriefGameMeta | undefined,
   own: WorkbenchLearning[],
   utterancesById: WorkbenchData["utterancesById"],
+  clues: DebriefRoundClue[],
 ): DebriefRound {
   const state = roundGameState(gameStats, s);
   const slower = slowerDuoGuess(s);
@@ -207,6 +254,7 @@ function debriefRound(
     countdownS: r.timerStartTime ? (ms(r.timerStartTime) - start) / 1000 : null,
     saidAloud: missedAnswer ? linesNaming(said, r.countryCode!) : [],
     saidWhileGuessing: said,
+    clues,
   };
 }
 

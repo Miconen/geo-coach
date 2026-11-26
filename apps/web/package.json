@@ -13,6 +13,7 @@
     "db:migrate": "tsx src/lib/server/db/migrate.ts",
     "db:seed": "tsx src/lib/server/db/seed.ts",
     "db:rebuild-derived": "tsx src/lib/server/db/rebuild-derived.ts",
+    "clues:tag": "tsx src/lib/server/db/queue-claim-tagging.ts",
     "db:check-geocoder": "tsx src/lib/server/db/check-geocoder.ts",
     "geocoder:build-data": "tsx src/lib/server/geocoder/build-data.ts",
     "geocoder:build-sizes": "tsx src/lib/server/geocoder/build-country-sizes.ts",

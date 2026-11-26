@@ -74,6 +74,11 @@ export interface MapScene {
   chromeless?: boolean;
   /** Where the legend sits (bottom-left by default, above the style toggle). */
   legend?: "bottom-left" | "bottom-right" | "top-right" | "hidden";
+  /**
+   * The Clue lens (#89) in place of the Outcome lens's fills: one plain colour per country. The violet
+   * said-not-guessed outline stays as the Outcome lens draws it. Nothing shows under Recall.
+   */
+  clueLens?: { fills: ReadonlyArray<readonly [code: string, color: string]> } | null;
 }
 
 export const OPPONENT_GUESS_COLOR = OPPONENT_COLOR;

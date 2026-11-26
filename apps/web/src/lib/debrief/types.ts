@@ -2,6 +2,7 @@
 // Round (#82). The server builds it (src/lib/server/debrief) and the view derives everything else in the browser.
 import type { GameMode, PanoView, TeamHp } from "@geo-coach/shared";
 import type { WorkbenchLearning } from "$lib/server/workbench/view-model.js";
+import type { ClueLensLink } from "./clue-lens.js";
 
 export interface DebriefPlayer {
   id: string;
@@ -96,6 +97,27 @@ export interface DebriefRound {
   saidAloud: DebriefLine[];
   /** Every country a Player named while guessing was on (#86), in order of first mention, guessed or not. */
   saidWhileGuessing: SaidCountry[];
+  /** The Clues said while guessing (#89), from the Round's `clues` run, each with the speech it rests on. */
+  clues: DebriefRoundClue[];
+}
+
+/** A Clue said in a Round, with the Utterances that said it, oldest first. */
+export interface DebriefRoundClue {
+  clueId: string;
+  lines: DebriefLine[];
+}
+
+export interface DebriefClue {
+  id: string;
+  family: string;
+  name: string;
+}
+
+/** The Clue lens's data (#89): the Clues the Rounds said, every Claim link of those Clues, and the linked Claims. */
+export interface DebriefClueLens {
+  clues: Record<string, DebriefClue>;
+  links: ClueLensLink[];
+  claimText: Record<string, string>;
 }
 
 export interface DebriefGame {
@@ -121,6 +143,7 @@ export interface Debrief {
   sessionLearningIds: string[];
   /** Whether the Games were recorded (a Session exists): otherwise the transcript panel says so. */
   recorded: boolean;
+  clueLens: DebriefClueLens;
 }
 
 /** What the view shows: a whole Session, one Game, or one Round (#82). */

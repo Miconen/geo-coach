@@ -1,4 +1,5 @@
 import type { LearningKind } from "@geo-coach/shared";
+import { gameNumbers } from "$lib/game-number.js";
 import type { MapRound } from "$lib/map/scene.js";
 import { links } from "$lib/links.js";
 import { formatSigned } from "$lib/stats/overview-text.js";
@@ -70,33 +71,17 @@ export interface Home {
 }
 
 const DAY_MS = 86_400_000;
-const utcDay = (iso: string) => iso.slice(0, 10);
 const shortDate = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 
 /** Neither Duo guess landed in the answer country. */
 export const missedAnswer = (r: Pick<WorkbenchRound, "countryCode" | "guesses">) =>
   r.countryCode !== null && !r.guesses.some((g) => g.isDuo && g.countryCode === r.countryCode);
 
-/**
- * Each Game's number within its Session, or within its UTC day when no one recorded it: "Game N" reads the same
- * on Home as on the Session page and the Games list.
- */
-export function gameNumbers(games: readonly Pick<WorkbenchGame, "id" | "startedAt" | "sessionIds">[]): Map<string, number> {
-  const byGroup = new Map<string, number>();
-  const numbers = new Map<string, number>();
-  for (const g of [...games].sort((a, b) => a.startedAt.localeCompare(b.startedAt))) {
-    const key = g.sessionIds[0] ?? `day:${utcDay(g.startedAt)}`;
-    const n = (byGroup.get(key) ?? 0) + 1;
-    byGroup.set(key, n);
-    numbers.set(g.id, n);
-  }
-  return numbers;
-}
-
-export function buildHome(wb: WorkbenchData, duoId: string): Home {
+/** `timeZone` groups unrecorded Games by day for "Game N", as the Games list does (#81). */
+export function buildHome(wb: WorkbenchData, duoId: string, timeZone?: string): Home {
   const current = wb.learnings.filter((l) => l.status === "current" && !l.dismissed);
   const games = Object.values(wb.gamesById).sort((a, b) => a.startedAt.localeCompare(b.startedAt));
-  const numbers = gameNumbers(games);
+  const numbers = gameNumbers(games, wb.sessions, timeZone);
   const roundsOf = (g: WorkbenchGame) =>
     g.roundIds
       .flatMap((id) => (wb.roundsById[id] ? [wb.roundsById[id]!] : []))

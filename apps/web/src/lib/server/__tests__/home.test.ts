@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { matchCountries } from "$lib/country-search.js";
-import { buildHome, gameNumbers, RECENT_DAYS } from "../home.js";
+import { buildHome, RECENT_DAYS } from "../home.js";
 import type {
   CountryDossier,
   WorkbenchData,
@@ -188,8 +188,10 @@ describe("buildHome: rating, latest Session and map Rounds", () => {
       missed: [{ code: "DK", count: 2 }],
     });
 
-    const numbers = gameNumbers(b.games);
-    expect([numbers.get("solo"), numbers.get("s1g1"), numbers.get("s1g2")]).toEqual([1, 1, 2]);
+    // "Game N" as on the Session page and the Games list (game-number.ts): in its Session, or its day when unrecorded.
+    const title = (gameId: string) => home.rounds.find((x) => x.gameId === gameId)!.title;
+    expect(title("s1g1")).toMatch(/· Game 1 · Round 1$/);
+    expect(title("solo")).toMatch(/· Game 1 · Round 1$/);
     const r = home.rounds.find((x) => x.gameId === "s1g2" && x.countryCode === "CZ")!;
     expect(r.title).toMatch(/· Game 2 · Round 2$/);
     expect(r.guesses[0]).toMatchObject({ isDuo: true, color: "#2b6cb0", initial: "M" });

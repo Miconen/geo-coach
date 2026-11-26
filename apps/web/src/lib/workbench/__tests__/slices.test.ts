@@ -106,6 +106,7 @@ function game(id: string, roundIds: string[]): WorkbenchGame {
     roundCount: roundIds.length,
     roundIds,
     sessionIds: [],
+    ratingSessionId: null,
     micCount: 0,
   };
 }

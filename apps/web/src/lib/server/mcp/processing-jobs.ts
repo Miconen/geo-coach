@@ -3,11 +3,12 @@ import { and, asc, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { intervalsOverlap, uuidv7 } from "@geo-coach/shared";
 import { hashToken } from "../auth/index.js";
 import type { AppDb } from "../db/index.js";
-import { claimTaggingJobs, learnings, processingJobs, processingRuns, recordings } from "../db/schema.js";
+import { claimTaggingJobs, claims, learnings, processingJobs, processingRuns, recordings } from "../db/schema.js";
 import { duoEventBus } from "../events/bus.js";
+import { CLAIM_TAGGING_MODELS, isClaimTaggingModel, type ClaudeRunUsage } from "../processor/worker.js";
 import { CLAIM_TAGGING_BATCH, DomainError, assertPlayerInDuo, loadClaimTaggingQueue } from "../services/index.js";
-import { countJobTagged, type ClaimTaggingScope } from "./clue-tagging.js";
-import { getCurrentPromptVersion } from "./prompts.js";
+import { countJobTagged, countTrialTagged, type ClaimTaggingScope } from "./clue-tagging.js";
+import { CLUE_TAG_PROMPT_VERSIONS, getCurrentPromptVersion, isClueTagPromptVersion } from "./prompts.js";
 import { mcpListWork, mcpStartRun } from "./workflow.js";
 
 export const JOB_TOKEN_PREFIX = "gc_job_";
@@ -32,8 +33,16 @@ export type ProcessingJobScope =
 /** A job the worker claimed: a Session job with its open run, or a Claim tagging job. */
 export type ClaimedProcessingJob =
   | { jobId: string; runId: string; purpose: ProcessingJobPurpose; mcpToken: string }
-  | { jobId: string; runId: null; purpose: "tag-claims"; mcpToken: string; claimCount: number };
+  | { jobId: string; runId: null; purpose: "tag-claims"; mcpToken: string; claimCount: number; model: string | null };
 type TagJobRow = typeof claimTaggingJobs.$inferSelect;
+
+/** How a worker says a job ended; a Claim tagging job also gets the model it ran and what it used (#94). */
+export interface JobOutcome {
+  ok: boolean;
+  error?: string | null;
+  model?: string | null;
+  usage?: ClaudeRunUsage | null;
+}
 
 let processorSeenAt = 0;
 
@@ -276,6 +285,8 @@ export async function verifyProcessingJobToken(
       duoId: tagging.duoId,
       claimIds: tagging.claimIds,
       startedAt: tagging.startedAt,
+      trial: tagging.trial,
+      promptVersion: tagging.promptVersion ?? getCurrentPromptVersion("clue-tag"),
     };
   }
   if (!job.runId || !job.leaseExpiresAt || job.leaseExpiresAt <= now) return null;
@@ -314,7 +325,7 @@ export async function extendProcessingJobLease(
 export async function finishProcessingJob(
   db: AppDb,
   jobId: string,
-  outcome: { ok: boolean; error?: string | null },
+  outcome: JobOutcome,
 ): Promise<{ status: JobRow["status"] | null }> {
   const job = await db.query.processingJobs.findFirst({ where: eq(processingJobs.id, jobId) });
   if (!job) {
@@ -397,12 +408,38 @@ async function closeTaggingJob(
   status: "succeeded" | "failed" | "cancelled",
   error: string | null,
   taggedCount = job.taggedCount,
+  ran: Pick<JobOutcome, "model" | "usage"> = {},
 ) {
   await db
     .update(claimTaggingJobs)
-    .set({ status, error, taggedCount, tokenHash: null, leaseExpiresAt: null, finishedAt: new Date() })
+    .set({
+      status,
+      error,
+      taggedCount,
+      tokenHash: null,
+      leaseExpiresAt: null,
+      finishedAt: new Date(),
+      ...(ran.model ? { model: ran.model } : {}),
+      ...(ran.usage ? { usage: ran.usage, costUsd: ran.usage.costUsd } : {}),
+    })
     .where(and(eq(claimTaggingJobs.id, job.id), inArray(claimTaggingJobs.status, ["queued", "running"])));
   duoEventBus.emitChanged(job.duoId, "clue", job.id);
+}
+
+/** A live job that takes its Claims from the queue, not a trial or a job for named Claims (#94). */
+const takesFromQueue = (j: Pick<TagJobRow, "trial" | "requestedClaimIds">) => !j.trial && j.requestedClaimIds === null;
+
+/** The Claims live jobs hold: a running job's, and a queued job's named Claims. Trials hold none. */
+function heldByLiveJobs(active: ReadonlyArray<Pick<TagJobRow, "status" | "trial" | "claimIds" | "requestedClaimIds">>) {
+  return new Set(
+    active.filter((j) => !j.trial).flatMap((j) => (j.status === "running" ? j.claimIds : (j.requestedClaimIds ?? []))),
+  );
+}
+
+function assertTaggingModel(model: string | null | undefined) {
+  if (model && !isClaimTaggingModel(model)) {
+    throw new DomainError("UNKNOWN_MODEL", `Unknown model "${model}"; use one of ${CLAIM_TAGGING_MODELS.join(", ")}.`, 400);
+  }
 }
 
 /**
@@ -414,18 +451,20 @@ async function closeTaggingJob(
 export async function enqueueClaimTagging(
   db: AppDb,
   playerId: string,
-  input: { duoId: string; limit?: number | null },
-): Promise<{ jobs: number; claims: number }> {
+  input: { duoId: string; limit?: number | null; model?: string | null },
+): Promise<{ jobs: number; claims: number; jobIds: string[] }> {
   await assertPlayerInDuo(db, playerId, input.duoId);
+  assertTaggingModel(input.model);
+  const promptVersion = getCurrentPromptVersion("clue-tag");
   const result = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`clue-tag:${input.duoId}`}))`);
     const active = await tx.query.claimTaggingJobs.findMany({
       where: and(eq(claimTaggingJobs.duoId, input.duoId), inArray(claimTaggingJobs.status, ["queued", "running"])),
     });
-    const queue = await loadClaimTaggingQueue(tx as unknown as AppDb, input.duoId, getCurrentPromptVersion("clue-tag"));
-    // A running job holds its Claims; a queued one will take the next claimLimit of the queue.
-    const held = new Set(active.flatMap((j) => j.claimIds));
-    const ahead = active.filter((j) => j.status === "queued").reduce((n, j) => n + j.claimLimit, 0);
+    const queue = await loadClaimTaggingQueue(tx as unknown as AppDb, input.duoId, promptVersion);
+    // A running job holds its Claims; a queued queue job will take the next claimLimit of the queue.
+    const held = heldByLiveJobs(active);
+    const ahead = active.filter((j) => j.status === "queued" && takesFromQueue(j)).reduce((n, j) => n + j.claimLimit, 0);
     const free = queue.filter((id) => !held.has(id)).length - ahead;
     const wanted = Math.min(free, input.limit ?? Infinity);
     if (wanted <= 0) return null;
@@ -436,19 +475,95 @@ export async function enqueueClaimTagging(
         duoId: input.duoId,
         requestedByPlayerId: playerId,
         claimLimit: Math.min(left, CLAIM_TAGGING_BATCH),
+        model: input.model ?? null,
+        promptVersion,
       });
     }
     await tx.insert(claimTaggingJobs).values(rows);
-    return { jobs: rows.length, claims: wanted };
+    return { jobs: rows.length, claims: wanted, jobIds: rows.map((r) => r.id) };
   });
   if (!result) throw new DomainError("NOTHING_TO_TAG", "Every Claim in the queue is already tagged or being tagged.", 409);
   duoEventBus.emitChanged(input.duoId, "clue");
   return result;
 }
 
-/** Gives the worker the oldest queued Claim tagging job, with the next queue Claims no running job holds. */
+/**
+ * Starts one Claim tagging job for a Player's agent (#94): on named Claims or the next `limit` of the queue, with a
+ * model and, for a trial, a prompt version. A trial tags into the trial store; a live job, like the Clues page's,
+ * always tags with the current prompt version. A trial's Claims are fixed when it starts, so it can be rerun on the
+ * same Claims.
+ */
+export async function startClaimTagging(
+  db: AppDb,
+  playerId: string,
+  input: {
+    duoId: string;
+    claimIds?: readonly string[];
+    limit?: number;
+    model?: string | null;
+    promptVersion?: string | null;
+    trial: boolean;
+  },
+): Promise<{ jobId: string; trial: boolean; claimCount: number; model: string | null; promptVersion: string }> {
+  await assertPlayerInDuo(db, playerId, input.duoId);
+  assertTaggingModel(input.model);
+  const current = getCurrentPromptVersion("clue-tag");
+  const promptVersion = input.promptVersion ?? current;
+  if (!isClueTagPromptVersion(promptVersion)) {
+    throw new DomainError("UNKNOWN_PROMPT_VERSION", `Unknown prompt version "${promptVersion}"; use one of ${CLUE_TAG_PROMPT_VERSIONS.join(", ")}.`, 400);
+  }
+  if (!input.trial && promptVersion !== current) {
+    throw new DomainError("TRIAL_ONLY", `Only a trial can tag with ${promptVersion}; live tagging uses ${current}.`, 400);
+  }
+  if (input.claimIds?.length && input.limit) {
+    throw new DomainError("INVALID_INPUT", "Pass claimIds or limit, not both.", 400);
+  }
+  const limit = Math.min(input.limit ?? CLAIM_TAGGING_BATCH, CLAIM_TAGGING_BATCH);
+
+  if (!input.trial && !input.claimIds?.length) {
+    const res = await enqueueClaimTagging(db, playerId, { duoId: input.duoId, limit, model: input.model });
+    return { jobId: res.jobIds[0]!, trial: false, claimCount: res.claims, model: input.model ?? null, promptVersion };
+  }
+
+  let claimIds: string[];
+  if (input.claimIds?.length) {
+    const wanted = [...new Set(input.claimIds)];
+    if (wanted.length > CLAIM_TAGGING_BATCH) {
+      throw new DomainError("TOO_MANY_CLAIMS", `A job tags at most ${CLAIM_TAGGING_BATCH} Claims.`, 400);
+    }
+    const found = await db
+      .select({ id: claims.id })
+      .from(claims)
+      .where(and(eq(claims.duoId, input.duoId), inArray(claims.id, wanted)));
+    const known = new Set(found.map((c) => c.id));
+    const unknown = wanted.filter((id) => !known.has(id));
+    if (unknown.length > 0) throw new DomainError("UNKNOWN_CLAIMS", `Unknown or other Duo's claimIds: ${unknown.join(", ")}`, 400);
+    claimIds = wanted;
+  } else {
+    // A trial on the queue: the next Claims its prompt version hasn't tagged, fixed now.
+    claimIds = await loadClaimTaggingQueue(db, input.duoId, promptVersion, { limit });
+    if (claimIds.length === 0) throw new DomainError("NOTHING_TO_TAG", `Every Claim is already tagged with ${promptVersion}.`, 409);
+  }
+  const jobId = uuidv7();
+  await db.insert(claimTaggingJobs).values({
+    id: jobId,
+    duoId: input.duoId,
+    requestedByPlayerId: playerId,
+    claimLimit: claimIds.length,
+    requestedClaimIds: claimIds,
+    model: input.model ?? null,
+    promptVersion,
+    trial: input.trial,
+  });
+  duoEventBus.emitChanged(input.duoId, "clue");
+  return { jobId, trial: input.trial, claimCount: claimIds.length, model: input.model ?? null, promptVersion };
+}
+
+/**
+ * Gives the worker the oldest queued Claim tagging job: with the Claims it names, or else the next queue Claims no
+ * running live job holds.
+ */
 async function claimNextTaggingJob(db: AppDb, now: Date): Promise<ClaimedProcessingJob | null> {
-  const promptVersion = getCurrentPromptVersion("clue-tag");
   for (;;) {
     const claimed = await db.transaction(async (tx) => {
       const [next] = await tx
@@ -459,16 +574,30 @@ async function claimNextTaggingJob(db: AppDb, now: Date): Promise<ClaimedProcess
         .limit(1)
         .for("update", { skipLocked: true });
       if (!next) return null;
+      const promptVersion = next.promptVersion ?? getCurrentPromptVersion("clue-tag");
       // One claim per Duo at a time, so two jobs never take the same Claims.
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`clue-tag:${next.duoId}`}))`);
-      const running = await tx.query.claimTaggingJobs.findMany({
-        where: and(eq(claimTaggingJobs.duoId, next.duoId), eq(claimTaggingJobs.status, "running")),
-        columns: { claimIds: true },
-      });
-      const claimIds = await loadClaimTaggingQueue(tx as unknown as AppDb, next.duoId, promptVersion, {
-        limit: next.claimLimit,
-        exclude: new Set(running.flatMap((j) => j.claimIds)),
-      });
+      let claimIds: string[];
+      if (next.requestedClaimIds) {
+        // Named Claims (#94), less any deleted since.
+        const left = next.requestedClaimIds.length
+          ? await tx
+              .select({ id: claims.id })
+              .from(claims)
+              .where(and(eq(claims.duoId, next.duoId), inArray(claims.id, next.requestedClaimIds)))
+          : [];
+        const alive = new Set(left.map((c) => c.id));
+        claimIds = next.requestedClaimIds.filter((id) => alive.has(id));
+      } else {
+        const running = await tx.query.claimTaggingJobs.findMany({
+          where: and(eq(claimTaggingJobs.duoId, next.duoId), eq(claimTaggingJobs.status, "running"), eq(claimTaggingJobs.trial, false)),
+          columns: { claimIds: true },
+        });
+        claimIds = await loadClaimTaggingQueue(tx as unknown as AppDb, next.duoId, promptVersion, {
+          limit: next.claimLimit,
+          exclude: new Set(running.flatMap((j) => j.claimIds)),
+        });
+      }
       if (claimIds.length === 0) return { job: next, mcpToken: null, claimIds };
       const mcpToken = `${JOB_TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
       await tx
@@ -476,6 +605,7 @@ async function claimNextTaggingJob(db: AppDb, now: Date): Promise<ClaimedProcess
         .set({
           status: "running",
           claimIds,
+          promptVersion,
           tokenHash: hashToken(mcpToken),
           leaseExpiresAt: new Date(now.getTime() + LEASE_MS),
           startedAt: now,
@@ -495,59 +625,95 @@ async function claimNextTaggingJob(db: AppDb, now: Date): Promise<ClaimedProcess
       purpose: "tag-claims",
       mcpToken: claimed.mcpToken,
       claimCount: claimed.claimIds.length,
+      model: claimed.job.model,
     };
   }
 }
 
 /**
  * A Claim tagging job succeeds when it tagged every Claim it took. The ones it didn't simply stay in the queue for
- * the next job.
+ * the next job. A trial counts the Claims it tagged in the trial store.
  */
 async function finishTaggingJob(
   db: AppDb,
   job: TagJobRow,
-  outcome: { ok: boolean; error?: string | null },
+  outcome: JobOutcome,
 ): Promise<{ status: TagJobRow["status"] | null }> {
   if (job.status !== "running" || !job.startedAt) return { status: job.status };
-  const tagged = await countJobTagged(
-    db,
-    { duoId: job.duoId, claimIds: job.claimIds, startedAt: job.startedAt },
-    getCurrentPromptVersion("clue-tag"),
-  );
+  const tagged = job.trial
+    ? await countTrialTagged(db, job.id)
+    : await countJobTagged(
+        db,
+        { duoId: job.duoId, claimIds: job.claimIds, startedAt: job.startedAt },
+        job.promptVersion ?? getCurrentPromptVersion("clue-tag"),
+      );
+  const ran = { model: outcome.model, usage: outcome.usage };
   if (tagged === job.claimIds.length) {
-    await closeTaggingJob(db, job, "succeeded", null, tagged);
+    await closeTaggingJob(db, job, "succeeded", null, tagged, ran);
     return { status: "succeeded" };
   }
   const why = outcome.error?.slice(0, 200) || "The model stopped before tagging every Claim.";
-  const error = `Tagged ${tagged} of ${job.claimIds.length} Claims; the rest stay in the queue. ${why}`;
-  await closeTaggingJob(db, job, "failed", error, tagged);
+  const rest = job.trial ? "the trial keeps what it tagged" : "the rest stay in the queue";
+  const error = `Tagged ${tagged} of ${job.claimIds.length} Claims; ${rest}. ${why}`;
+  await closeTaggingJob(db, job, "failed", error, tagged, ran);
   return { status: "failed" };
 }
 
 export interface ClaimTaggingJobRow {
   id: string;
   status: TagJobRow["status"];
+  trial: boolean;
   claimLimit: number;
   taggedCount: number;
   error: string | null;
+  /** The model the job ran with (or asked for, until it runs); null is the worker's default. */
+  model: string | null;
+  promptVersion: string | null;
+  usage: ClaudeRunUsage | null;
+  /** Claude Code's total_cost_usd: what the run would cost at API prices, not what the subscription bills. */
+  apiEquivalentCostUsd: number | null;
+  claimIds: string[];
   createdAt: string;
+  startedAt: string | null;
   finishedAt: string | null;
+  promotedAt: string | null;
 }
 
-/** A Duo's recent Claim tagging jobs, newest first, for the Clues page. */
-export async function listClaimTaggingJobs(db: AppDb, duoId: string, limit = 20): Promise<ClaimTaggingJobRow[]> {
-  const jobs = await db.query.claimTaggingJobs.findMany({
-    where: eq(claimTaggingJobs.duoId, duoId),
-    orderBy: [desc(claimTaggingJobs.createdAt), desc(claimTaggingJobs.id)],
-    limit,
-  });
-  return jobs.map((j) => ({
+export function toClaimTaggingJobRow(j: TagJobRow): ClaimTaggingJobRow {
+  return {
     id: j.id,
     status: j.status,
+    trial: j.trial,
     claimLimit: j.claimLimit,
     taggedCount: j.taggedCount,
     error: j.error,
+    model: j.model,
+    promptVersion: j.promptVersion,
+    usage: j.usage,
+    apiEquivalentCostUsd: j.costUsd,
+    // Until it runs, a job for named Claims lists those.
+    claimIds: j.claimIds.length > 0 ? j.claimIds : (j.requestedClaimIds ?? []),
     createdAt: j.createdAt.toISOString(),
+    startedAt: j.startedAt?.toISOString() ?? null,
     finishedAt: j.finishedAt?.toISOString() ?? null,
-  }));
+    promotedAt: j.promotedAt?.toISOString() ?? null,
+  };
+}
+
+/** A Duo's recent Claim tagging jobs, newest first, for the Clues page and `list_claim_tagging_jobs`. */
+export async function listClaimTaggingJobs(
+  db: AppDb,
+  duoId: string,
+  limit = 20,
+  filter: { trial?: boolean } = {},
+): Promise<ClaimTaggingJobRow[]> {
+  const jobs = await db.query.claimTaggingJobs.findMany({
+    where: and(
+      eq(claimTaggingJobs.duoId, duoId),
+      filter.trial === undefined ? undefined : eq(claimTaggingJobs.trial, filter.trial),
+    ),
+    orderBy: [desc(claimTaggingJobs.createdAt), desc(claimTaggingJobs.id)],
+    limit,
+  });
+  return jobs.map(toClaimTaggingJobRow);
 }

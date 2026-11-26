@@ -60,7 +60,7 @@ describe("tagging Claims with Clues (#89)", () => {
     mcpTagClaims(handle.db, mikoId, { items: ids.map((claimId) => ({ claimId, clues: [] })) }, scope);
 
   it("a job with a limit of N tags at most N Claims, and the next job continues where it stopped", async () => {
-    expect(await enqueueClaimTagging(handle.db, mikoId, { duoId, limit: 3 })).toEqual({ jobs: 1, claims: 3 });
+    expect(await enqueueClaimTagging(handle.db, mikoId, { duoId, limit: 3 })).toMatchObject({ jobs: 1, claims: 3 });
     const first = await claimTagJob();
     expect(first.scope.claimIds).toHaveLength(3);
     const listed = await untagged(first.scope);
@@ -74,7 +74,7 @@ describe("tagging Claims with Clues (#89)", () => {
     expect(await finishProcessingJob(handle.db, first.jobId, { ok: true })).toEqual({ status: "succeeded" });
 
     // Only two are left in the queue, and the next job takes exactly those.
-    expect(await enqueueClaimTagging(handle.db, mikoId, { duoId, limit: 3 })).toEqual({ jobs: 1, claims: 2 });
+    expect(await enqueueClaimTagging(handle.db, mikoId, { duoId, limit: 3 })).toMatchObject({ jobs: 1, claims: 2 });
     const second = await claimTagJob();
     expect([...second.scope.claimIds].sort()).toEqual(claimIds.filter((id) => !first.scope.claimIds.includes(id)).sort());
     await expect(enqueueClaimTagging(handle.db, mikoId, { duoId, limit: 3 })).rejects.toThrow(/already/);
@@ -91,7 +91,7 @@ describe("tagging Claims with Clues (#89)", () => {
   });
 
   it("without a limit, queues the whole queue", async () => {
-    expect(await enqueueClaimTagging(handle.db, mikoId, { duoId, limit: null })).toEqual({ jobs: 1, claims: 5 });
+    expect(await enqueueClaimTagging(handle.db, mikoId, { duoId, limit: null })).toMatchObject({ jobs: 1, claims: 5 });
   });
 
   it("reuses the seed Clues, creates new ones only inside a family, reports them, and caps lacks", async () => {

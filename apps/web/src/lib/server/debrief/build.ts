@@ -156,6 +156,7 @@ export function buildDebrief(input: DebriefInput): Debrief {
 function roundClues(data: ClueLensData | undefined, roundId: string, startMs: number): DebriefRoundClue[] {
   return (data?.byRound.get(roundId) ?? []).map((c) => ({
     clueId: c.clueId,
+    polarity: c.polarity,
     lines: c.quotes.map((q) => ({ id: q.id, playerId: q.playerId, text: q.text, atS: (q.startedAt.getTime() - startMs) / 1000, afterEnd: false })),
   }));
 }

@@ -6,6 +6,7 @@ import {
   uuidv7,
   type ClaimStatus,
   type CluePrevalence,
+  type RoundCluePolarity,
   type TimeInterval,
 } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
@@ -306,23 +307,36 @@ export async function queueTaggingOfChangedClaims(db: AppDb, playerId: string, d
 
 // --- Round Clues ----------------------------------------------------------------------------------------------------
 
+/** A Round Clue to save: seen, or not seen (#93). */
+export interface RoundClueToSave {
+  clueId: string;
+  polarity: RoundCluePolarity;
+  note: string | null;
+  utteranceIds: string[];
+}
+
 /**
- * Saves a `clues` run's Clues for some Rounds. Each item is all the Clues said in its Round: it replaces what this
- * run said earlier about that Round. Earlier runs' links are left for replacement by derivation (ADR 0002).
+ * Saves a `clues` run's Clues for some Rounds. Each item is all the Clues said in its Round, seen or not: it replaces
+ * what this run said earlier about that Round. Earlier runs' links are left for replacement by derivation (ADR 0002).
+ * A Clue listed twice for a Round keeps one link, seen if either says so.
  */
 export async function insertRunRoundClues(
   db: AppDb,
   runId: string,
   duoId: string,
-  items: ReadonlyArray<{ roundId: string; clues: ReadonlyArray<{ clueId: string; note: string | null; utteranceIds: string[] }> }>,
+  items: ReadonlyArray<{ roundId: string; clues: ReadonlyArray<RoundClueToSave> }>,
 ): Promise<number> {
   let saved = 0;
   for (const item of items) {
     await db.delete(roundClues).where(and(eq(roundClues.runId, runId), eq(roundClues.roundId, item.roundId)));
-    const byClue = new Map(item.clues.map((c) => [c.clueId, c]));
+    const byClue = new Map<string, RoundClueToSave>();
+    for (const c of item.clues) {
+      const held = byClue.get(c.clueId);
+      if (!held || held.polarity === "not_seen" || c.polarity === "seen") byClue.set(c.clueId, c);
+    }
     for (const c of byClue.values()) {
       const id = uuidv7();
-      await db.insert(roundClues).values({ id, duoId, runId, roundId: item.roundId, clueId: c.clueId, note: c.note });
+      await db.insert(roundClues).values({ id, duoId, runId, roundId: item.roundId, clueId: c.clueId, polarity: c.polarity, note: c.note });
       if (c.utteranceIds.length > 0) {
         await db
           .insert(roundClueUtterances)
@@ -358,6 +372,7 @@ export function latestClueRunFor<R extends RunLike>(guessing: TimeInterval, runs
 export interface CurrentRoundClue {
   clueId: string;
   runId: string;
+  polarity: RoundCluePolarity;
   note: string | null;
   utteranceIds: string[];
 }
@@ -411,7 +426,7 @@ export async function deriveCurrentRoundClues(
   for (const l of current) {
     out.set(l.roundId, [
       ...(out.get(l.roundId) ?? []),
-      { clueId: l.clueId, runId: l.runId, note: l.note, utteranceIds: citesBy.get(l.id) ?? [] },
+      { clueId: l.clueId, runId: l.runId, polarity: l.polarity, note: l.note, utteranceIds: citesBy.get(l.id) ?? [] },
     ]);
   }
   return out;

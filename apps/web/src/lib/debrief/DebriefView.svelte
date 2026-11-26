@@ -24,7 +24,7 @@
   import { anchoredRoundId, readSelection, select, type DebriefSelection } from "./selection.js";
   import { updateQuery, viewParams } from "$lib/url-state.js";
   import { CLUE_FILL_COLOR, CLUE_FILL_LABEL, CLUE_FILL_ORDER, clueFillCounts, clueLensClaims, clueLensFills, type ClueFill } from "./clue-lens.js";
-  import type { Debrief, DebriefGame, DebriefRound, DebriefScope } from "./types.js";
+  import type { Debrief, DebriefGame, DebriefRound, DebriefRoundClue, DebriefScope } from "./types.js";
   import {
     clock,
     countryPopup,
@@ -226,12 +226,16 @@
   });
   // The Clue lens (#89): ?lens=clues on a focused Round (ADR 0007) swaps the Outcome lens's fills for what the
   // Round's Clues say about each country, from the Claims. Every Clue shows by default; clicking one shows it alone
-  // and ticking several combines them, until the Round changes.
+  // and ticking several combines them, until the Round changes. A Clue the Duo said the Round doesn't have (#93)
+  // lists under "Not seen" and makes the countries where it's typical read unlikely.
   const roundClues = $derived(round?.clues ?? []);
+  const seenClues = $derived(roundClues.filter((c) => c.polarity === "seen"));
+  const notSeenClues = $derived(roundClues.filter((c) => c.polarity === "not_seen"));
+  const notSeenIds = $derived(new Set(notSeenClues.map((c) => c.clueId)));
   const clueOn = $derived(round !== null && roundClues.length > 0 && viewParams().get("lens") === "clues");
   let picked = $state<{ roundId: string; ids: string[] } | null>(null);
   const shownClueIds = $derived(round && picked?.roundId === round.id ? picked.ids : roundClues.map((c) => c.clueId));
-  const clueFills = $derived(clueOn ? clueLensFills(debrief.clueLens.links, new Set(shownClueIds)) : new Map<string, ClueFill>());
+  const clueFills = $derived(clueOn ? clueLensFills(debrief.clueLens.links, new Set(shownClueIds), notSeenIds) : new Map<string, ClueFill>());
   const clueCounts = $derived(clueFillCounts(clueFills));
   /** The violet outline's countries (#86): named while guessing, and no Duo guess landed there. */
   const saidNotGuessed = $derived.by(() => {
@@ -247,6 +251,8 @@
     picked = { roundId: round.id, ids: shownClueIds.includes(id) ? shownClueIds.filter((x) => x !== id) : [...shownClueIds, id] };
   }
   const PREVALENCE_LABEL = { typical: "typical", some: "in some areas", lacks: "lacks" } as const;
+  /** A fill as the answer line words it. */
+  const fillWords = (f: ClueFill) => (f === "unlikely" ? "unlikely: typical there, not seen this Round" : CLUE_FILL_LABEL[f].toLowerCase());
 
   const scopeRounds = $derived(scope.kind === "session" && !country ? debrief.rounds : country ? country.rounds : gameRounds);
   useMapScene(map, (): MapScene => {
@@ -347,14 +353,14 @@
       </div>
       {#if clueOn}
         {@const fill = clueFills.get(popup.code)}
-        {@const said = clueLensClaims(debrief.clueLens.links, new Set(shownClueIds), popup.code)}
+        {@const said = clueLensClaims(debrief.clueLens.links, new Set(shownClueIds), popup.code, notSeenIds)}
         <p class="mt-1 font-semibold" style="color:{fill ? CLUE_FILL_COLOR[fill] : 'rgb(255 255 255 / 0.6)'}" data-testid="clue-popup-fill">
           {fill ? CLUE_FILL_LABEL[fill] : "No Claim says"}{saidNotGuessed.includes(popup.code) ? " · said while guessing" : ""}{popup.code === round?.countryCode ? " · the answer" : ""}
         </p>
         <ul class="mt-1.5 max-h-56 space-y-1 overflow-auto" data-testid="clue-popup-claims">
           {#each said as l (`${l.claimId}:${l.clueId}`)}
             <li class="rounded-lg bg-white/5 px-2 py-1" data-testid="clue-popup-claim">
-              <span class="font-semibold">{PREVALENCE_LABEL[l.prevalence]} · {debrief.clueLens.clues[l.clueId]?.name ?? "Clue"}</span>
+              <span class="font-semibold">{PREVALENCE_LABEL[l.prevalence]} · {debrief.clueLens.clues[l.clueId]?.name ?? "Clue"}{notSeenIds.has(l.clueId) ? " (not seen)" : ""}</span>
               <span class={l.status === "verified" ? "text-emerald-300" : l.status === "disproved" ? "text-red-300" : "text-amber-300"}> · {l.status}</span>
               <span class="block text-white/80">{debrief.clueLens.claimText[l.claimId] ?? ""}</span>
             </li>
@@ -413,28 +419,38 @@
         <p class="mt-2 text-[var(--muted)]" data-testid="clue-lens-none">No Clues said this Round</p>
       {:else if clueOn}
         <p class="mt-2 text-[var(--muted)]">Click a Clue to see it alone; tick more to combine them.</p>
-        <ul class="mt-1.5 space-y-1">
-          {#each roundClues as c (c.clueId)}
-            {@const clue = debrief.clueLens.clues[c.clueId]}
-            {@const on = shownClueIds.includes(c.clueId)}
-            <li
-              class="flex items-start gap-1.5 rounded-lg border px-2 py-1 {on ? 'border-sky-400 bg-sky-400/10' : 'border-[var(--border)] hover:bg-[var(--surface-hover)]'}"
-              data-testid="clue-lens-clue"
-              data-clue-id={c.clueId}
-              data-shown={on}
-            >
-              <input type="checkbox" class="mt-0.5" checked={on} aria-label="Combine {clue?.name ?? 'Clue'}" data-testid="clue-lens-combine" onchange={() => toggleClue(c.clueId)} />
-              <button type="button" class="flex-1 text-left" data-testid="clue-lens-solo" onclick={() => soloClue(c.clueId)}>
-                <span class="text-[10px] uppercase text-[var(--muted)]">{clue?.family}</span>
-                <span class="font-semibold">{clue?.name}</span>
-                <span class="text-[var(--muted)]">· {claimCountOf(c.clueId)} Claims</span>
-                {#each c.lines as l (l.id)}
-                  <span class="block italic text-[var(--muted)]">{debrief.players[l.playerId]?.name ?? "Player"}: “{l.text}”</span>
-                {/each}
-              </button>
-            </li>
-          {/each}
-        </ul>
+        {#snippet clueRows(list: DebriefRoundClue[])}
+          <ul class="mt-1.5 space-y-1">
+            {#each list as c (c.clueId)}
+              {@const clue = debrief.clueLens.clues[c.clueId]}
+              {@const on = shownClueIds.includes(c.clueId)}
+              <li
+                class="flex items-start gap-1.5 rounded-lg border px-2 py-1 {on ? 'border-sky-400 bg-sky-400/10' : 'border-[var(--border)] hover:bg-[var(--surface-hover)]'}"
+                data-testid="clue-lens-clue"
+                data-clue-id={c.clueId}
+                data-polarity={c.polarity}
+                data-shown={on}
+              >
+                <input type="checkbox" class="mt-0.5" checked={on} aria-label="Combine {clue?.name ?? 'Clue'}" data-testid="clue-lens-combine" onchange={() => toggleClue(c.clueId)} />
+                <button type="button" class="flex-1 text-left" data-testid="clue-lens-solo" onclick={() => soloClue(c.clueId)}>
+                  <span class="text-[10px] uppercase text-[var(--muted)]">{clue?.family}</span>
+                  <span class="font-semibold">{clue?.name}</span>
+                  <span class="text-[var(--muted)]">· {claimCountOf(c.clueId)} Claims</span>
+                  {#each c.lines as l (l.id)}
+                    <span class="block italic text-[var(--muted)]">{debrief.players[l.playerId]?.name ?? "Player"}: “{l.text}”</span>
+                  {/each}
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/snippet}
+        {#if seenClues.length}{@render clueRows(seenClues)}{/if}
+        {#if notSeenClues.length}
+          <section class="mt-2" data-testid="clue-lens-not-seen">
+            <h3 class="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">Not seen</h3>
+            {@render clueRows(notSeenClues)}
+          </section>
+        {/if}
         <div class="mt-2 space-y-0.5 border-t border-[var(--border)] pt-1.5" data-testid="clue-legend">
           {#each CLUE_FILL_ORDER as f (f)}
             <p class="flex items-center gap-1.5" data-testid="clue-legend-entry" data-fill={f}>
@@ -450,7 +466,7 @@
             {@const ans = clueFills.get(round.countryCode.toUpperCase())}
             <p class="pt-1 text-[var(--muted)]" data-testid="clue-lens-answer">
               The answer, {flag(round.countryCode)} {round.countryName ?? round.countryCode}, reads
-              <span class="font-semibold text-[var(--ink)]">{ans ? CLUE_FILL_LABEL[ans].toLowerCase() : "neutral: no Claim covers it"}</span>.
+              <span class="font-semibold text-[var(--ink)]">{ans ? fillWords(ans) : "neutral: no Claim covers it"}</span>.
             </p>
           {/if}
         </div>

@@ -64,6 +64,7 @@ import {
   getCurrentTranscriptVersionIds,
   insertRunCallLabels,
   insertRunRoundClues,
+  type RoundClueToSave,
   clueResolver,
   deriveCurrentRoundClues,
   listDuoClues,
@@ -1144,7 +1145,7 @@ async function readCluesRange(db: AppDb, run: RunRow) {
       utterances: said,
       currentClues: (current.get(r.id) ?? []).flatMap((c) => {
         const clue = clueById.get(c.clueId);
-        return clue ? [`${clue.family}: ${clue.name}`] : [];
+        return clue ? [`${c.polarity === "not_seen" ? "not seen: " : ""}${clue.family}: ${clue.name}`] : [];
       }),
     };
   });
@@ -1171,9 +1172,9 @@ async function readCluesRange(db: AppDb, run: RunRow) {
 
 /**
  * `add_round_clues`: saves a `clues` run's Clues for some Rounds. Each item is every Clue said in one Round of the
- * run's range (it replaces what this run said about that Round earlier), citing only Utterances spoken while that
- * Round's guessing was on. Clues are reused by id or by family and name, and created only inside a vocabulary
- * family; the Clues created are reported. Invalid items are reported and the rest saved.
+ * run's range, seen or not seen (#93); it replaces what this run said about that Round earlier, citing only
+ * Utterances spoken while that Round's guessing was on. Clues are reused by id or by family and name, and created
+ * only inside a vocabulary family; the Clues created are reported. Invalid items are reported and the rest saved.
  */
 export async function mcpAddRoundClues(db: AppDb, playerId: string, runId: string, rawItems: unknown[]) {
   const run = await findScopedRun(db, runId);
@@ -1217,7 +1218,7 @@ export async function mcpAddRoundClues(db: AppDb, playerId: string, runId: strin
     // Speech after guessing ends reacts to the reveal (#80): it never names a Round's Clue.
     const guessing = roundGuessingInterval(round);
     const problems: string[] = [];
-    const roundClueItems: Array<{ clueId: string; note: string | null; utteranceIds: string[] }> = [];
+    const roundClueItems: RoundClueToSave[] = [];
     for (const c of item.clues) {
       const badRefs = c.utteranceRefs.filter((ref) => {
         const u = refToUtterance.get(ref);
@@ -1232,7 +1233,12 @@ export async function mcpAddRoundClues(db: AppDb, playerId: string, runId: strin
         problems.push(clue.error);
         continue;
       }
-      roundClueItems.push({ clueId: clue.id, note: c.note ?? null, utteranceIds: c.utteranceRefs.map((ref) => refToUtterance.get(ref)!.id) });
+      roundClueItems.push({
+        clueId: clue.id,
+        polarity: c.polarity,
+        note: c.note ?? null,
+        utteranceIds: c.utteranceRefs.map((ref) => refToUtterance.get(ref)!.id),
+      });
     }
     if (problems.length > 0) {
       errors.push({ index: i, message: problems.join("; ") });

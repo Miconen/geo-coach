@@ -14,6 +14,8 @@ import {
 import { loadSessionRunsPage, type SessionRunsPage } from "./session-runs.js";
 import { loadGameRuns, type GameRun } from "./game-runs.js";
 import { loadRoundSpeech } from "./round-speech.js";
+import { buildDebrief, gameNumbers, loadDebriefMeta } from "../debrief/load.js";
+import type { Debrief } from "$lib/debrief/types.js";
 
 export * from "./session-runs.js";
 export * from "./game-runs.js";
@@ -79,6 +81,8 @@ export interface SessionPayload {
   relatedGames: GameChip[];
   runs: SessionRunsPage;
   wb: EntityWorkbench;
+  /** The map-first debrief of the Session's Games (#79). */
+  debrief: Debrief;
 }
 
 const chipOfGame = (g: WorkbenchGame): GameChip => ({
@@ -285,13 +289,25 @@ export async function loadSessionPayload(
   }
   const wb = slice(full, { gameIds: overlap, sessionIds: new Set([sessionId]) });
   if (!wb.sessions.some((s) => s.id === sessionId)) wb.sessions = [session, ...wb.sessions];
+  // The debrief names no Opponent team (#79): the page never receives one.
+  wb.gamesById = Object.fromEntries(Object.entries(wb.gamesById).map(([id, g]) => [id, { ...g, opponentTeamName: null }]));
+  const anonymous = (g: WorkbenchGame): GameChip => ({ ...chipOfGame(g), opponentTeamName: null });
+  const sessionGames = [...overlap].flatMap((id) => (full.gamesById[id] ? [full.gamesById[id]!] : []));
+  const numbers = gameNumbers(sessionGames);
+  const debrief = buildDebrief({
+    wb: full,
+    games: sessionGames.map((g) => ({ id: g.id, number: numbers.get(g.id)! })),
+    meta: await loadDebriefMeta(db, duoId, [...overlap]),
+    sessionId,
+  });
   return {
     kind: "session",
     session,
-    games: [...overlap].flatMap((id) => (full.gamesById[id] ? [chipOfGame(full.gamesById[id]!)] : [])),
-    relatedGames: [...cited].flatMap((id) => (full.gamesById[id] ? [chipOfGame(full.gamesById[id]!)] : [])),
+    games: [...overlap].flatMap((id) => (full.gamesById[id] ? [anonymous(full.gamesById[id]!)] : [])),
+    relatedGames: [...cited].flatMap((id) => (full.gamesById[id] ? [anonymous(full.gamesById[id]!)] : [])),
     runs,
     wb,
+    debrief,
   };
 }
 export * from "./knowledge.js";

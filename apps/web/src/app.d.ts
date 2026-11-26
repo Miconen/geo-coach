@@ -18,6 +18,8 @@ declare global {
     interface PageState {
       focus?: string;
       filter?: string;
+      /** The debrief view's Game, Round, country and drawer (#79). */
+      debrief?: Record<"game" | "round" | "country" | "drawer", string | null>;
     }
   }
 }

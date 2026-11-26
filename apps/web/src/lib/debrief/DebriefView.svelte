@@ -382,7 +382,7 @@
           </div>
           <button type="button" class="text-lg leading-none text-[var(--muted)] hover:text-[var(--ink)]" aria-label="Close" onclick={() => go({ round: null })}>×</button>
         </div>
-        <RoundTranscript {debrief} {round} revealed={!masked} onHover={(id) => (hoverPlayer = id)} />
+        <RoundTranscript {debrief} {round} revealed={!masked} onReveal={reveal} onHover={(id) => (hoverPlayer = id)} />
         <h3 class="pt-1 text-[11px] font-semibold uppercase text-[var(--muted)]">Learnings</h3>
         <ul class="space-y-1.5">
           {#each learningsOf(debrief, round.learningIds) as l (l.id)}

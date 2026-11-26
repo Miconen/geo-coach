@@ -18,6 +18,8 @@ const ids = {
   c2: crypto.randomUUID(),
   c3: crypto.randomUUID(),
   c4: crypto.randomUUID(),
+  // c5 (verified) links the truck to one Region, Galicia (#92); added by its own test, last.
+  c5: crypto.randomUUID(),
   rcYellow: crypto.randomUUID(),
   rcTruck: crypto.randomUUID(),
 };
@@ -55,7 +57,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await withSql(async (sql) => {
     await sql`DELETE FROM processing_runs WHERE id = ${ids.run}`;
-    await sql`DELETE FROM claims WHERE id = ANY(${[ids.c1, ids.c2, ids.c3, ids.c4]})`;
+    await sql`DELETE FROM claims WHERE id = ANY(${[ids.c1, ids.c2, ids.c3, ids.c4, ids.c5]})`;
     await sql`DELETE FROM clues WHERE id = ANY(${[ids.yellow, ids.truck]})`;
   });
 });
@@ -140,4 +142,50 @@ test("under Recall the lens stays hidden until Reveal", async ({ page }) => {
   await expect(page.getByTestId("clue-lens")).toHaveCount(0);
   await page.getByTestId("debrief-reveal").click();
   await expect(page.getByTestId("clue-lens-clue")).toHaveCount(2);
+});
+
+/** The Clue lens's Region layer (#92) as drawn: the filled Region at a point, if any, and its fill colour. */
+async function regionFillAt(page: Page, lng: number, lat: number) {
+  return page.evaluate(([x, y]) => {
+    type M = {
+      project(p: [number, number]): { x: number; y: number };
+      queryRenderedFeatures(p: { x: number; y: number }, o: { layers: string[] }): Array<{ properties: { code: string } }>;
+      getPaintProperty(layer: string, prop: string): unknown;
+    };
+    const m = (window as unknown as { __sharedMapbox: M }).__sharedMapbox;
+    const code = m.queryRenderedFeatures(m.project([x!, y!]), { layers: ["clue-regions"] })[0]?.properties.code ?? null;
+    const paint = m.getPaintProperty("clue-regions", "fill-color");
+    const at = code && Array.isArray(paint) ? paint.indexOf(code) : -1;
+    return { code, color: at >= 0 ? ((paint as unknown[])[at + 1] as string) : null };
+  }, [lng, lat]);
+}
+
+test("a Clue with a Region link shades its country Region by Region, and the popup names the Region", async ({ page }) => {
+  test.setTimeout(60_000);
+  await withSql(async (sql) => {
+    await sql`INSERT INTO claims (id, duo_id, text, countries, regions, clues_prompt_version, clues_tagged_at)
+      VALUES (${ids.c5}, ${s.duoId}, 'E2E: Galicia often has pickup truck coverage.', '["ES"]', '[{"country":"ES","name":"Galicia"}]', 'clue-tag-v2', now())`;
+    await sql`INSERT INTO claim_evidence (id, claim_id, duo_id, kind, direction, player_id) VALUES (${crypto.randomUUID()}, ${ids.c5}, ${s.duoId}, 'player', 'for', ${s.mikoId})`;
+    await sql`INSERT INTO claim_clues (claim_id, clue_id, duo_id, country, region_code, prevalence) VALUES (${ids.c5}, ${ids.truck}, ${s.duoId}, 'ES', 'ES-GA', 'some')`;
+  });
+  await page.goto(`${duo}/games/${game1.id}/rounds/1?lens=clues`);
+  await expect(page.getByRole("navigation", { name: "Duo" })).toHaveAttribute("data-stream", "open");
+  const clues = page.getByTestId("clue-lens-clue");
+  await clues.nth(1).getByTestId("clue-lens-solo").click();
+  // The truck alone: PT typical; MA, and now Spain through Galicia, in some areas.
+  await expect.poll(() => counts(page)).toEqual(["0", "1", "2"]);
+  await expect(page.getByTestId("clue-lens-answer")).toContainText("in some areas");
+
+  // Spain is drawn by its Regions: Galicia in some areas, Madrid neutral.
+  await clickMapAt(page, -3.7, 40.42);
+  await expect.poll(() => regionFillAt(page, -7.9, 42.75), { timeout: 15_000 }).toEqual({ code: "ES-GA", color: "#93c5fd" });
+  expect((await regionFillAt(page, -3.7, 40.42)).code).toBeNull();
+
+  // Spain's popup lists the Region link with its Region.
+  await clickMapAt(page, -7.9, 42.75);
+  await expect(page.getByTestId("country-popup")).toContainText("Spain");
+  const region = page.getByTestId("clue-popup-claim").filter({ has: page.getByTestId("clue-popup-region") });
+  await expect(region).toHaveCount(1);
+  await expect(region).toContainText("in some areas · Pickup truck · in Galicia · verified");
+  await expect(region).toContainText("Galicia often has pickup truck coverage");
 });

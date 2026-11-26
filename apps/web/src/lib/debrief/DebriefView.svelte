@@ -23,7 +23,8 @@
   import { LENS_COLORS, playerInk } from "$lib/player-color.js";
   import { anchoredRoundId, readSelection, select, type DebriefSelection } from "./selection.js";
   import { updateQuery, viewParams } from "$lib/url-state.js";
-  import { CLUE_FILL_COLOR, CLUE_FILL_LABEL, CLUE_FILL_ORDER, clueFillCounts, clueLensClaims, clueLensFills, type ClueFill } from "./clue-lens.js";
+  import { CLUE_FILL_COLOR, CLUE_FILL_LABEL, CLUE_FILL_ORDER, clueFillCounts, clueLensClaims, clueLensFills, clueLensMapFills, type ClueFill } from "./clue-lens.js";
+  import { regionName } from "@geo-coach/shared";
   import type { Debrief, DebriefGame, DebriefRound, DebriefScope } from "./types.js";
   import {
     clock,
@@ -233,6 +234,8 @@
   const shownClueIds = $derived(round && picked?.roundId === round.id ? picked.ids : roundClues.map((c) => c.clueId));
   const clueFills = $derived(clueOn ? clueLensFills(debrief.clueLens.links, new Set(shownClueIds)) : new Map<string, ClueFill>());
   const clueCounts = $derived(clueFillCounts(clueFills));
+  // What the map paints (#92): a country with Region links for the shown Clues is shaded Region by Region.
+  const clueMap = $derived(clueOn ? clueLensMapFills(debrief.clueLens.links, new Set(shownClueIds)) : null);
   /** The violet outline's countries (#86): named while guessing, and no Duo guess landed there. */
   const saidNotGuessed = $derived.by(() => {
     if (!round) return [];
@@ -261,7 +264,12 @@
       labelPins: game !== null || country !== null,
       kmLabels: round === null,
       masked,
-      clueLens: clueOn ? { fills: [...clueFills].map(([code, f]) => [code, CLUE_FILL_COLOR[f]] as const) } : null,
+      clueLens: clueMap
+        ? {
+            fills: [...clueMap.countries].map(([code, f]) => [code, CLUE_FILL_COLOR[f]] as const),
+            regions: { countries: clueMap.regionCountries, fills: [...clueMap.regions].map(([code, f]) => [code, CLUE_FILL_COLOR[f]] as const) },
+          }
+        : null,
       // The Clue lens card carries its own legend.
       legend: clueOn ? "hidden" : undefined,
       onReveal: reveal,
@@ -352,9 +360,10 @@
           {fill ? CLUE_FILL_LABEL[fill] : "No Claim says"}{saidNotGuessed.includes(popup.code) ? " · said while guessing" : ""}{popup.code === round?.countryCode ? " · the answer" : ""}
         </p>
         <ul class="mt-1.5 max-h-56 space-y-1 overflow-auto" data-testid="clue-popup-claims">
-          {#each said as l (`${l.claimId}:${l.clueId}`)}
-            <li class="rounded-lg bg-white/5 px-2 py-1" data-testid="clue-popup-claim">
+          {#each said as l (`${l.claimId}:${l.clueId}:${l.regionCode ?? ""}`)}
+            <li class="rounded-lg bg-white/5 px-2 py-1" data-testid="clue-popup-claim" data-region={l.regionCode ?? undefined}>
               <span class="font-semibold">{PREVALENCE_LABEL[l.prevalence]} · {debrief.clueLens.clues[l.clueId]?.name ?? "Clue"}</span>
+              {#if l.regionCode}<span class="text-sky-200" data-testid="clue-popup-region"> · in {regionName(l.regionCode) ?? l.regionCode}</span>{/if}
               <span class={l.status === "verified" ? "text-emerald-300" : l.status === "disproved" ? "text-red-300" : "text-amber-300"}> · {l.status}</span>
               <span class="block text-white/80">{debrief.clueLens.claimText[l.claimId] ?? ""}</span>
             </li>

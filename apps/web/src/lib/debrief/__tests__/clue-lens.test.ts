@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { ClaimStatus, CluePrevalence } from "@geo-coach/shared";
-import { clueFillCounts, clueLensClaims, clueLensFills, type ClueLensLink } from "../clue-lens.js";
+import { regionsOf } from "@geo-coach/shared";
+import { clueFillCounts, clueLensClaims, clueLensFills, clueLensMapFills, type ClueLensLink } from "../clue-lens.js";
 
 let n = 0;
-const link = (clueId: string, country: string, prevalence: CluePrevalence, status: ClaimStatus): ClueLensLink => ({
+const link = (clueId: string, country: string, prevalence: CluePrevalence, status: ClaimStatus, regionCode: string | null = null): ClueLensLink => ({
   claimId: `c${++n}`,
   clueId,
   country,
+  regionCode,
   prevalence,
   status,
 });
@@ -70,5 +72,61 @@ describe("the Clue lens fills (#89)", () => {
       ["yellow", "typical", "disproved"],
     ]);
     expect(clueLensClaims(links, new Set(["yellow"]), "SE")).toEqual([]);
+  });
+});
+
+describe("Region links in the Clue lens (#92)", () => {
+  it("a Region typical link makes its country in some areas at country level", () => {
+    expect(fills([link("yellow", "US", "typical", "verified", "US-HI")])).toEqual({ US: "some" });
+    expect(fills([link("yellow", "US", "some", "speculated", "US-HI")])).toEqual({ US: "some" });
+  });
+
+  it("a Region lacks link doesn't rule its country out", () => {
+    expect(fills([link("yellow", "US", "lacks", "verified", "US-HI")])).toEqual({});
+    expect(fills([link("yellow", "US", "lacks", "verified", "US-HI"), link("yellow", "US", "typical", "verified")])).toEqual({ US: "typical" });
+  });
+
+  it("a country link still beats what its Regions roll up to", () => {
+    expect(fills([link("yellow", "US", "typical", "verified", "US-HI"), link("yellow", "US", "lacks", "verified")])).toEqual({ US: "out" });
+  });
+
+  it("shades a country with Region links Region by Region, its other Regions neutral, other countries as before", () => {
+    const links = [
+      link("yellow", "US", "typical", "verified", "US-HI"),
+      link("yellow", "US", "lacks", "verified", "US-AK"),
+      link("yellow", "CA", "typical", "verified"),
+      link("yellow", "MX", "lacks", "verified"),
+    ];
+    const map = clueLensMapFills(links, new Set(["yellow"]));
+    expect(Object.fromEntries(map.countries)).toEqual({ CA: "typical", MX: "out" });
+    expect(map.regionCountries).toEqual(["US"]);
+    expect(Object.fromEntries(map.regions)).toEqual({ "US-HI": "typical", "US-AK": "out" });
+    // The same countries as the country-level fills, the US drawn by its Regions instead.
+    expect(Object.fromEntries(clueLensFills(links, new Set(["yellow"])))).toEqual({ US: "some", CA: "typical", MX: "out" });
+  });
+
+  it("a Region shows the stronger of its own links and its country's", () => {
+    const links = [link("yellow", "US", "some", "verified", "US-HI"), link("yellow", "US", "typical", "verified"), link("yellow", "US", "lacks", "verified", "US-AK")];
+    const { regions } = clueLensMapFills(links, new Set(["yellow"]));
+    expect(regions.get("US-HI")).toBe("typical");
+    expect(regions.get("US-AK")).toBe("out");
+    expect(regions.get("US-TX")).toBe("typical");
+    expect(regions.size).toBe(regionsOf("US").length);
+  });
+
+  it("only shown Clues' painting Region links shade by Region", () => {
+    const links = [link("truck", "US", "typical", "verified", "US-HI"), link("yellow", "US", "typical", "disproved", "US-AK"), link("yellow", "US", "typical", "verified")];
+    const map = clueLensMapFills(links, new Set(["yellow"]));
+    expect(map.regionCountries).toEqual([]);
+    expect(Object.fromEntries(map.countries)).toEqual({ US: "typical" });
+    expect(map.regions.size).toBe(0);
+  });
+
+  it("the popup lists a country's Region links beside its country links", () => {
+    const links = [link("yellow", "US", "typical", "verified", "US-HI"), link("yellow", "US", "some", "speculated")];
+    expect(clueLensClaims(links, new Set(["yellow"]), "US").map((l) => [l.regionCode, l.prevalence])).toEqual([
+      ["US-HI", "typical"],
+      [null, "some"],
+    ]);
   });
 });

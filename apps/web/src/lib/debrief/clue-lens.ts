@@ -1,4 +1,4 @@
-import type { ClaimStatus, CluePrevalence } from "@geo-coach/shared";
+import { regionsOf, type ClaimStatus, type CluePrevalence } from "@geo-coach/shared";
 
 // The Clue lens (#89, ADR 0009): what the Clues said in a Round mean for each country, from the Duo's Claims. Pure,
 // so the debrief view only draws it.
@@ -6,11 +6,13 @@ import type { ClaimStatus, CluePrevalence } from "@geo-coach/shared";
 /** A country's fill: ruled out (grey), typical (blue), or in some areas (light blue). */
 export type ClueFill = "out" | "typical" | "some";
 
-/** A Claim's link of a Clue to a country, with the Claim's derived status. */
+/** A Claim's link of a Clue to a country, or to a Region of it (#92), with the Claim's derived status. */
 export interface ClueLensLink {
   claimId: string;
   clueId: string;
   country: string;
+  /** The geocoder Region code when the link covers one Region; null for the whole country. */
+  regionCode: string | null;
   prevalence: CluePrevalence;
   status: ClaimStatus;
 }
@@ -34,19 +36,73 @@ function linkFill(l: Pick<ClueLensLink, "prevalence" | "status">): ClueFill | nu
 }
 
 /**
+ * What a link says about its whole country (#92, ADR 0009): a country link as it is; a Region link where the Region
+ * has the Clue (typical or in some areas) counts as in some areas, and one where the Region lacks it says nothing.
+ */
+export function countryLevelLink<L extends ClueLensLink>(l: L): L | null {
+  if (l.regionCode === null) return l;
+  return l.prevalence === "lacks" ? null : { ...l, regionCode: null, prevalence: "some" };
+}
+
+/**
  * Each country's fill for the shown Clues: the strongest of every shown Clue's links there, ruled out first, then
- * typical, then in some areas. A country no link covers is left out (neutral).
+ * typical, then in some areas. Region links count as `countryLevelLink` says. A country no link covers is left out
+ * (neutral).
  */
 export function clueLensFills(links: readonly ClueLensLink[], shown: ReadonlySet<string>): Map<string, ClueFill> {
   const out = new Map<string, ClueFill>();
-  for (const l of links) {
-    if (!shown.has(l.clueId)) continue;
+  for (const raw of links) {
+    const l = countryLevelLink(raw);
+    if (!l || !shown.has(l.clueId)) continue;
     const fill = linkFill(l);
     if (!fill) continue;
     const held = out.get(l.country);
     if (!held || STRENGTH[fill] > STRENGTH[held]) out.set(l.country, fill);
   }
   return out;
+}
+
+/** What the map paints: country fills, and Region fills for the countries shaded Region by Region (#92). */
+export interface ClueMapFills {
+  /** Countries painted whole. */
+  countries: Map<string, ClueFill>;
+  /** Countries painted Region by Region instead, sorted. */
+  regionCountries: string[];
+  /** Their Regions' fills by geocoder code; a Region left out is neutral. */
+  regions: Map<string, ClueFill>;
+}
+
+/**
+ * The map's fills for the shown Clues (#92). A country with a Region link that paints is shaded Region by Region:
+ * each of its Regions takes the strongest of its own links and the country's whole-country links, in the usual
+ * order, so a Region nothing covers stays neutral. Every other country keeps its `clueLensFills` fill.
+ */
+export function clueLensMapFills(links: readonly ClueLensLink[], shown: ReadonlySet<string>): ClueMapFills {
+  const countries = clueLensFills(links, shown);
+  const stronger = (a: ClueFill | undefined, b: ClueFill | undefined) => (!a || (b && STRENGTH[b] > STRENGTH[a]) ? b : a);
+  const whole = new Map<string, ClueFill>();
+  const byCountry = new Map<string, Map<string, ClueFill>>();
+  for (const l of links) {
+    const fill = shown.has(l.clueId) ? linkFill(l) : null;
+    if (!fill) continue;
+    if (l.regionCode === null) {
+      whole.set(l.country, stronger(whole.get(l.country), fill)!);
+      continue;
+    }
+    const own = byCountry.get(l.country) ?? new Map<string, ClueFill>();
+    own.set(l.regionCode, stronger(own.get(l.regionCode), fill)!);
+    byCountry.set(l.country, own);
+  }
+  const regions = new Map<string, ClueFill>();
+  for (const [country, own] of byCountry) {
+    countries.delete(country);
+    const codes = new Set([...regionsOf(country).map((r) => r.code), ...own.keys()]);
+    for (const code of codes) {
+      const fill = stronger(whole.get(country), own.get(code));
+      if (fill) regions.set(code, fill);
+    }
+  }
+  return { countries, regionCountries: [...byCountry.keys()].sort(), regions };
 }
 
 /** How many countries each fill covers, for the legend. */

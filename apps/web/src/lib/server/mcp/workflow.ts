@@ -164,8 +164,9 @@ async function loadCurrentSessionUtterances(
   });
 }
 
-export async function mcpGetInstructions(purpose: InstructionPurpose) {
-  return loadPromptInstructions(purpose);
+/** A purpose's current instructions; a trial tagging job (#94) passes the `clue-tag` version it runs. */
+export async function mcpGetInstructions(purpose: InstructionPurpose, version?: string | null) {
+  return loadPromptInstructions(purpose, version);
 }
 
 /**

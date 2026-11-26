@@ -92,6 +92,13 @@
       "when": 1795706856856,
       "tag": "0012_claim_clue_regions",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795709705368,
+      "tag": "0013_claim_tagging_trials",
+      "breakpoints": true
     }
   ]
 }

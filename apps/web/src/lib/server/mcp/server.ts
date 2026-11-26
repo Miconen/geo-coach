@@ -29,6 +29,15 @@ import {
 } from "./workflow.js";
 import { mcpListClaimsToTag, mcpListClues, mcpTagClaims } from "./clue-tagging.js";
 import {
+  mcpCompareClaimTaggingJobs,
+  mcpGetClaimTaggingJob,
+  mcpListClaimTaggingJobs,
+  mcpPromoteClaimTaggingTrial,
+  mcpStartClaimTagging,
+} from "./claim-tagging-jobs.js";
+import { CLUE_TAG_PROMPT_VERSIONS } from "./prompts.js";
+import { CLAIM_TAGGING_MODELS } from "../processor/worker.js";
+import {
   JOB_TOKEN_PREFIX,
   verifyProcessingJobToken,
   type ProcessingJobScope,
@@ -86,7 +95,9 @@ export function createGeoCoachMcpServer(
       purpose: instructionPurposeSchema,
     },
     async ({ purpose }) => {
-      const res = await mcpGetInstructions(purpose);
+      // A tagging job reads the prompt version it tags with: a trial may run an earlier one (#94).
+      const tagging = tagScope(job);
+      const res = await mcpGetInstructions(purpose, purpose === "clue-tag" ? tagging?.promptVersion : undefined);
       return {
         content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
       };
@@ -363,6 +374,76 @@ export function createGeoCoachMcpServer(
     },
     async (args) => {
       const res = await mcpTagClaims(db, playerId, args, tagScope(job));
+      return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }] };
+    },
+  );
+
+  // Running and comparing Claim tagging jobs (#94). Player tools only: no job token gets them.
+  server.tool(
+    "start_claim_tagging",
+    `Start a Claim tagging job on the processing worker (it must be online); returns its jobId. Pass claimIds (up to 100, e.g. an earlier job's, from list_claim_tagging_jobs) or limit (the next N of the queue, at most 100). trial: true tags into a side store and never touches live Clue links, tagging marks or Clues; promote it later with promote_claim_tagging_trial. model: one of ${CLAIM_TAGGING_MODELS.join(", ")} (default: the worker's). promptVersion: one of ${CLUE_TAG_PROMPT_VERSIONS.join(", ")}, for a trial only (default: the current one).`,
+    {
+      claimIds: z.array(z.string().uuid()).min(1).max(100).optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+      model: z.enum(CLAIM_TAGGING_MODELS).optional(),
+      promptVersion: z.enum(CLUE_TAG_PROMPT_VERSIONS).optional(),
+      trial: z.boolean(),
+      duo: z.string().optional(),
+    },
+    async (args) => {
+      const res = await mcpStartClaimTagging(db, playerId, args);
+      return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "get_claim_tagging_job",
+    "Read a Claim tagging job: status, timings, model, prompt version, usage (turns, tokens, API-equivalent cost: production runs on a subscription), each Claim with its links (a trial's from its side store, a live job's current live links; null when the job didn't tag it or a later tagging replaced it), and the Clues it created (a trial: would create).",
+    {
+      jobId: z.string().uuid(),
+    },
+    async (args) => {
+      const res = await mcpGetClaimTaggingJob(db, playerId, args);
+      return { content: [{ type: "text", text: JSON.stringify(res) }] };
+    },
+  );
+
+  server.tool(
+    "compare_claim_tagging_jobs",
+    "Compare two Claim tagging jobs (live or trial) Claim by Claim: each Claim's links in a and b side by side, with the differences from a to b flagged as added, removed or changed (prevalence), and totals. onlyDifferences: true lists only Claims that differ or only one job tagged.",
+    {
+      jobIds: z.tuple([z.string().uuid(), z.string().uuid()]),
+      onlyDifferences: z.boolean().optional(),
+    },
+    async (args) => {
+      const res = await mcpCompareClaimTaggingJobs(db, playerId, args);
+      return { content: [{ type: "text", text: JSON.stringify(res) }] };
+    },
+  );
+
+  server.tool(
+    "promote_claim_tagging_trial",
+    "Apply a finished trial's links as if a live tagging job had written them, creating the Clues it proposed. Untagged Claims and Claims tagged by an older prompt version get the trial's links; Claims tagged by its version or a newer one are skipped unless force: true.",
+    {
+      jobId: z.string().uuid(),
+      force: z.boolean().optional(),
+    },
+    async (args) => {
+      const res = await mcpPromoteClaimTaggingTrial(db, playerId, args);
+      return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "list_claim_tagging_jobs",
+    "List the Duo's recent Claim tagging jobs, newest first: status, trial or live, model, prompt version, usage, API-equivalent cost and Claim ids (to rerun the same Claims as a trial). trial filters to trials (true) or live jobs (false).",
+    {
+      limit: z.number().int().min(1).max(50).optional(),
+      trial: z.boolean().optional(),
+      duo: z.string().optional(),
+    },
+    async (args) => {
+      const res = await mcpListClaimTaggingJobs(db, playerId, args);
       return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }] };
     },
   );

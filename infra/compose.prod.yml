@@ -72,6 +72,8 @@ services:
       WEB_URL: http://web:3000
       PROCESSOR_SECRET: ${PROCESSOR_SECRET:-}
       PROCESSOR_MODEL: ${PROCESSOR_MODEL:-claude-haiku-5-5}
+      # Claim tagging jobs' model when the job names none (#94); empty uses PROCESSOR_MODEL.
+      PROCESSOR_CLUE_TAG_MODEL: ${PROCESSOR_CLUE_TAG_MODEL:-}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
     depends_on:
       - web

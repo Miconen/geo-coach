@@ -31,20 +31,39 @@ const CURRENT_VERSIONS: Record<InstructionPurpose, { version: string; file: stri
   ingest: { version: "ingest-v2", file: "ingest-v2.md" },
   // Each Claim records this version when tagged; a newer one puts every Claim tagged by an older one back in the
   // tagging queue (#89). The prompt pins its vocabulary file, so a new vocabulary needs a new version here too.
-  "clue-tag": { version: "clue-tag-v2", file: "clue-tag-v2.md" },
+  "clue-tag": { version: "clue-tag-v3", file: "clue-tag-v3.md" },
 };
+
+/** Every Claim tagger prompt version, oldest first: a trial job (#94) may run any of them. */
+export const CLUE_TAG_PROMPT_VERSIONS = ["clue-tag-v1", "clue-tag-v2", "clue-tag-v3"] as const;
+
+export function isClueTagPromptVersion(version: string): boolean {
+  return (CLUE_TAG_PROMPT_VERSIONS as readonly string[]).includes(version);
+}
+
+export { comparePromptVersions } from "../services/clues.js";
 
 export function getCurrentPromptVersion(purpose: ProcessingRunPurpose | "clue-tag"): string {
   return CURRENT_VERSIONS[purpose].version;
 }
 
+function promptEntry(purpose: InstructionPurpose, version?: string | null): { version: string; file: string } {
+  if (!version || version === CURRENT_VERSIONS[purpose].version) return CURRENT_VERSIONS[purpose];
+  if (purpose !== "clue-tag" || !isClueTagPromptVersion(version)) {
+    throw new Error(`Unknown ${purpose} prompt version: ${version}`);
+  }
+  return { version, file: `${version}.md` };
+}
+
 /** `{{include file.md}}` on a line of its own pulls in another prompt file, such as the Clue vocabulary. */
 const INCLUDE = /^\{\{include ([\w.-]+\.md)\}\}$/m;
 
+/** A purpose's current instructions, or, for `clue-tag`, an earlier version a trial job runs (#94). */
 export async function loadPromptInstructions(
   purpose: InstructionPurpose,
+  version?: string | null,
 ): Promise<{ promptVersion: string; instructions: string }> {
-  const entry = CURRENT_VERSIONS[purpose];
+  const entry = promptEntry(purpose, version);
   const dir = resolvePromptsDir();
   let instructions = await readFile(path.join(dir, entry.file), "utf8");
   for (let m = INCLUDE.exec(instructions); m; m = INCLUDE.exec(instructions)) {
@@ -70,11 +89,15 @@ export function parseClueVocabulary(markdown: string, version: string): ClueVoca
   return { version, families };
 }
 
-/** The vocabulary the current Claim tagger prompt includes: its families bound which Clues an agent may create. */
-export async function loadClueVocabulary(): Promise<ClueVocabulary> {
+/**
+ * The vocabulary a Claim tagger prompt includes (the current one unless a trial names another): its families bound
+ * which Clues an agent may create.
+ */
+export async function loadClueVocabulary(version?: string | null): Promise<ClueVocabulary> {
   const dir = resolvePromptsDir();
-  const prompt = await readFile(path.join(dir, CURRENT_VERSIONS["clue-tag"].file), "utf8");
+  const entry = promptEntry("clue-tag", version);
+  const prompt = await readFile(path.join(dir, entry.file), "utf8");
   const file = INCLUDE.exec(prompt)?.[1];
-  if (!file) throw new Error(`${CURRENT_VERSIONS["clue-tag"].file} includes no Clue vocabulary`);
+  if (!file) throw new Error(`${entry.file} includes no Clue vocabulary`);
   return parseClueVocabulary(await readFile(path.join(dir, file), "utf8"), file.replace(/\.md$/, ""));
 }

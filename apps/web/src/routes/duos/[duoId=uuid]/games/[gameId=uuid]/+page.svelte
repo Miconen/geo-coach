@@ -5,7 +5,9 @@
   import GameScoreboard from "$lib/components/GameScoreboard.svelte";
   import LearningRow from "$lib/components/LearningRow.svelte";
   import RoundStrip from "$lib/components/RoundStrip.svelte";
+  import { SECTION } from "$lib/anchors.js";
   import { entityHref, links } from "$lib/links.js";
+  import { urlDisclosure } from "$lib/url-disclosure.js";
   import { gameTitle, roundLabel, sessionTitle } from "$lib/entity-titles.js";
   import { useEntityRefresh } from "$lib/live/entity-refresh.svelte.js";
   import type { GamePayload } from "$lib/server/entities/index.js";
@@ -40,12 +42,12 @@
     </p>
   {/if}
 
-  <section class="space-y-1.5" aria-label="Rounds">
+  <section id={SECTION.rounds} class="space-y-1.5" aria-label="Rounds">
     <h2 class="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Rounds</h2>
     <RoundStrip {duoId} {rounds} />
   </section>
 
-  <section class="flex flex-wrap items-center gap-1.5 text-xs" aria-label="Sessions" data-testid="game-sessions">
+  <section id={SECTION.sessions} class="flex flex-wrap items-center gap-1.5 text-xs" aria-label="Sessions" data-testid="game-sessions">
     <span class="font-semibold text-[var(--muted)]">Sessions:</span>
     {#each p.sessions as s (s.id)}
       <EntityChip kind="session" label={sessionTitle(s)} href={entityHref({ kind: "session", duoId, id: s.id })} />
@@ -60,7 +62,12 @@
     {/if}
   </section>
 
-  <details class="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3" data-testid="game-runs">
+  <details
+    id={SECTION.runs}
+    use:urlDisclosure={SECTION.runs}
+    class="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3"
+    data-testid="game-runs"
+  >
     <summary class="cursor-pointer text-xs font-semibold">Runs ({p.runs.length})</summary>
     <ul class="mt-2 space-y-1.5">
       {#each p.runs as gr (gr.row.key)}
@@ -107,7 +114,12 @@
     </ul>
   </details>
 
-  <details class="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3" data-testid="round-learnings">
+  <details
+    id={SECTION.learnings}
+    use:urlDisclosure={SECTION.learnings}
+    class="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3"
+    data-testid="round-learnings"
+  >
     <summary class="cursor-pointer text-xs font-semibold">Learnings by Round</summary>
     {#each rounds as r (r.id)}
       {@const ls = p.wb.learnings.filter((l) => l.roundIds.includes(r.id))}

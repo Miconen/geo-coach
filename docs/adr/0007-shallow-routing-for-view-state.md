@@ -10,6 +10,8 @@ Decided by the 0-spike on @sveltejs/kit 2.70.4 against spike-only routes (`src/r
 - A same-route query change reruns a server load only when it read that key (`url.searchParams.get`), so `?learning=` or `?country=` never reruns a load that reads only `?duo=`. Review needs no membership recheck for those.
 - An SSE event, or a stream reopen, received while a navigation is held after the destination's load is kept and reconciled once after the navigation commits, for a same-route id change and a cross-route one, with no replayed event. The store marks a navigation in flight from `beforeNavigate` to `afterNavigate` (or the navigation's `complete` rejecting). `beforeNavigate` fires a tick after the click, because the router resolves the route first; an event in that window refreshes the departing page, which is harmless because the destination's load starts later and sees the write.
 
+In code (#73), `$lib/url-state.ts` is the only writer: `updateQuery` replaces (filters, tabs, drawers) and `pushQuery` pushes (focus). Both store the new query string as `page.state.query`, and pages read view params through `viewParams()` (that state first, else `page.url`), never `page.url` alone.
+
 ## Considered Options
 
 - **`goto` with `replaceState: true, keepFocus, noScroll` for filters and a push for focus and drill-down** (the no-go fallback): reruns every load on each filter change. Stats keeps it in reserve if typed state ever loses the canonical URL on cross-route Back or reload.

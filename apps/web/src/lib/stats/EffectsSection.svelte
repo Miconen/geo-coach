@@ -4,7 +4,7 @@
   // country, Mode or Map, plus an automatic scan for strong patterns. The choice
   // lives in the URL so a finding can be bookmarked and shared.
   import { page } from "$app/state";
-  import { updateQuery } from "./url-query.js";
+  import { updateQuery } from "$lib/url-state.js";
   import {
     MIN_EFFECT_ROUNDS,
     SCAN_MIN_Z,

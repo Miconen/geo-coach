@@ -20,6 +20,24 @@ async function expectNoDeadChips(page: Page) {
   }
 }
 
+/** Clicks the first answer pin on the shared map (#78), once its camera has settled. */
+async function clickAnswerPin(page: Page) {
+  await expect(page.getByTestId("shared-map")).toHaveAttribute("data-ready", "true", { timeout: 20_000 });
+  const at = await page.evaluate(async () => {
+    type Mapbox = {
+      isMoving(): boolean;
+      once(e: string, f: () => void): void;
+      getSource(id: string): { serialize(): { data: { features: Array<{ geometry: { coordinates: [number, number] } }> } } } | undefined;
+      project(p: [number, number]): { x: number; y: number };
+    };
+    const m = (window as unknown as { __sharedMapbox: Mapbox }).__sharedMapbox;
+    if (m.isMoving()) await new Promise<void>((r) => m.once("moveend", r));
+    const pin = m.getSource("answers")!.serialize().data.features[0]!;
+    return m.project(pin.geometry.coordinates);
+  });
+  await page.getByTestId("shared-map").locator(".mapboxgl-canvas").click({ position: at });
+}
+
 async function onlyOneH1(page: Page, name: RegExp | string) {
   await expect(page.locator("h1")).toHaveCount(1);
   await expect(page.locator("h1")).toHaveText(name);
@@ -72,14 +90,17 @@ test.describe("entity pages", () => {
   });
 
   test("two clicks from any Duo page reach a Game, a Round and a Session", async ({ page }) => {
+    // Each pass waits for the shared map to load before clicking an answer pin.
+    test.setTimeout(120_000);
     for (const start of [`${duo}/review`, `${duo}/stats`, `${duo}/sessions/${s.session2Id}`]) {
       await page.goto(start);
       await page.getByTestId("section-games").click();
-      await page.getByTestId("games-index-row").first().getByRole("link", { name: /^vs / }).click();
+      await page.getByTestId("games-index-row").first().click();
       await expect(page).toHaveURL(/\/games\/[0-9a-f-]{36}$/);
       await page.goto(start);
       await page.getByTestId("section-games").click();
-      await page.getByTestId("round-strip").first().getByRole("link").first().click();
+      // The Games list doesn't list Rounds (#81): its map's answer pins open them.
+      await clickAnswerPin(page);
       await expect(page).toHaveURL(/\/rounds\/\d+$/);
       await page.goto(start);
       await page.getByTestId("section-sessions").click();
@@ -94,8 +115,6 @@ test.describe("entity pages", () => {
     await page.goto(`${duo}/games/${game2.id}`);
     await expect(page.getByTestId("round-strip").locator('[data-entity-text="round"]', { hasText: "Round 0" })).toHaveCount(1);
     await expect(page.getByTestId("round-strip").getByRole("link", { name: /^Round 0/ })).toHaveCount(0);
-    await page.goto(`${duo}/games`);
-    await expect(page.locator('[data-entity-text="round"]', { hasText: "Round 0" })).toHaveCount(1);
     expect((await page.goto(`${duo}/games/${game2.id}/rounds/0`))!.status()).toBe(404);
     expect((await page.goto(`${duo}/games/${game2.id}/rounds/-1`))!.status()).toBe(404);
     expect((await page.goto(`${duo}/games/${game2.id}/rounds/99999999999`))!.status()).toBe(404);

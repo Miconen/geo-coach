@@ -1,24 +1,14 @@
 import type { PageServerLoad } from "./$types";
 import { assertDuoAccess } from "$lib/server/auth/guards.js";
 import { getDb } from "$lib/server/db/index.js";
+import { buildGamesList } from "$lib/server/entities/games-list.js";
 import { loadWorkbench } from "$lib/server/workbench/cache.js";
 
-// Games index: every Game, newest first, with its Rounds as the strip shows them (reload-only: game events do not
-// refresh indexes).
+// Games list (#81): compact Game rows grouped by Session on the shared map (reload-only: game events do not
+// refresh indexes). The cited-speech derivation is the Game page's cache entry too (#72).
 export const load: PageServerLoad = async ({ locals, params, url }) => {
   const db = getDb();
   const player = await assertDuoAccess(locals, params.duoId, url, db);
   const wb = await loadWorkbench(db, params.duoId, player.id, { speech: "cited" });
-  const games = Object.values(wb.gamesById)
-    .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
-    .map(({ roundIds, sessionIds, ...game }) => ({
-      game,
-      rounds: roundIds.flatMap((id) => {
-        const r = wb.roundsById[id];
-        if (!r) return [];
-        const { id: rid, gameId, roundNumber, countryCode, duoBestScore, opponentBestScore, hpDelta } = r;
-        return [{ id: rid, gameId, roundNumber, countryCode, duoBestScore, opponentBestScore, hpDelta }];
-      }),
-    }));
-  return { games };
+  return { list: buildGamesList(wb, params.duoId) };
 };

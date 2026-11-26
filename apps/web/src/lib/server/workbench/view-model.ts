@@ -148,6 +148,8 @@ export interface WorkbenchGame {
   roundCount: number;
   roundIds: string[];
   sessionIds: string[];
+  /** The one Session the Game's rating change counts toward (ADR 0008), or null with no Session. */
+  ratingSessionId: string | null;
   micCount: number;
 }
 
@@ -847,6 +849,7 @@ export async function buildWorkbenchData(
       roundCount: g.roundCount,
       roundIds: roundsByGame.get(g.id) ?? [],
       sessionIds: overlappingSessionIds,
+      ratingSessionId,
       micCount: activePlayersDuringGame.size,
     };
     gamesById[g.id] = wbGame;

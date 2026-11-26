@@ -9,7 +9,7 @@ import {
   type StatsRound,
 } from "@geo-coach/shared";
 import type { Debrief, DebriefGame, DebriefGuess, DebriefLine, DebriefPlayer, DebriefRound } from "$lib/debrief/types.js";
-import type { WorkbenchData, WorkbenchGame, WorkbenchLearning, WorkbenchRound } from "../workbench/view-model.js";
+import type { WorkbenchData, WorkbenchLearning, WorkbenchRound } from "../workbench/view-model.js";
 
 /** What a Game adds beyond the workbench: its mode and map, and each Round's starting camera (from the raw duel). */
 export interface DebriefGameMeta {
@@ -20,7 +20,7 @@ export interface DebriefGameMeta {
 
 export interface DebriefInput {
   wb: Pick<WorkbenchData, "players" | "gamesById" | "roundsById" | "utterancesById" | "learnings">;
-  /** The Games to show, each with its "Game N". */
+  /** The Games to show, each with its "Game N" ($lib/game-number.ts). */
   games: ReadonlyArray<{ id: string; number: number }>;
   meta: ReadonlyMap<string, DebriefGameMeta>;
   /** The Session shown, for its Learnings that cite no Round; null for a Game with no Session. */
@@ -28,14 +28,6 @@ export interface DebriefInput {
 }
 
 const ms = (iso: string | Date) => new Date(iso).getTime();
-
-/**
- * "Game N" for a Session's Games: their order of play within it. The Session page, the Games list and the Game page
- * all number a Game this way, so "Game 4" is the same Game everywhere.
- */
-export function gameNumbers(games: ReadonlyArray<Pick<WorkbenchGame, "id" | "startedAt">>): Map<string, number> {
-  return new Map([...games].sort((a, b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id)).map((g, i) => [g.id, i + 1]));
-}
 
 /** The workbench Round as the Stats shape, so the Stats helpers (HP, slower guess) apply unchanged. */
 function asStatsRound(r: WorkbenchRound, panoView: PanoView | null): StatsRound {

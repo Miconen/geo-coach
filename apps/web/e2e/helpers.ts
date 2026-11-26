@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { PORT } from "../playwright.config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -53,4 +53,16 @@ export async function withSql<T>(fn: (sql: import("postgres").Sql) => Promise<T>
     });
     if (!res.ok) throw new Error(`clear-workbench: ${res.status}`);
   }
+}
+
+/**
+ * Opens the Session page's "Session details" drawer (#79): its Games, processing ranges, run history and full
+ * Transcript. Retries until the page has hydrated and the drawer shows.
+ */
+export async function openSessionDetails(page: Page) {
+  const drawer = page.getByTestId("drawer-details");
+  await expect(async () => {
+    if (!(await drawer.isVisible())) await page.getByTestId("chip-details").click();
+    await expect(drawer).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
 }

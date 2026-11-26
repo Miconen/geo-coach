@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PanoView } from "@geo-coach/shared";
-import { buildDebrief, gameNumbers, type DebriefInput } from "../build.js";
+import { buildDebrief, type DebriefInput } from "../build.js";
 import { countryView, mapRounds, missedCountries, placeCallouts, record, roundName, signed, stepRound } from "$lib/debrief/view.js";
 import type { WorkbenchGame, WorkbenchLearning, WorkbenchRound, WorkbenchUtterance } from "../../workbench/view-model.js";
 
@@ -182,13 +182,6 @@ describe("buildDebrief", () => {
 
   it("names no Opponent", () => {
     expect(JSON.stringify(d)).not.toContain("red");
-  });
-
-  it("numbers a Session's Games by play order", () => {
-    expect([...gameNumbers([{ id: "b", startedAt: t(9) }, { id: "a", startedAt: t(1) }])]).toEqual([
-      ["a", 1],
-      ["b", 2],
-    ]);
   });
 });
 

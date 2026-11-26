@@ -14,7 +14,8 @@ import {
 import { loadSessionRunsPage, type SessionRunsPage } from "./session-runs.js";
 import { loadGameRuns, type GameRun } from "./game-runs.js";
 import { loadRoundSpeech } from "./round-speech.js";
-import { buildDebrief, gameNumbers, loadDebriefMeta } from "../debrief/load.js";
+import { buildDebrief, loadDebriefMeta } from "../debrief/load.js";
+import { numberInPlayOrder } from "$lib/game-number.js";
 import type { Debrief } from "$lib/debrief/types.js";
 
 export * from "./session-runs.js";
@@ -293,7 +294,8 @@ export async function loadSessionPayload(
   wb.gamesById = Object.fromEntries(Object.entries(wb.gamesById).map(([id, g]) => [id, { ...g, opponentTeamName: null }]));
   const anonymous = (g: WorkbenchGame): GameChip => ({ ...chipOfGame(g), opponentTeamName: null });
   const sessionGames = [...overlap].flatMap((id) => (full.gamesById[id] ? [full.gamesById[id]!] : []));
-  const numbers = gameNumbers(sessionGames);
+  // A Session page numbers every Game of the Session in play order, as the Games list does (#81).
+  const numbers = numberInPlayOrder(sessionGames);
   const debrief = buildDebrief({
     wb: full,
     games: sessionGames.map((g) => ({ id: g.id, number: numbers.get(g.id)! })),

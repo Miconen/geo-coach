@@ -197,6 +197,7 @@
       That Session no longer exists.
     </p>
   {/if}
+  <h1 class="sr-only">{sessionTitle(p.session)}</h1>
   <a href={links.sessions(duoId)} data-testid="back-link" class="sr-only focus:not-sr-only">← Sessions</a>
   <div class="overflow-hidden rounded-xl border border-[var(--border)]">
     <DebriefView

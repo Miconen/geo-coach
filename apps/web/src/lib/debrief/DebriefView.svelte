@@ -5,6 +5,7 @@
   // its answer) with its transcript in the right panel; a country opens its own view. The selection is in the URL
   // (selection.ts): focusing pushes, drawers replace, and nothing reruns the page's server load.
   import { onMount, type Snippet } from "svelte";
+  import { afterNavigate } from "$app/navigation";
   import { page } from "$app/state";
   import { fly, slide } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
@@ -18,7 +19,7 @@
   import Damage from "./Damage.svelte";
   import RoundCallouts from "./RoundCallouts.svelte";
   import RoundTranscript from "./RoundTranscript.svelte";
-  import { readSelection, select, type DebriefSelection } from "./selection.js";
+  import { anchoredRoundId, readSelection, select, type DebriefSelection } from "./selection.js";
   import type { Debrief, DebriefGame, DebriefRound, DebriefScope } from "./types.js";
   import {
     countryPopup,
@@ -57,7 +58,7 @@
   } = $props();
 
   const map = getSharedMap();
-  const sel = $derived(readSelection(page));
+  const sel = $derived(readSelection());
   const gamesById = $derived(new Map(debrief.games.map((g) => [g.id, g])));
   const roundsById = $derived(new Map(debrief.rounds.map((r) => [r.id, r])));
   // Unknown or malformed ids in the URL are ignored.
@@ -75,7 +76,7 @@
   );
   const country = $derived(sel.country && /^[A-Za-z]{2}$/.test(sel.country) ? countryView(debrief, sel.country) : null);
   // Once the selection lives in page.state, a closed drawer stays closed; only a cold load opens the default.
-  const drawerKey = $derived(page.state.debrief ? sel.drawer : (sel.drawer ?? defaultDrawer));
+  const drawerKey = $derived(page.state.query !== undefined ? sel.drawer : (sel.drawer ?? defaultDrawer));
   const drawer = $derived(drawerKey === "learnings" || (drawerKey === "details" && details) ? drawerKey : null);
 
   const tally = $derived(record(debrief));
@@ -100,7 +101,7 @@
 
   const go = (patch: Partial<DebriefSelection>, opts?: { replace?: boolean }) => {
     pop = null;
-    select(sel, patch, opts);
+    select(patch, opts);
   };
   const focusRound = (id: string) => {
     const r = roundsById.get(id);
@@ -127,14 +128,16 @@
     else if (e.key === "Escape") up();
   }
 
-  // A Round anchor (#round-<id>) focuses that Round instead of scrolling to it.
+  // A Round anchor (#round-<id>) focuses that Round instead of scrolling to it. No element here carries a Round's
+  // id, so the Duo layout's anchor scrolling (followHash) finds nothing and leaves the map alone.
   function focusAnchor() {
-    const m = /^#round-(.+)$/.exec(location.hash);
-    const r = m ? roundsById.get(decodeURIComponent(m[1]!)) : undefined;
-    if (r) select(sel, { round: r.id, game: r.gameId, country: null }, { replace: true });
+    const id = anchoredRoundId(location.hash);
+    const r = id ? roundsById.get(id) : undefined;
+    if (r) select({ round: r.id, game: r.gameId, country: null }, { replace: true });
   }
+  // After the router is ready (a shallow replace before then throws): the cold load, and each link navigation here.
+  afterNavigate(() => void setTimeout(focusAnchor, 0));
   onMount(() => {
-    focusAnchor();
     window.addEventListener("hashchange", focusAnchor);
     return () => window.removeEventListener("hashchange", focusAnchor);
   });

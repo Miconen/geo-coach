@@ -97,15 +97,52 @@ describe("clues Processing runs (#89)", () => {
   async function startClues() {
     const { ranges } = await mcpListWork(handle.db, mikoId, { purpose: "clues" });
     expect(ranges).toHaveLength(1);
-    return mcpStartRun(handle.db, mikoId, { ...ranges[0]!, purpose: "clues", agent: "test", model: "test" });
+    const range = ranges[0]!;
+    return { range, ...(await mcpStartRun(handle.db, mikoId, { ...range, purpose: "clues", agent: "test", model: "test" })) };
   }
 
   it("serves the clues instructions with the vocabulary and the spoken letters", async () => {
     const { promptVersion, instructions } = await mcpGetInstructions("clues");
-    expect(promptVersion).toBe("clues-v1");
+    expect(promptVersion).toBe("clues-v2");
     expect(instructions).toContain('"s with a triangle"');
     expect(instructions).toContain("Š (s with a hat)");
     expect(instructions).toContain("1. **Road lines:**");
+  });
+
+  it("tells the tagger to tag a not seen observation about the Round, never a question (#93)", async () => {
+    const { instructions } = await mcpGetInstructions("clues");
+    expect(instructions).toContain('| "no yellow outer here" | Yellow/orange outer line, `not_seen` |');
+    expect(instructions).toContain('| "does Israel do yellow outer?" | nothing: a question |');
+    expect(instructions).toContain("When unsure, skip.");
+  });
+
+  it("saves a Clue said not to be in the Round as not seen, and seen wins when both are said (#93)", async () => {
+    const run = await startClues();
+    const res = await mcpAddRoundClues(handle.db, mikoId, run.runId, [
+      {
+        roundId: r1,
+        clues: [
+          { family: "Road lines", name: "Yellow/orange centre line", polarity: "not_seen", utteranceRefs: ["u1"] },
+          { family: "Google car", name: "Pickup truck", polarity: "not_seen", utteranceRefs: ["u2"] },
+          { family: "Google car", name: "Pickup truck", utteranceRefs: ["u2"] },
+        ],
+      },
+      { roundId: r2, clues: [{ family: "Chevrons", name: "Black chevron with yellow/orange arrows", polarity: "maybe", utteranceRefs: ["u3"] }] },
+    ]);
+    expect(res.errors.map((e) => e.index)).toEqual([1]);
+    expect(res.errors[0]!.message).toMatch(/polarity/);
+    await mcpFinishRun(handle.db, mikoId, run.runId);
+    const names = new Map((await handle.db.select().from(clues)).map((c) => [c.id, c.name]));
+    const current = await deriveCurrentRoundClues(handle.db, duoId, [r1]);
+    expect(current.get(r1)?.map((c) => [names.get(c.clueId), c.polarity])).toEqual([
+      ["Yellow/orange centre line", "not_seen"],
+      ["Pickup truck", "seen"],
+    ]);
+    // A later run over the same part reads the current Clues, each marked when not seen.
+    const again = await mcpStartRun(handle.db, mikoId, { ...run.range, purpose: "clues", agent: "test", model: "test" });
+    const view = await mcpReadRange(handle.db, mikoId, again.runId);
+    if (view.purpose !== "clues") throw new Error("expected a clues range");
+    expect(view.rounds[0]!.currentClues).toEqual(["not seen: Road lines: Yellow/orange centre line", "Google car: Pickup truck"]);
   });
 
   it("reads only speech while guessing, and refuses Utterances from after guessing ends", async () => {

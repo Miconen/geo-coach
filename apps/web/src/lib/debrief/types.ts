@@ -1,6 +1,6 @@
 // The debrief view (#79): the Session page's map-first debrief, and the Game and Round pages scoped to one Game or
 // Round (#82). The server builds it (src/lib/server/debrief) and the view derives everything else in the browser.
-import type { GameMode, PanoView, TeamHp } from "@geo-coach/shared";
+import type { GameMode, PanoView, RoundCluePolarity, TeamHp } from "@geo-coach/shared";
 import type { WorkbenchLearning } from "$lib/server/workbench/view-model.js";
 import type { ClueLensLink } from "./clue-lens.js";
 
@@ -104,6 +104,8 @@ export interface DebriefRound {
 /** A Clue said in a Round, with the Utterances that said it, oldest first. */
 export interface DebriefRoundClue {
   clueId: string;
+  /** Seen, or said not to be in this Round (#93). */
+  polarity: RoundCluePolarity;
   lines: DebriefLine[];
 }
 

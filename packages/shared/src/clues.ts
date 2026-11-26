@@ -52,16 +52,24 @@ export const claimTagItemInputSchema = z.object({
 });
 export type ClaimTagItemInput = z.infer<typeof claimTagItemInputSchema>;
 
-/** One Clue said in a Round, with the Utterances (spoken while guessing) that name or describe it. */
+/**
+ * Whether a Round has a Clue (#93): the Duo saw it, or said this Round doesn't have it ("that's not a Norway pole").
+ * Only a statement about the Round counts as not seen, never a question or a remark about another country.
+ */
+export const roundCluePolaritySchema = z.enum(["seen", "not_seen"]);
+export type RoundCluePolarity = z.infer<typeof roundCluePolaritySchema>;
+
+/** One Clue said in a Round, seen or not seen, with the Utterances (spoken while guessing) that say so. */
 export const roundClueInputSchema = z
   .object({
     ...clueRefShape,
+    polarity: roundCluePolaritySchema.default("seen"),
     utteranceRefs: z.array(z.string().min(1)).min(1),
     note: z.string().trim().max(300).nullable().optional(),
   })
   .superRefine(requireClueRef);
 
-/** One `add_round_clues` item: every Clue said in one Round. An empty list says none was. */
+/** One `add_round_clues` item: every Clue said in one Round, seen or not. An empty list says none was. */
 export const roundCluesItemInputSchema = z.object({
   roundId: z.string().uuid(),
   clues: z.array(roundClueInputSchema).max(30).default([]),

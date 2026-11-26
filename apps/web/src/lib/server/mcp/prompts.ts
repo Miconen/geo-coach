@@ -27,7 +27,7 @@ const CURRENT_VERSIONS: Record<InstructionPurpose, { version: string; file: stri
   extract: { version: "extract-v3", file: "extract-v3.md" },
   tips: { version: "tips-v3", file: "tips-v3.md" },
   calls: { version: "calls-v1", file: "calls-v1.md" },
-  clues: { version: "clues-v1", file: "clues-v1.md" },
+  clues: { version: "clues-v2", file: "clues-v2.md" },
   ingest: { version: "ingest-v2", file: "ingest-v2.md" },
   // Each Claim records this version when tagged; a newer one puts every Claim tagged by an older one back in the
   // tagging queue (#89). The prompt pins its vocabulary file, so a new vocabulary needs a new version here too.

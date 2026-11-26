@@ -24,6 +24,7 @@ import type {
   LearningRegion,
   SourceKind,
   ProcessingRunPurpose,
+  RoundCluePolarity,
   RoundPhaseInterval,
   WordTiming,
 } from "@geo-coach/shared";
@@ -850,6 +851,8 @@ export const roundClues = pgTable(
     clueId: uuid("clue_id")
       .notNull()
       .references(() => clues.id, { onDelete: "cascade" }),
+    /** Seen, or said not to be in this Round (#93). */
+    polarity: text("polarity").$type<RoundCluePolarity>().notNull().default("seen"),
     note: text("note"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

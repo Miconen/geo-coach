@@ -1,5 +1,5 @@
 {
-  "id": "a901f99a-bbe4-4731-ac93-92f472b78fd9",
+  "id": "718a0c28-38e4-42e8-8e6c-38150acafed6",
   "prevId": "39c7682c-cfef-4050-9504-acc9e82e5e8f",
   "version": "7",
   "dialect": "postgresql",
@@ -442,12 +442,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "region_code": {
-          "name": "region_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "prevalence": {
           "name": "prevalence",
           "type": "text",
@@ -528,19 +522,17 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "claim_clues_claim_clue_place_uq": {
-          "name": "claim_clues_claim_clue_place_uq",
-          "nullsNotDistinct": true,
+      "compositePrimaryKeys": {
+        "claim_clues_claim_id_clue_id_country_pk": {
+          "name": "claim_clues_claim_id_clue_id_country_pk",
           "columns": [
             "claim_id",
             "clue_id",
-            "country",
-            "region_code"
+            "country"
           ]
         }
       },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -3237,6 +3229,13 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
+        },
+        "polarity": {
+          "name": "polarity",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'seen'"
         },
         "note": {
           "name": "note",

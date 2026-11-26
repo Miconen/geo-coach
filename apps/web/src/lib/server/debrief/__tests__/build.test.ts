@@ -262,11 +262,18 @@ describe("buildDebrief: the Clue lens's data (#89)", () => {
     ...input,
     clueLens: {
       byRound: new Map([
-        ["r1", [{ clueId: "k-white", runId: "run", note: null, utteranceIds: ["u1"], quotes: [quote("u1", CERKIE, 16, "white centre line")] }]],
-        ["r-elsewhere", [{ clueId: "k-other", runId: "run", note: null, utteranceIds: [], quotes: [] }]],
+        [
+          "r1",
+          [
+            { clueId: "k-white", runId: "run", polarity: "seen", note: null, utteranceIds: ["u1"], quotes: [quote("u1", CERKIE, 16, "white centre line")] },
+            { clueId: "k-yellow", runId: "run", polarity: "not_seen", note: null, utteranceIds: ["u2"], quotes: [quote("u2", CERKIE, 18, "no yellow outer here")] },
+          ],
+        ],
+        ["r-elsewhere", [{ clueId: "k-other", runId: "run", polarity: "seen", note: null, utteranceIds: [], quotes: [] }]],
       ]),
       clues: [
         { id: "k-white", family: "Road lines", name: "White centre line" },
+        { id: "k-yellow", family: "Road lines", name: "Yellow/orange outer line" },
         { id: "k-other", family: "Poles", name: "Wooden pole" },
       ],
       links: [
@@ -282,12 +289,15 @@ describe("buildDebrief: the Clue lens's data (#89)", () => {
 
   it("gives each Round its Clues with the quoted speech, timed from the Round's start", () => {
     const r1 = d.rounds.find((r) => r.id === "r1")!;
-    expect(r1.clues.map((c) => [c.clueId, c.lines.map((l) => [l.text, Math.round(l.atS)])])).toEqual([["k-white", [["white centre line", 16]]]]);
+    expect(r1.clues.map((c) => [c.clueId, c.polarity, c.lines.map((l) => [l.text, Math.round(l.atS)])])).toEqual([
+      ["k-white", "seen", [["white centre line", 16]]],
+      ["k-yellow", "not_seen", [["no yellow outer here", 18]]],
+    ]);
     expect(d.rounds.find((r) => r.id === "r2")!.clues).toEqual([]);
   });
 
   it("ships only the Clues the shown Rounds said, their links with Claim status, and the linked Claims", () => {
-    expect(Object.keys(d.clueLens.clues)).toEqual(["k-white"]);
+    expect(Object.keys(d.clueLens.clues)).toEqual(["k-white", "k-yellow"]);
     expect(d.clueLens.links).toEqual([{ claimId: "c1", clueId: "k-white", country: "DK", regionCode: null, prevalence: "typical", status: "verified" }]);
     expect(d.clueLens.claimText).toEqual({ c1: "Denmark has white centre lines." });
     expect(buildDebrief(input).clueLens).toEqual({ clues: {}, links: [], claimText: {} });

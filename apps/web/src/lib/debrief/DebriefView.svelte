@@ -45,6 +45,7 @@
     scope = { kind: "session" },
     details,
     defaultDrawer = null,
+    back = null,
   }: {
     debrief: Debrief;
     duoId: string;
@@ -53,6 +54,8 @@
     scope?: DebriefScope;
     /** The page's own drawer (the Session's processing and full Transcript), behind a "Details" chip. */
     details?: { label: string; content: Snippet };
+    /** The Game bar's back control outside a Session scope (#82): the Game's Session, or the Games list. */
+    back?: { label: string; href: string } | null;
     /** The drawer a cold load opens when the URL names none (a ?run= pin opens the details). */
     defaultDrawer?: "learnings" | "details" | null;
   } = $props();
@@ -421,6 +424,8 @@
           <div class="flex shrink-0 items-center gap-2 border-r border-[var(--border)] pr-2">
             {#if scope.kind === "session"}
               <button type="button" class={chipBtn} data-testid="games-back" onclick={() => go({ game: null, round: null })}>‹ Games</button>
+            {:else if back}
+              <a class={chipBtn} data-testid="games-back" href={back.href}>‹ {back.label}</a>
             {/if}
             <span class="text-sm font-bold">Game {game.number}</span>
             <span class="text-sm font-black {resultTone(game.won)}">{resultLetter(game.won)}</span>

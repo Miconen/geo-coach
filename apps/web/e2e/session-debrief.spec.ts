@@ -55,6 +55,20 @@ test("drills from the Games into a Round, in the URL, and Back walks out", async
   await expect(page.getByTestId("game-tile").first()).toBeVisible();
 });
 
+test("after a reload, Back reaches the cold-loaded first view", async ({ page }) => {
+  await page.goto(session);
+  await hydrated(page);
+  const first = await page.getByTestId("scope-title").textContent();
+  await page.getByTestId("game-tile").first().click();
+  await expect(page).toHaveURL(/\?game=/);
+  await page.reload();
+  await expect(page.getByTestId("scope-title")).toHaveText(/^Game 1 · /);
+  await hydrated(page);
+  await page.goBack();
+  await expect(page.getByTestId("scope-title")).toHaveText(first!);
+  await expect(page.getByTestId("game-tile").first()).toBeVisible();
+});
+
 test("Esc steps out one level; the drawer replaces the history entry", async ({ page }) => {
   await page.goto(session);
   await hydrated(page);

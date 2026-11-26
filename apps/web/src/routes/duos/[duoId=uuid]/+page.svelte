@@ -3,7 +3,6 @@
   // we got wrong lately as chips. A picked country shows its dossier and focuses only the Rounds we missed there.
   // With nothing picked, the panel holds the latest Session card, the open Study items and the rating trend.
   // Recall hides the map's answers, but not the chips or the dossier: Home is for studying, not quizzing.
-  import { page } from "$app/state";
   import LatestSessionCard from "$lib/components/home/LatestSessionCard.svelte";
   import RatingSparkline from "$lib/components/home/RatingSparkline.svelte";
   import { matchCountries } from "$lib/country-search.js";
@@ -11,7 +10,7 @@
   import { recall } from "$lib/recall.svelte.js";
   import { formatSigned } from "$lib/stats/overview-text.js";
   import { flagEmoji } from "$lib/stats/players-text.js";
-  import { pushQuery, updateQuery, viewParams } from "$lib/url-state.js";
+  import { pushQuery, viewParams } from "$lib/url-state.js";
   import { readParam, setParam } from "$lib/view-url.js";
 
   let { data } = $props();
@@ -25,9 +24,6 @@
   /** Picking (or clearing) a country is a focus change: it adds a history entry, so Back undoes it. */
   function pick(code: string | null) {
     query = "";
-    // Stamp the entry we're leaving with its own query first: after a reload, Back to a never-stamped entry
-    // would otherwise read the reloaded page's page.url (#73's viewParams falls back to it).
-    if (page.state.query === undefined) updateQuery(() => {});
     pushQuery((params) => setParam(params, "look", code));
   }
 

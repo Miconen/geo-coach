@@ -8,6 +8,7 @@ const duo = `/duos/${s.duoId}`;
 const game1 = s.games[0]!;
 const round1 = game1.rounds.find((r) => r.roundNumber === 1)!;
 const round2 = game1.rounds.find((r) => r.roundNumber === 2)!;
+const round3 = game1.rounds.find((r) => r.roundNumber === 3)!;
 
 const ids = {
   run: crypto.randomUUID(),
@@ -20,6 +21,13 @@ const ids = {
   c4: crypto.randomUUID(),
   rcYellow: crypto.randomUUID(),
   rcTruck: crypto.randomUUID(),
+  // #93: a second run over Game 1's Round 3 only, where the yellow line is seen and red-top bollards are not.
+  run3: crypto.randomUUID(),
+  bollard: crypto.randomUUID(),
+  c5: crypto.randomUUID(),
+  c6: crypto.randomUUID(),
+  rc3Yellow: crypto.randomUUID(),
+  rc3Bollard: crypto.randomUUID(),
 };
 
 test.beforeAll(async () => {
@@ -49,14 +57,32 @@ test.beforeAll(async () => {
       (${ids.rcYellow}, ${s.duoId}, ${ids.run}, ${round1.id}, ${ids.yellow}),
       (${ids.rcTruck}, ${s.duoId}, ${ids.run}, ${round1.id}, ${ids.truck})`;
     await sql`INSERT INTO round_clue_utterances (round_clue_id, utterance_id) VALUES (${ids.rcYellow}, ${u1!.id}), (${ids.rcTruck}, ${u2!.id})`;
+
+    // Round 3 (#93): c5 verified (Portugal typical), c6 speculated (Italy typical), so only Portugal reads unlikely.
+    const [u3] = await sql<{ id: string }[]>`SELECT u.id FROM utterances u WHERE u.duo_id = ${s.duoId} AND u.text = 'Madrid for sure'`;
+    await sql`INSERT INTO processing_runs (id, duo_id, session_id, started_by_player_id, purpose, agent, model, prompt_version, range_start, range_end, status, started_at, finished_at)
+      VALUES (${ids.run3}, ${s.duoId}, ${s.sessionId}, ${s.mikoId}, 'clues', 'claude', 'e2e', 'clues-v2', '2026-11-20T19:02:50Z', '2026-11-20T19:03:50Z', 'finished', now(), now())`;
+    await sql`INSERT INTO clues (id, duo_id, family, name, origin) VALUES (${ids.bollard}, ${s.duoId}, 'Bollards', 'Red-top bollard', 'seed')`;
+    await sql`INSERT INTO claims (id, duo_id, text, countries, clues_prompt_version, clues_tagged_at) VALUES
+      (${ids.c5}, ${s.duoId}, 'E2E: Portugal has red-top bollards.', '["PT"]', 'clue-tag-v1', now()),
+      (${ids.c6}, ${s.duoId}, 'E2E: Italy has red-top bollards.', '["IT"]', 'clue-tag-v1', now())`;
+    await sql`INSERT INTO claim_evidence (id, claim_id, duo_id, kind, direction, player_id) VALUES
+      (${crypto.randomUUID()}, ${ids.c5}, ${s.duoId}, 'player', 'for', ${s.mikoId})`;
+    await sql`INSERT INTO claim_clues (claim_id, clue_id, duo_id, country, prevalence) VALUES
+      (${ids.c5}, ${ids.bollard}, ${s.duoId}, 'PT', 'typical'),
+      (${ids.c6}, ${ids.bollard}, ${s.duoId}, 'IT', 'typical')`;
+    await sql`INSERT INTO round_clues (id, duo_id, run_id, round_id, clue_id, polarity) VALUES
+      (${ids.rc3Yellow}, ${s.duoId}, ${ids.run3}, ${round3.id}, ${ids.yellow}, 'seen'),
+      (${ids.rc3Bollard}, ${s.duoId}, ${ids.run3}, ${round3.id}, ${ids.bollard}, 'not_seen')`;
+    await sql`INSERT INTO round_clue_utterances (round_clue_id, utterance_id) VALUES (${ids.rc3Yellow}, ${u3!.id}), (${ids.rc3Bollard}, ${u3!.id})`;
   });
 });
 
 test.afterAll(async () => {
   await withSql(async (sql) => {
-    await sql`DELETE FROM processing_runs WHERE id = ${ids.run}`;
-    await sql`DELETE FROM claims WHERE id = ANY(${[ids.c1, ids.c2, ids.c3, ids.c4]})`;
-    await sql`DELETE FROM clues WHERE id = ANY(${[ids.yellow, ids.truck]})`;
+    await sql`DELETE FROM processing_runs WHERE id = ANY(${[ids.run, ids.run3]})`;
+    await sql`DELETE FROM claims WHERE id = ANY(${[ids.c1, ids.c2, ids.c3, ids.c4, ids.c5, ids.c6]})`;
+    await sql`DELETE FROM clues WHERE id = ANY(${[ids.yellow, ids.truck, ids.bollard]})`;
   });
 });
 
@@ -99,20 +125,21 @@ test("a Round's Clue lens: switch to it, solo one Clue, combine two, and open a 
   await expect(clues).toHaveCount(2);
   await expect(clues.first()).toContainText("Yellow/orange centre line");
   await expect(clues.first()).toContainText("You go Spain");
-  // Every Clue by default: ruled out FR · typical ES, PT · in some areas IT (speculated), MA.
-  await expect.poll(() => counts(page)).toEqual(["1", "2", "2"]);
+  // Every Clue by default: ruled out FR · typical ES, PT · unlikely none · in some areas IT (speculated), MA.
+  await expect.poll(() => counts(page)).toEqual(["1", "2", "0", "2"]);
+  await expect(page.getByTestId("clue-lens-not-seen")).toHaveCount(0);
   await expect(page.getByTestId("clue-lens-answer")).toContainText("typical there");
   await expect(page.getByTestId("shared-map-legend")).toHaveCount(0);
 
   // Solo the truck: PT typical, MA in some areas; Spain's lacks is speculated, so never rules it out.
   await clues.nth(1).getByTestId("clue-lens-solo").click();
   await expect(clues.nth(0)).toHaveAttribute("data-shown", "false");
-  await expect.poll(() => counts(page)).toEqual(["0", "1", "1"]);
+  await expect.poll(() => counts(page)).toEqual(["0", "1", "0", "1"]);
   await expect(page.getByTestId("clue-lens-answer")).toContainText("neutral");
 
   // Tick the yellow line back in: combined, each country takes its strongest fill.
   await clues.nth(0).getByTestId("clue-lens-combine").check();
-  await expect.poll(() => counts(page)).toEqual(["1", "2", "2"]);
+  await expect.poll(() => counts(page)).toEqual(["1", "2", "0", "2"]);
 
   // The answer country opens a popup with every shown Claim that links it.
   await clickMapAt(page, -0.88, 41.65);
@@ -124,6 +151,31 @@ test("a Round's Clue lens: switch to it, solo one Clue, combine two, and open a 
   await expect(rows).toHaveCount(2);
   await expect(rows.nth(0)).toContainText("typical · Yellow/orange centre line · verified");
   await expect(rows.nth(1)).toContainText("lacks · Pickup truck · speculated");
+});
+
+test("a Clue not seen this Round: listed under Not seen, shown alone, and its countries read unlikely (#93)", async ({ page }) => {
+  await page.goto(`${duo}/games/${game1.id}/rounds/3?lens=clues`);
+  await expect(page.getByTestId("lens-clues")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("lens-clues")).toHaveText("Clues (2)");
+  const notSeen = page.getByTestId("clue-lens-not-seen");
+  await expect(notSeen).toContainText("Not seen");
+  const row = notSeen.getByTestId("clue-lens-clue");
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText("Red-top bollard");
+  await expect(row).toContainText("Madrid for sure");
+  await expect(row).toHaveAttribute("data-polarity", "not_seen");
+
+  // Combined: ruled out FR · typical ES · unlikely PT (verified typical, not seen) · in some areas IT (speculated).
+  const unlikely = page.locator('[data-testid="clue-legend-entry"][data-fill="unlikely"]');
+  await expect(unlikely).toContainText("Unlikely: typical there, not seen this Round");
+  await expect.poll(() => counts(page)).toEqual(["1", "1", "1", "1"]);
+
+  // Alone: only Portugal reads unlikely; Italy's speculated Claim says nothing for a Clue not seen.
+  await row.getByTestId("clue-lens-solo").click();
+  await expect(row).toHaveAttribute("data-shown", "true");
+  await expect(page.locator('[data-testid="clue-lens-clue"][data-polarity="seen"]')).toHaveAttribute("data-shown", "false");
+  await expect.poll(() => counts(page)).toEqual(["0", "0", "1", "0"]);
+  await expect(unlikely.getByTestId("clue-legend-count")).toHaveText("1");
 });
 
 test("with no Clues said, the lens is unavailable", async ({ page }) => {

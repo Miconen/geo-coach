@@ -92,12 +92,12 @@ describe("relationships and parity (#56 1a-derivation)", () => {
   });
 
   const utt = (text: string) => sora.u[SORA_LINES.findIndex(([t]) => t === text)]!;
-  const manual = (utteranceIds: string[], roundIds: string[] = []) =>
+  const manual = (utteranceIds: string[], roundIds: string[] = [], countries: string[] = []) =>
     createManualLearning(handle.db, f.mikoId, {
       duoId: f.duoId,
       kind: "other",
       text: "note",
-      countries: [],
+      countries,
       regions: [],
       topics: [],
       utteranceIds,
@@ -147,6 +147,22 @@ describe("relationships and parity (#56 1a-derivation)", () => {
     expect(wb.learnings.find((l) => l.id === debrief)).toMatchObject({ roundIds: [g3Final.id], isDebrief: true });
     const g6Round = wb.gamesById[gameId.g6!]!.roundIds[0];
     expect(wb.learnings.find((l) => l.id === next)).toMatchObject({ roundIds: [g6Round], isDebrief: false });
+  });
+
+  it("keeps a Learning off Rounds its speech only spills into; explicit links attach regardless (#87)", async () => {
+    // Every Round here is Spain, so a Chile Learning relates to none and its majority Round wins.
+    const cited = [utt("g3 round one").id, utt("just before R1 ends").id, utt("g6 first round").id];
+    const spill = await manual(cited, [], ["CL"]);
+    const before = await buildWorkbenchData(handle.db, f.duoId, f.mikoId);
+    const g4Round2 = before.gamesById[gameId.g4!]!.roundIds.find((id) => before.roundsById[id]!.roundNumber === 2)!;
+    const linked = await manual(cited, [g4Round2], ["CL"]);
+    const wb = await buildWorkbenchData(handle.db, f.duoId, f.mikoId);
+    const g3First = wb.gamesById[gameId.g3!]!.roundIds.map((id) => wb.roundsById[id]!).find((r) => r.roundNumber === 1)!;
+    const g6Round = wb.gamesById[gameId.g6!]!.roundIds[0]!;
+    expect(wb.learnings.find((l) => l.id === spill)).toMatchObject({ derivedRoundIds: [g3First.id], roundIds: [g3First.id] });
+    expect(wb.roundsById[g6Round]!.learningIds).not.toContain(spill);
+    expect(wb.learnings.find((l) => l.id === linked)!.roundIds).toEqual([g3First.id, g4Round2]);
+    expect(wb.roundsById[g4Round2]!.learningIds).toContain(linked);
   });
 
   it("links a Session overlapping only the 15 s tail by citation, never by time", async () => {

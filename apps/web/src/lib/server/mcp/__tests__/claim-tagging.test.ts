@@ -123,6 +123,67 @@ describe("tagging Claims with Clues (#89)", () => {
     expect(links.map((l) => [l.country, l.prevalence]).sort()).toEqual([["NO", "some"], ["NO", "typical"]]);
   });
 
+  it("links a Region the Claim names, and keeps a vague scope a country link (#92)", async () => {
+    const add = (text: string, regions: Array<{ country: string; name: string }> = []) =>
+      insertClaim(handle.db, { duoId, runId: null, createdByPlayerId: mikoId, text, countries: ["US"], regions, topics: [] });
+    const hawaii = await add("Hawaii has no front plates.");
+    const listedOnly = await add("No front plates on these islands.", [{ country: "US", name: "Hawaii" }]);
+    const northEast = await add("The north-eastern states have front plates.");
+
+    const listed = await mcpListClaimsToTag(handle.db, mikoId, { limit: 100 });
+    const regionsOf = (id: string) => listed.claims.find((c) => c.claimId === id)!.regions;
+    expect(regionsOf(hawaii)).toEqual([{ country: "US", name: "Hawaii", code: "US-HI" }]);
+    expect(regionsOf(listedOnly)).toEqual([{ country: "US", name: "Hawaii", code: "US-HI" }]);
+    expect(regionsOf(northEast)).toEqual([]);
+
+    const noFront = { family: "Plates", name: "No front plate" };
+    const res = await mcpTagClaims(handle.db, mikoId, {
+      items: [
+        { claimId: hawaii, clues: [{ ...noFront, prevalence: "typical", regions: [{ country: "US", name: "Hawaii" }] }] },
+        { claimId: listedOnly, clues: [{ ...noFront, prevalence: "typical", regions: [{ country: "US", name: "US-HI" }] }] },
+        // A scope never becomes a guessed list of states, nor a name that isn't a Region.
+        { claimId: northEast, clues: [{ ...noFront, prevalence: "lacks", regions: [{ country: "US", name: "New York" }] }] },
+        { claimId: northEast, clues: [{ ...noFront, prevalence: "lacks", regions: [{ country: "US", name: "north-eastern states" }] }] },
+        { claimId: northEast, clues: [{ family: "Plates", name: "Front plate", prevalence: "some", countries: ["US"] }] },
+      ],
+    });
+    expect(res.saved.map((s) => s.claimId)).toEqual([hawaii, listedOnly, northEast]);
+    expect(res.errors.map((e) => e.index)).toEqual([2, 3]);
+    expect(res.errors[0]!.message).toMatch(/doesn't name New York \(US-NY\)/);
+    expect(res.errors[1]!.message).toMatch(/"north-eastern states" isn't a Region the geocoder knows/);
+
+    const links = await handle.db.select().from(claimClues);
+    const of = (id: string) => links.filter((l) => l.claimId === id).map((l) => [l.country, l.regionCode, l.prevalence]);
+    expect(of(hawaii)).toEqual([["US", "US-HI", "typical"]]);
+    expect(of(listedOnly)).toEqual([["US", "US-HI", "typical"]]);
+    expect(of(northEast)).toEqual([["US", null, "some"]]);
+  });
+
+  it("keeps a country link and a Region link of the same Clue apart (#92)", async () => {
+    const res = await mcpTagClaims(handle.db, mikoId, {
+      items: [
+        {
+          claimId: claimIds[0],
+          clues: [{ family: "Road lines", name: "Yellow/orange centre line", prevalence: "typical", countries: ["NO"], regions: [{ country: "NO", name: "Nordland" }] }],
+        },
+      ],
+    });
+    // Claim 0's text doesn't name Nordland.
+    expect(res.errors[0]!.message).toMatch(/doesn't name Nordland/);
+    await handle.db.update(claims).set({ text: "Nordland has yellow centre lines, like the rest of Norway." }).where(eq(claims.id, claimIds[0]!));
+    const again = await mcpTagClaims(handle.db, mikoId, {
+      items: [
+        {
+          claimId: claimIds[0],
+          clues: [{ family: "Road lines", name: "Yellow/orange centre line", prevalence: "typical", countries: ["NO"], regions: [{ country: "NO", name: "Nordland" }] }],
+        },
+      ],
+    });
+    expect(again.saved).toEqual([{ index: 0, claimId: claimIds[0], links: 2 }]);
+    const links = await handle.db.select().from(claimClues);
+    expect(links.map((l) => [l.country, l.regionCode]).sort()).toEqual([["NO", null], ["NO", "NO-18"]]);
+  });
+
   it("queues tagging of new and edited Claims only once the Duo's tagging has started", async () => {
     await mcpAddClaims(handle.db, mikoId, { items: [{ text: "Iceland has no yellow lines.", countries: ["IS"] }] });
     expect(await handle.db.select().from(claimTaggingJobs)).toEqual([]);

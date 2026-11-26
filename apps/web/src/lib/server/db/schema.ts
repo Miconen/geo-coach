@@ -11,6 +11,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
@@ -800,8 +801,9 @@ export const clues = pgTable(
 );
 
 /**
- * A Claim tying a Clue to a country (ADR 0009). Written by Claim tagging, which replaces all of a Claim's links at
- * once; the country need not be in the Claim's own country list.
+ * A Claim tying a Clue to a country, or to one Region of it (ADR 0009, #92). Written by Claim tagging, which replaces
+ * all of a Claim's links at once; the country need not be in the Claim's own country list. A Region link counts for
+ * its country as in some areas, worked out when read, never stored.
  */
 export const claimClues = pgTable(
   "claim_clues",
@@ -816,10 +818,13 @@ export const claimClues = pgTable(
       .notNull()
       .references(() => duos.id, { onDelete: "cascade" }),
     country: text("country").notNull(),
+    /** The geocoder's Region code (ADR 0004) when the link covers one Region of the country; null for all of it. */
+    regionCode: text("region_code"),
     prevalence: text("prevalence").$type<CluePrevalence>().notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.claimId, table.clueId, table.country] }),
+    // One link per Clue and place: the whole country (no Region) counts as one place.
+    unique("claim_clues_claim_clue_place_uq").on(table.claimId, table.clueId, table.country, table.regionCode).nullsNotDistinct(),
     index("claim_clues_clue_idx").on(table.clueId),
     index("claim_clues_duo_idx").on(table.duoId),
   ],

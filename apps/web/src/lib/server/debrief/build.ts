@@ -9,6 +9,7 @@ import {
   type StatsRound,
 } from "@geo-coach/shared";
 import type { Debrief, DebriefGame, DebriefGuess, DebriefLine, DebriefPlayer, DebriefRound } from "$lib/debrief/types.js";
+import { namesCountry } from "../country-mentions.js";
 import type { WorkbenchData, WorkbenchLearning, WorkbenchRound } from "../workbench/view-model.js";
 
 /** What a Game adds beyond the workbench: its mode and map, and each Round's starting camera (from the raw duel). */
@@ -170,6 +171,7 @@ function debriefRound(
       return [{ id, playerId: u.playerId, text: u.text, atS: (at - start) / 1000, afterEnd: at >= end }];
     })
     .sort((a, b) => a.atS - b.atS);
+  const missedAnswer = r.countryCode !== null && !guesses.some((g) => g.isDuo && g.countryCode === r.countryCode);
   return {
     id: r.id,
     gameId: r.gameId,
@@ -196,10 +198,19 @@ function debriefRound(
     bestCountry: best?.countryCode ?? null,
     bestKm: best?.distanceMeters != null ? Math.round(best.distanceMeters / 1000) : null,
     wrongCountry: best !== null && best.countryCode !== r.countryCode,
-    missedAnswer: r.countryCode !== null && !guesses.some((g) => g.isDuo && g.countryCode === r.countryCode),
+    missedAnswer,
     learningIds: own.map((l) => l.id),
     transcript,
     endS: (end - start) / 1000,
     countdownS: r.timerStartTime ? (ms(r.timerStartTime) - start) / 1000 : null,
+    saidAloud: missedAnswer ? saidAloud(transcript, r.countryCode!) : [],
   };
+}
+
+/**
+ * The Utterances that named the answer country while guessing was still on (#80). Speech after guessing ends is a
+ * reaction to the reveal, so it never counts.
+ */
+export function saidAloud(transcript: readonly DebriefLine[], answerCode: string): DebriefLine[] {
+  return transcript.filter((l) => !l.afterEnd && namesCountry(l.text, answerCode));
 }

@@ -19,6 +19,8 @@
   import Damage from "./Damage.svelte";
   import RoundCallouts from "./RoundCallouts.svelte";
   import RoundTranscript from "./RoundTranscript.svelte";
+  import SaidAloud from "./SaidAloud.svelte";
+  import { LENS_COLORS, playerInk } from "$lib/player-color.js";
   import { anchoredRoundId, readSelection, select, type DebriefSelection } from "./selection.js";
   import type { Debrief, DebriefGame, DebriefRound, DebriefScope } from "./types.js";
   import {
@@ -263,6 +265,7 @@
   const signTone = (n: number | null) => (n === null ? "" : n >= 0 ? "text-[var(--ok)]" : "text-[var(--danger)]");
   const resultTone = (won: boolean | null) => (won ? "text-[var(--ok)]" : won === false ? "text-[var(--danger)]" : "text-[var(--muted)]");
   const panel = "rounded-xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_90%,transparent)] shadow-xl backdrop-blur";
+  const saidInk = playerInk(LENS_COLORS.saidAloud);
   const chipBtn = "rounded-md px-1.5 py-0.5 text-xs text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink)]";
 </script>
 
@@ -411,7 +414,8 @@
                       >
                         <span>{flag(m.code)}</span>
                         <span class="truncate">{m.name}</span>
-                        {#if m.rounds.length > 1}<span class="ml-auto text-[var(--danger)]">×{m.rounds.length}</span>{/if}
+                        {#if m.rounds.some((r) => r.saidAloud.length)}<span class="ml-auto text-[10px] font-semibold" style="color:{saidInk}" data-testid="said-it">said it</span>{/if}
+                        {#if m.rounds.length > 1}<span class="{m.rounds.some((r) => r.saidAloud.length) ? '' : 'ml-auto'} text-[var(--danger)]">×{m.rounds.length}</span>{/if}
                       </button>
                     </li>
                   {/each}
@@ -475,12 +479,14 @@
         {/if}
         {#if roundTab && tab === roundTab.key}
           <div id={roundTab.key} role="tabpanel" data-testid="round-tabpanel-{roundTab.key}">{@render roundTab.content(!masked)}</div>
-        {:else if !debrief.recorded}
-          <p class="rounded-lg bg-[var(--surface-subtle)] px-2 py-1.5 text-xs text-[var(--muted)]" data-testid="not-recorded">
-            No one recorded this Game, so there's no transcript.
-          </p>
         {:else}
-          <RoundTranscript {debrief} {round} revealed={!masked} onHover={(id) => (hoverPlayer = id)} />
+          {#if !debrief.recorded}
+            <p class="rounded-lg bg-[var(--surface-subtle)] px-2 py-1.5 text-xs text-[var(--muted)]" data-testid="not-recorded">
+              No one recorded this Game, so there's no speech: only its guesses.
+            </p>
+          {/if}
+          <RoundTranscript {debrief} {round} revealed={!masked} onReveal={reveal} onHover={(id) => (hoverPlayer = id)} />
+          <SaidAloud {debrief} {round} revealed={!masked} />
         {/if}
         <h3 class="pt-1 text-[11px] font-semibold uppercase text-[var(--muted)]">Learnings</h3>
         <ul class="space-y-1.5">
@@ -567,7 +573,11 @@
                 <span class="text-[var(--muted)]">Round {r.roundNumber}</span>
                 <Masked revealed={isRevealed(r.id, game.id)} label="?"><span>{flag(r.countryCode)}</span></Masked>
               </span>
-              <span class="flex items-center gap-1.5"><Damage hp={r.hpDelta} /><Masked revealed={isRevealed(r.id, game.id)} label="">{@render km(r)}</Masked></span>
+              <span class="flex items-center gap-1.5"
+                ><Damage hp={r.hpDelta} /><Masked revealed={isRevealed(r.id, game.id)} label=""
+                  >{@render km(r)}{#if r.saidAloud.length}<span class="ml-1 text-[10px] font-semibold" style="color:{saidInk}" data-testid="said-it">said it</span>{/if}</Masked
+                ></span
+              >
             </button>
           {/each}
         </div>

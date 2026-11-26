@@ -119,3 +119,36 @@ test("the shared map survives Session → Games → Session", async ({ page }) =
   await expect(page.getByTestId("game-tile").first()).toBeVisible();
   await expect(map).toHaveAttribute("data-map-instances", "1");
 });
+
+// #83: the Countdown band and the Round-end reveal line in the transcript panel.
+const recallKey = `recall:v1:${s.mikoId}:${s.duoId}`;
+
+test("a Round's transcript opens the Countdown band on the first guess and ends on the Round-end line", async ({ page }) => {
+  const round = s.games[0]!.rounds.find((r) => r.roundNumber === 1)!;
+  await page.addInitScript((k) => localStorage.setItem(k, "0"), recallKey);
+  await page.goto(`${session}?round=${round.id}`);
+  const band = page.getByTestId("countdown-band");
+  await expect(band).toBeVisible();
+  // The seed's timer starts 20 s before guessing ends.
+  const opener = band.getByTestId("transcript-line").first();
+  await expect(opener.getByTestId("countdown-opener")).toContainText(/guessed ⚡/);
+  await expect(opener.getByTestId("countdown-length")).toHaveText("Countdown 20s");
+  const end = page.getByTestId("round-over");
+  await expect(end.getByTestId("round-end-guess").first()).toBeVisible();
+  await expect(end.getByTestId("round-end-hp")).toContainText(/HP us [\d,]+ → [\d,]+/);
+  await expect(end.getByTestId("round-end-hp")).toContainText(/them [\d,]+ → [\d,]+/);
+});
+
+test("with Recall on, the Round-end line hides guesses, scores and HP; revealing there reveals the map too", async ({ page }) => {
+  const round = s.games[0]!.rounds.find((r) => r.roundNumber === 1)!;
+  await page.addInitScript((k) => localStorage.setItem(k, "1"), recallKey);
+  await page.goto(`${session}?round=${round.id}`);
+  await hydrated(page);
+  const end = page.getByTestId("round-over");
+  await expect(end.getByTestId("round-end-reveal")).toBeVisible();
+  await expect(end.getByTestId("round-end-guess")).toHaveCount(0);
+  await expect(page.getByTestId("debrief-reveal")).toBeVisible();
+  await end.getByTestId("round-end-reveal").click();
+  await expect(end.getByTestId("round-end-guess").first()).toBeVisible();
+  await expect(page.getByTestId("debrief-reveal")).toBeHidden();
+});

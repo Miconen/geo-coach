@@ -83,6 +83,11 @@ export interface DebriefRound {
   endS: number;
   /** Seconds from the Round's start to the Countdown's start (the first guess); null without a timer start. */
   countdownS: number | null;
+  /**
+   * Said aloud, not guessed (#80): the Utterances, before guessing ended, that named the answer country when neither
+   * Duo guess landed there. Empty otherwise.
+   */
+  saidAloud: DebriefLine[];
 }
 
 export interface DebriefGame {

@@ -83,6 +83,7 @@ export function mapRounds(d: Debrief, rounds: readonly DebriefRound[]): MapRound
         won: r.won,
         guesses,
         learningCountries,
+        saidAloud: r.saidAloud.length > 0,
       },
     ];
   });

@@ -1,5 +1,5 @@
 import { and, eq, gte, inArray, lte, or } from "drizzle-orm";
-import { intervalsOverlap } from "@geo-coach/shared";
+import { intervalsOverlap, isLearningRunPurpose } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
 import { callLabels, claimEvidence, claims, processingRuns, rounds } from "../db/schema.js";
 import { evidenceInDuo, roundInDuo, runInDuo } from "../services/index.js";
@@ -108,7 +108,7 @@ export async function loadGameRuns(
     const why = [...reasons.get(run.id)!];
     // Game-scoped Learnings: explicit or derived Round outputs of this eligible run on this Game.
     let learnings: RunTimelineCounts | null = null;
-    if (run.purpose !== "calls") {
+    if (isLearningRunPurpose(run.purpose)) {
       learnings = { current: 0, surviving: 0 };
       for (const l of full.learnings) {
         if (l.runId !== run.id) continue;

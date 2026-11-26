@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { intervalsOverlap, type ProcessingRunPurpose } from "@geo-coach/shared";
+import { intervalsOverlap, isLearningRunPurpose, type ProcessingRunPurpose } from "@geo-coach/shared";
 import type { AppDb } from "../db/index.js";
 import { claimEvidence, claims, processingJobs, processingRuns, sessions } from "../db/schema.js";
 import { ALREADY_UP_TO_DATE } from "../mcp/processing-jobs.js";
@@ -308,7 +308,7 @@ export function runRow(run: RunRow, job: JobRow | null, counts: OutputCounts): R
     // A run leaves the pin when its job closes, or, jobless, once it is no longer open.
     pinned: job ? jobActive : run.status === "open",
     draft,
-    learnings: run.purpose === "calls" ? null : draft ? { current: 0, surviving: learnings.surviving } : learnings,
+    learnings: !isLearningRunPurpose(run.purpose) ? null : draft ? { current: 0, surviving: learnings.surviving } : learnings,
     callLabels: run.purpose === "calls" ? (draft ? { current: 0, surviving: callLabels.surviving } : callLabels) : null,
     claimsCreated: counts.claimsCreated.get(run.id) ?? 0,
     claimsWithNewEvidence: counts.claimsWithNewEvidence.get(run.id) ?? 0,

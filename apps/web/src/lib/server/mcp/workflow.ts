@@ -8,6 +8,7 @@ import {
   gameOverlaps,
   hedgeKind,
   intervalsOverlap,
+  isLearningRunPurpose,
   isMissingTime,
   roundWindowsById,
   learningItemInputSchema,
@@ -565,8 +566,8 @@ export async function mcpAddClaims(
     if (run.status !== "open") {
       throw new DomainError("CONFLICT", `Processing run is already ${run.status}`, 409);
     }
-    if (run.purpose === "calls") {
-      throw new DomainError("WRONG_PURPOSE", "A calls Processing run doesn't make Claims", 400);
+    if (!isLearningRunPurpose(run.purpose)) {
+      throw new DomainError("WRONG_PURPOSE", `A ${run.purpose} Processing run doesn't make Claims`, 400);
     }
     duoId = run.duoId;
   } else {
@@ -787,6 +788,13 @@ export async function mcpAddLearnings(
     throw new DomainError(
       "WRONG_PURPOSE",
       "A calls Processing run produces Call labels, not Learnings; use add_call_labels",
+      400,
+    );
+  }
+  if (run.purpose === "clues") {
+    throw new DomainError(
+      "WRONG_PURPOSE",
+      "A clues Processing run links Rounds to Clues, not Learnings; use add_round_clues",
       400,
     );
   }

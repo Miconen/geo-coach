@@ -71,6 +71,13 @@
       "when": 1795636803282,
       "tag": "0009_player_color",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795702636938,
+      "tag": "0010_clues",
+      "breakpoints": true
     }
   ]
 }

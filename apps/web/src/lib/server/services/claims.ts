@@ -339,6 +339,8 @@ export async function updateClaim(db: AppDb, duoId: string, claimId: string, pat
   if (patch.regions !== undefined) set.regions = patch.regions;
   if (patch.topics !== undefined) set.topics = patch.topics;
   if (Object.keys(set).length === 0) return;
+  // An edit after the Claim's Clue tagging puts it back in the tagging queue (#89).
+  set.updatedAt = new Date();
   await db.update(claims).set(set).where(and(eq(claims.id, claimId), eq(claims.duoId, duoId)));
 }
 

@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { InstructionPurpose, ProcessingRunPurpose } from "@geo-coach/shared";
+import type { ClueVocabulary } from "../services/clues.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -26,18 +27,54 @@ const CURRENT_VERSIONS: Record<InstructionPurpose, { version: string; file: stri
   extract: { version: "extract-v3", file: "extract-v3.md" },
   tips: { version: "tips-v3", file: "tips-v3.md" },
   calls: { version: "calls-v1", file: "calls-v1.md" },
+  clues: { version: "clues-v1", file: "clues-v1.md" },
   ingest: { version: "ingest-v2", file: "ingest-v2.md" },
+  // Each Claim records this version when tagged; a newer one puts every Claim tagged by an older one back in the
+  // tagging queue (#89). The prompt pins its vocabulary file, so a new vocabulary needs a new version here too.
+  "clue-tag": { version: "clue-tag-v1", file: "clue-tag-v1.md" },
 };
 
-export function getCurrentPromptVersion(purpose: ProcessingRunPurpose): string {
+export function getCurrentPromptVersion(purpose: ProcessingRunPurpose | "clue-tag"): string {
   return CURRENT_VERSIONS[purpose].version;
 }
+
+/** `{{include file.md}}` on a line of its own pulls in another prompt file, such as the Clue vocabulary. */
+const INCLUDE = /^\{\{include ([\w.-]+\.md)\}\}$/m;
 
 export async function loadPromptInstructions(
   purpose: InstructionPurpose,
 ): Promise<{ promptVersion: string; instructions: string }> {
   const entry = CURRENT_VERSIONS[purpose];
-  const filePath = path.join(resolvePromptsDir(), entry.file);
-  const instructions = await readFile(filePath, "utf8");
+  const dir = resolvePromptsDir();
+  let instructions = await readFile(path.join(dir, entry.file), "utf8");
+  for (let m = INCLUDE.exec(instructions); m; m = INCLUDE.exec(instructions)) {
+    const included = await readFile(path.join(dir, m[1]!), "utf8");
+    instructions = instructions.replace(m[0], included.trim());
+  }
   return { promptVersion: entry.version, instructions };
+}
+
+/**
+ * The Clue vocabulary (#90) as a list: each `N. **Family:** value · value` line of the vocabulary file. A family
+ * whose values are left to the tagger reads `N. **Family:** _(…)_`.
+ */
+export function parseClueVocabulary(markdown: string, version: string): ClueVocabulary {
+  const families: Array<{ family: string; seeds: string[] }> = [];
+  for (const line of markdown.split("\n")) {
+    const m = /^\d+\.\s+\*\*(.+?):\*\*\s*(.*)$/.exec(line.trim());
+    if (!m) continue;
+    const rest = m[2]!.trim();
+    const seeds = rest.startsWith("_(") ? [] : rest.split(" · ").map((v) => v.trim()).filter(Boolean);
+    families.push({ family: m[1]!.trim(), seeds });
+  }
+  return { version, families };
+}
+
+/** The vocabulary the current Claim tagger prompt includes: its families bound which Clues an agent may create. */
+export async function loadClueVocabulary(): Promise<ClueVocabulary> {
+  const dir = resolvePromptsDir();
+  const prompt = await readFile(path.join(dir, CURRENT_VERSIONS["clue-tag"].file), "utf8");
+  const file = INCLUDE.exec(prompt)?.[1];
+  if (!file) throw new Error(`${CURRENT_VERSIONS["clue-tag"].file} includes no Clue vocabulary`);
+  return parseClueVocabulary(await readFile(path.join(dir, file), "utf8"), file.replace(/\.md$/, ""));
 }

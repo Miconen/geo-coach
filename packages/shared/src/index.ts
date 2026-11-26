@@ -12,3 +12,4 @@ export * from "./themes.js";
 export * from "./transcript-corrections.js";
 export * from "./stats/index.js";
 export * from "./claims.js";
+export * from "./clues.js";

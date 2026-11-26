@@ -38,13 +38,17 @@ export type LearningOrigin = z.infer<typeof learningOriginSchema>;
 export const reactionTypeSchema = z.enum(["star", "dismiss", "done"]);
 export type ReactionType = z.infer<typeof reactionTypeSchema>;
 
-export const processingRunPurposeSchema = z.enum(["extract", "tips", "calls"]);
+export const processingRunPurposeSchema = z.enum(["extract", "tips", "calls", "clues"]);
 export type ProcessingRunPurpose = z.infer<typeof processingRunPurposeSchema>;
-/** The purposes whose runs produce Learnings; `calls` runs produce Call labels (ADR 0002). */
-export type LearningRunPurpose = Exclude<ProcessingRunPurpose, "calls">;
+/** The purposes whose runs produce Learnings; `calls` runs produce Call labels and `clues` runs Round Clues (ADR 0002). */
+export type LearningRunPurpose = Exclude<ProcessingRunPurpose, "calls" | "clues">;
+export const isLearningRunPurpose = (p: ProcessingRunPurpose): p is LearningRunPurpose => p === "extract" || p === "tips";
 
-/** What `get_instructions` serves: each Processing run purpose, plus Source ingestion (not a run). */
-export const instructionPurposeSchema = z.enum(["extract", "tips", "calls", "ingest"]);
+/**
+ * What `get_instructions` serves: each Processing run purpose, plus Source ingestion and tagging Claims with Clues
+ * (`clue-tag`), which are not runs.
+ */
+export const instructionPurposeSchema = z.enum(["extract", "tips", "calls", "clues", "ingest", "clue-tag"]);
 export type InstructionPurpose = z.infer<typeof instructionPurposeSchema>;
 
 export const processingRunStatusSchema = z.enum(["open", "finished", "abandoned"]);
